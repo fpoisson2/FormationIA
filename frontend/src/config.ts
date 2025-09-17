@@ -1,4 +1,10 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const envApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+const sanitizedEnvBase = envApiBase ? envApiBase.replace(/\/$/, "") : undefined;
+const isLocalHost =
+  typeof window !== "undefined" && window.location.origin.startsWith("http://localhost");
+const fallbackApiBase = isLocalHost ? "http://localhost:8000/api" : "/api";
+
+export const API_BASE_URL = sanitizedEnvBase ?? fallbackApiBase;
 
 export const MODEL_OPTIONS = [
   {

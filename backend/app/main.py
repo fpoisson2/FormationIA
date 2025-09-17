@@ -91,7 +91,7 @@ class HealthResponse(BaseModel):
 
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
 
-frontend_origin = os.getenv("FRONTEND_ORIGIN", "http://localhost:4173")
+frontend_origin = os.getenv("FRONTEND_ORIGIN", "https://formationia.ve2fpd.com")
 allow_origins: list[str] = []
 for item in frontend_origin.split(","):
     origin = item.strip()

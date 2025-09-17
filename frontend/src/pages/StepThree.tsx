@@ -49,7 +49,7 @@ function StepThree({
       config: ModelConfig,
       setCards: Dispatch<SetStateAction<Flashcard[]>>
     ) => {
-      const response = await fetch(`${API_BASE_URL}/api/flashcards`, {
+      const response = await fetch(`${API_BASE_URL}/flashcards`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -102,7 +102,7 @@ function StepThree({
     setFinalSummaryLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/summary`, {
+      const response = await fetch(`${API_BASE_URL}/summary`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

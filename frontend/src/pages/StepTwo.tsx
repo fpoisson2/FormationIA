@@ -66,7 +66,7 @@ function StepTwo({
       setLoading(true);
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/summary`, {
+        const response = await fetch(`${API_BASE_URL}/summary`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
