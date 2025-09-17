@@ -16,8 +16,8 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
   };
 
   return (
-    <div className="landing-gradient space-y-12">
-      <section className="page-section landing-panel grid gap-10 animate-section md:grid-cols-[2fr_1fr]">
+    <div className="space-y-12">
+      <section className="page-section landing-panel grid gap-10 bg-white/95 animate-section md:grid-cols-[2fr_1fr]">
         <div className="flex flex-col gap-4 animate-section-delayed">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 1</span>
@@ -70,24 +70,22 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
         </div>
       </section>
       <div className="section-divider" />
-      <section className="animate-section">
-        <div className="grid gap-4 md:grid-cols-3">
-          <InfoCard
-            tone="red"
-            title="Biais cognitifs"
-            description="L’IA peut amplifier vos premières hypothèses. Variez vos formulations pour dévoiler d’autres angles d’analyse."
-          />
-          <InfoCard
-            tone="black"
-            title="Transparence"
-            description="Surveillez les indices de confiance et les sources proposées. Ils orientent vos validations manuelles."
-          />
-          <InfoCard
-            tone="sand"
-            title="Compagnon, pas pilote"
-            description="Gardez la main : l’IA accélère l’exploration, mais la sélection finale vous appartient."
-          />
-        </div>
+      <section className="grid gap-4 animate-section md:grid-cols-3">
+        <InfoCard
+          tone="red"
+          title="Biais cognitifs"
+          description="L’IA peut amplifier vos premières hypothèses. Variez vos formulations pour dévoiler d’autres angles d’analyse."
+        />
+        <InfoCard
+          tone="black"
+          title="Transparence"
+          description="Surveillez les indices de confiance et les sources proposées. Ils orientent vos validations manuelles."
+        />
+        <InfoCard
+          tone="sand"
+          title="Compagnon, pas pilote"
+          description="Gardez la main : l’IA accélère l’exploration, mais la sélection finale vous appartient."
+        />
       </section>
     </div>
   );

@@ -110,7 +110,7 @@ function StepTwo({
   };
 
   return (
-    <div className="landing-gradient space-y-12">
+    <div className="space-y-12">
       <section className="page-section landing-panel bg-white/95 animate-section">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">

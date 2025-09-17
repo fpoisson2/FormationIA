@@ -140,7 +140,7 @@ function StepThree({
   };
 
   return (
-    <div className="landing-gradient space-y-12">
+    <div className="space-y-12">
       <section className="page-section landing-panel bg-white/95 space-y-6 animate-section">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-3">
