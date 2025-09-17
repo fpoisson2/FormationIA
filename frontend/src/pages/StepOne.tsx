@@ -70,22 +70,24 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
         </div>
       </section>
       <div className="section-divider" />
-      <section className="page-section page-section--transparent landing-panel landing-panel--flat grid gap-4 animate-section md:grid-cols-3">
-        <InfoCard
-          tone="red"
-          title="Biais cognitifs"
-          description="L’IA peut amplifier vos premières hypothèses. Variez vos formulations pour dévoiler d’autres angles d’analyse."
-        />
-        <InfoCard
-          tone="black"
-          title="Transparence"
-          description="Surveillez les indices de confiance et les sources proposées. Ils orientent vos validations manuelles."
-        />
-        <InfoCard
-          tone="sand"
-          title="Compagnon, pas pilote"
-          description="Gardez la main : l’IA accélère l’exploration, mais la sélection finale vous appartient."
-        />
+      <section className="page-section page-section--transparent landing-panel landing-panel--flat animate-section">
+        <div className="grid gap-4 rounded-3xl border border-white/20 bg-white/5 px-6 py-8 md:grid-cols-3">
+          <InfoCard
+            tone="red"
+            title="Biais cognitifs"
+            description="L’IA peut amplifier vos premières hypothèses. Variez vos formulations pour dévoiler d’autres angles d’analyse."
+          />
+          <InfoCard
+            tone="black"
+            title="Transparence"
+            description="Surveillez les indices de confiance et les sources proposées. Ils orientent vos validations manuelles."
+          />
+          <InfoCard
+            tone="sand"
+            title="Compagnon, pas pilote"
+            description="Gardez la main : l’IA accélère l’exploration, mais la sélection finale vous appartient."
+          />
+        </div>
       </section>
     </div>
   );
