@@ -183,7 +183,6 @@ function StepThree({
       <section className="grid gap-6 md:grid-cols-2">
         {["A", "B"].map((label) => {
           const cards = label === "A" ? flashcardsA : flashcardsB;
-          const isLoading = loadingSide !== null;
           return (
             <div key={label} className="flex flex-col gap-4 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm">
               <div className="flex items-center justify-between">

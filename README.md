@@ -35,6 +35,7 @@ docker-compose up --build
 
 - Frontend : http://localhost:4173
 - Backend  (FastAPI + client Responses) : http://localhost:8000
+- L’écran de connexion utilise les variables `VITE_LOGIN_USERNAME` / `VITE_LOGIN_PASSWORD` (défaut : `test` / `Telecom2025$`).
 
 Le backend ouvre deux routes principales :
 
