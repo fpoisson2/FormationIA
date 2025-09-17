@@ -70,7 +70,7 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
         </div>
       </section>
       <div className="section-divider" />
-      <section className="page-section landing-panel grid gap-4 animate-section md:grid-cols-3">
+      <section className="page-section page-section--transparent landing-panel landing-panel--flat grid gap-4 animate-section md:grid-cols-3">
         <InfoCard
           tone="red"
           title="Biais cognitifs"
