@@ -1,5 +1,17 @@
 const envApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
-const sanitizedEnvBase = envApiBase ? envApiBase.replace(/\/$/, "") : undefined;
+const sanitizedEnvBase = (() => {
+  if (!envApiBase) {
+    return undefined;
+  }
+  const trimmed = envApiBase.replace(/\/$/, "");
+  if (/^https?:\/\/[^/]+$/.test(trimmed)) {
+    return `${trimmed}/api`;
+  }
+  if (trimmed === "" || trimmed === "/") {
+    return "/api";
+  }
+  return trimmed;
+})();
 const isLocalHost =
   typeof window !== "undefined" && window.location.origin.startsWith("http://localhost");
 const fallbackApiBase = isLocalHost ? "http://localhost:8000/api" : "/api";
