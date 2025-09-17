@@ -140,8 +140,8 @@ function StepThree({
   };
 
   return (
-    <div className="space-y-10">
-      <section className="page-section space-y-6 bg-white/90">
+    <div className="landing-gradient space-y-12">
+      <section className="page-section landing-panel space-y-6 animate-section">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 3</span>
@@ -158,7 +158,8 @@ function StepThree({
             Revenir à l’étape 2
           </button>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="section-divider my-6" />
+        <div className="grid gap-4 md:grid-cols-2 animate-section-delayed">
           <article className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm">
             <header className="mb-3 flex items-center justify-between">
               <h3 className="text-base font-semibold text-[color:var(--brand-black)]">Profil A — {profileA?.label ?? "configuration"}</h3>
@@ -180,7 +181,8 @@ function StepThree({
         </div>
       </section>
 
-      <section className="grid gap-6 md:grid-cols-2">
+      <div className="section-divider" />
+      <section className="grid gap-6 animate-section md:grid-cols-2">
         {["A", "B"].map((label) => {
           const cards = label === "A" ? flashcardsA : flashcardsB;
           return (
@@ -214,6 +216,8 @@ function StepThree({
         <p className="rounded-3xl bg-red-50 p-3 text-sm text-red-600">{errorSide}</p>
       )}
 
+      <div className="section-divider" />
+
       <button
         type="button"
         onClick={handleCardsBoth}
@@ -223,7 +227,9 @@ function StepThree({
         {loadingSide ? "Génération…" : "Créer les cartes pour les deux profils"}
       </button>
 
-      <section className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm space-y-4">
+      <div className="section-divider" />
+
+      <section className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm space-y-4 animate-section">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-2">
             <h3 className="text-base font-semibold text-[color:var(--brand-black)]">Synthèse finale</h3>

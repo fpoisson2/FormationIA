@@ -19,8 +19,8 @@ function Layout({ currentStep, children }: LayoutProps): JSX.Element {
     <div className="min-h-screen bg-[color:var(--brand-sand)]">
       <header className="relative bg-[color:var(--brand-black)] text-white">
         <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[rgba(237,30,32,0.2)] to-transparent" />
-        <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
-          <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+        <div className="relative mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8 animate-section">
+          <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between animate-section-delayed">
             <Link to="/" className="flex items-center gap-3">
               <img src={logoPrincipal} alt="Cégep Limoilou" className="h-12 w-auto md:h-16" />
               <span className="text-xs uppercase tracking-[0.3em] text-white/70">Atelier IA</span>
@@ -29,7 +29,8 @@ function Layout({ currentStep, children }: LayoutProps): JSX.Element {
               Voir grand avec l’IA pédagogique
             </span>
           </div>
-          <div className="grid gap-6 md:grid-cols-[3fr_2fr] md:items-center">
+          <div className="section-divider section-divider--light" />
+          <div className="grid gap-6 md:grid-cols-[3fr_2fr] md:items-center animate-section-delayed">
             <div className="space-y-3">
               <h1 className="text-3xl font-semibold leading-tight md:text-4xl">
                 Dompter l’IA pour apprendre avec confiance
@@ -47,7 +48,8 @@ function Layout({ currentStep, children }: LayoutProps): JSX.Element {
               </ul>
             </div>
           </div>
-          <nav className="flex flex-col gap-3 md:flex-row">
+          <div className="section-divider section-divider--light" />
+          <nav className="flex flex-col gap-3 md:flex-row animate-section-delayed">
             {STEPS.map((step) => {
               const isActive = currentStep === step.number;
               const isCompleted = currentStep > step.number;
@@ -68,7 +70,7 @@ function Layout({ currentStep, children }: LayoutProps): JSX.Element {
           </nav>
         </div>
       </header>
-      <main className="relative z-10 mx-auto max-w-6xl px-6 pb-16 pt-12">
+      <main className="relative z-10 mx-auto max-w-6xl space-y-12 px-6 pb-16 pt-12">
         {children}
       </main>
     </div>

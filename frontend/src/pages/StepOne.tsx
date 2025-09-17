@@ -16,9 +16,9 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
   };
 
   return (
-    <div className="space-y-10">
-      <section className="page-section grid gap-10 bg-white/90 md:grid-cols-[2fr_1fr]">
-        <div className="flex flex-col gap-4">
+    <div className="landing-gradient space-y-12">
+      <section className="page-section landing-panel grid gap-10 bg-white/95 animate-section md:grid-cols-[2fr_1fr]">
+        <div className="flex flex-col gap-4 animate-section-delayed">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 1</span>
             <h2 className="text-2xl leading-tight text-[color:var(--brand-black)]">
@@ -51,7 +51,7 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
             </button>
           </div>
         </div>
-        <div className="space-y-4">
+        <div className="space-y-4 animate-section-delayed">
           <InfoCard
             tone="sand"
             title="Pourquoi préparer le contexte ?"
@@ -69,7 +69,8 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
           />
         </div>
       </section>
-      <section className="grid gap-4 md:grid-cols-3">
+      <div className="section-divider" />
+      <section className="grid gap-4 animate-section md:grid-cols-3">
         <InfoCard
           tone="red"
           title="Biais cognitifs"

@@ -110,8 +110,8 @@ function StepTwo({
   };
 
   return (
-    <div className="space-y-10">
-      <section className="page-section bg-white/90">
+    <div className="landing-gradient space-y-12">
+      <section className="page-section landing-panel animate-section">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 2</span>
@@ -128,7 +128,8 @@ function StepTwo({
             Revenir à l’étape 1
           </button>
         </div>
-        <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="my-6 section-divider" />
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between animate-section-delayed">
           <button
             type="button"
             onClick={launchBothSummaries}
@@ -138,7 +139,8 @@ function StepTwo({
             {loadingA || loadingB ? "Réponses en cours…" : "Lancer les deux requêtes"}
           </button>
         </div>
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="my-6 section-divider" />
+        <div className="grid gap-6 md:grid-cols-2 animate-section-delayed">
           {["A", "B"].map((side) => {
             const config = side === "A" ? configA : configB;
             const summary = side === "A" ? summaryA : summaryB;
@@ -224,7 +226,8 @@ function StepTwo({
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="section-divider" />
+      <section className="grid gap-4 animate-section md:grid-cols-2 lg:grid-cols-4">
         <InfoCard
           tone="red"
           title="Profils IA"
@@ -247,7 +250,8 @@ function StepTwo({
         />
       </section>
 
-      <div className="flex justify-end">
+      <div className="section-divider" />
+      <div className="flex justify-end animate-section">
         <button
           type="button"
           onClick={() => navigate("/etape-3")}

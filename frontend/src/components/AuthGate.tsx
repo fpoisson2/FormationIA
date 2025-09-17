@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
+import logoPrincipal from "../assets/logo_principal.svg";
 
 const STORAGE_KEY = "formationia-auth";
 
@@ -38,16 +39,28 @@ function AuthGate({ children }: AuthGateProps): JSX.Element {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[color:var(--brand-black)] via-[#1e1e2f] to-[color:var(--brand-red)] p-4">
-      <div className="w-full max-w-md rounded-3xl bg-white/90 p-8 shadow-xl backdrop-blur">
-        <div className="mb-6 flex flex-col gap-2 text-center">
-          <span className="text-xs uppercase tracking-[0.4em] text-[color:var(--brand-red)]">Accès réservé</span>
-          <h1 className="text-2xl font-semibold text-[color:var(--brand-black)]">Connexion à l’atelier</h1>
-          <p className="text-sm text-[color:var(--brand-charcoal)]">
-            Entrez les identifiants fournis pour accéder à l’expérience interactive.
-          </p>
+    <div className="auth-background landing-gradient flex min-h-screen items-center justify-center p-4">
+      <div className="w-full max-w-md animate-fade-in-up rounded-3xl bg-white/90 p-8 shadow-2xl shadow-black/10 backdrop-blur">
+        <div className="flex flex-col gap-5 text-center">
+          <div className="flex flex-col items-center gap-3 animate-float-soft">
+            <img
+              src={logoPrincipal}
+              alt="Cégep Limoilou"
+              className="h-12 w-auto filter brightness-0"
+            />
+            <span className="text-xs uppercase tracking-[0.4em] text-[color:var(--brand-red)]">
+              Atelier Formation IA
+            </span>
+          </div>
+          <div className="space-y-3 animate-fade-in-up-delayed">
+            <h1 className="text-2xl font-semibold text-[color:var(--brand-black)]">Connexion</h1>
+            <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
+              Plongez dans un atelier guidé où vous testez deux profils IA, observez leurs différences en direct et repartez avec une synthèse claire. Identifiez-vous pour démarrer la démonstration.
+            </p>
+          </div>
         </div>
-        <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="my-6 h-px bg-gradient-to-r from-transparent via-[color:var(--brand-charcoal)]/20 to-transparent" />
+        <form className="space-y-4 animate-fade-in-up-delayed" onSubmit={handleSubmit}>
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]" htmlFor="username">
               Nom d’utilisateur
