@@ -68,7 +68,7 @@ Définissez les mêmes variables d’environnement (`OPENAI_API_KEY`, `VITE_API_
 ## Parcours pédagogique
 
 1. **Étape 1 — Préparer** : contextualisez votre texte et découvrez les bonnes pratiques de cadrage.
-2. **Étape 2 — Explorer** : choisissez le modèle, la verbosité et l’effort de raisonnement pour deux configurations, puis observez les résumés apparaître en flux continu.
+2. **Étape 2 — Explorer** : choisissez le modèle, la verbosité et l’effort de raisonnement pour deux configurations, puis observez les résumés apparaître en flux continu (avec un court résumé du raisonnement fourni automatiquement).
 3. **Étape 3 — Synthétiser** : comparez les deux profils, générez des cartes d’étude si besoin, puis produisez une synthèse finale structurée.
 
 Chaque étape intègre des encarts pédagogiques sur l’IA afin de rythmer l’apprentissage et d’ancrer les notions clés.

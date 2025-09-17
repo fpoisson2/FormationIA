@@ -7,7 +7,7 @@ export const MODEL_OPTIONS = [
     helper: "Priorise la réactivité et des réponses synthétiques, idéal pour une première lecture."
   },
   {
-    value: "gpt-5",
+    value: "gpt-5-mini",
     label: "Profil expert",
     helper: "Explore davantage de nuances et de justification, parfait pour une analyse approfondie."
   }

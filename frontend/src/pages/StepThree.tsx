@@ -36,17 +36,19 @@ function StepThree({
 
   const canGenerate = useMemo(() => Boolean(sourceText.trim()), [sourceText]);
 
-  const handleFlashcards = async (side: "A" | "B") => {
+  const handleCardsBoth = async () => {
     if (!canGenerate) {
       setErrorSide("Ajoutez un texte source avant de créer des cartes d’étude.");
       return;
     }
 
     setErrorSide(null);
-    setLoadingSide(side);
+    setLoadingSide("A");
 
-    try {
-      const config = side === "A" ? configA : configB;
+    const runFor = async (
+      config: ModelConfig,
+      setCards: Dispatch<SetStateAction<Flashcard[]>>
+    ) => {
       const response = await fetch(`${API_BASE_URL}/api/flashcards`, {
         method: "POST",
         headers: {
@@ -70,11 +72,14 @@ function StepThree({
       if (!Array.isArray(cards)) {
         throw new Error("Format de réponse inattendu.");
       }
-      if (side === "A") {
-        setFlashcardsA(cards);
-      } else {
-        setFlashcardsB(cards);
-      }
+      setCards(cards);
+    };
+
+    try {
+      await Promise.all([
+        runFor(configA, setFlashcardsA),
+        runFor(configB, setFlashcardsB),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inattendue";
       setErrorSide(message);
@@ -104,9 +109,9 @@ function StepThree({
         },
         body: JSON.stringify({
           text: `Texte source :\n${sourceText}\n\nProfil rapide :\n${summaryA}\n\nProfil expert :\n${summaryB}\n\nÉcris une synthèse finale en français en trois parties : 1) points communs, 2) différences notables, 3) recommandations pédagogiques.`,
-          model: configB.model,
-          verbosity: configB.verbosity,
-          thinking: configB.thinking,
+          model: "gpt-5-mini",
+          verbosity: "medium",
+          thinking: "minimal",
         }),
       });
 
@@ -178,18 +183,14 @@ function StepThree({
       <section className="grid gap-6 md:grid-cols-2">
         {["A", "B"].map((label) => {
           const cards = label === "A" ? flashcardsA : flashcardsB;
+          const isLoading = loadingSide !== null;
           return (
             <div key={label} className="flex flex-col gap-4 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-semibold text-[color:var(--brand-black)]">Cartes d’étude — Modèle {label}</h3>
-                <button
-                  type="button"
-                  onClick={() => handleFlashcards(label as "A" | "B")}
-                  className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white"
-                  disabled={loadingSide !== null}
-                >
-                  {loadingSide === label ? "Génération…" : "Créer les cartes"}
-                </button>
+                <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                  {cards.length ? `${cards.length} carte(s)` : "En attente"}
+                </span>
               </div>
               {cards.length > 0 ? (
                 <ul className="space-y-3 text-sm text-[color:var(--brand-charcoal)]">
@@ -213,6 +214,15 @@ function StepThree({
       {errorSide && (
         <p className="rounded-3xl bg-red-50 p-3 text-sm text-red-600">{errorSide}</p>
       )}
+
+      <button
+        type="button"
+        onClick={handleCardsBoth}
+        className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300"
+        disabled={loadingSide !== null}
+      >
+        {loadingSide ? "Génération…" : "Créer les cartes pour les deux profils"}
+      </button>
 
       <section className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm space-y-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

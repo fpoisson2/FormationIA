@@ -48,58 +48,65 @@ function StepTwo({
     }
   };
 
-  const fetchSummary = async (
-    side: "A" | "B",
-    config: ModelConfig,
-    setSummary: (value: string) => void,
-    setError: (value: string | null) => void,
-    setLoading: (value: boolean) => void
-  ) => {
+  const launchBothSummaries = async () => {
     if (disabled) {
-      setError("Ajoutez un texte source avant de lancer la génération.");
+      setErrorA("Ajoutez un texte source avant de lancer la génération.");
+      setErrorB("Ajoutez un texte source avant de lancer la génération.");
       return;
     }
 
-    setError(null);
-    setSummary("");
-    setLoading(true);
+    const runFor = async (
+      config: ModelConfig,
+      setSummary: (value: string) => void,
+      setError: (value: string | null) => void,
+      setLoading: (value: boolean) => void
+    ) => {
+      setError(null);
+      setSummary("");
+      setLoading(true);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/summary`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: sourceText,
-          model: config.model,
-          verbosity: config.verbosity,
-          thinking: config.thinking,
-        }),
-      });
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/summary`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text: sourceText,
+            model: config.model,
+            verbosity: config.verbosity,
+            thinking: config.thinking,
+          }),
+        });
 
-      if (!response.ok || !response.body) {
-        const errorMessage = await response.text();
-        throw new Error(errorMessage || "Impossible de contacter le serveur");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        if (chunk) {
-          setSummary((prev) => prev + chunk);
+        if (!response.ok || !response.body) {
+          const errorMessage = await response.text();
+          throw new Error(errorMessage || "Impossible de contacter le serveur");
         }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          if (chunk) {
+            setSummary((prev) => prev + chunk);
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Erreur inattendue";
+        setError(message);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Erreur inattendue";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
+    };
+
+    await Promise.all([
+      runFor(configA, setSummaryA, setErrorA, setLoadingA),
+      runFor(configB, setSummaryB, setErrorB, setLoadingB),
+    ]);
   };
 
   return (
@@ -121,7 +128,17 @@ function StepTwo({
             Revenir à l’étape 1
           </button>
         </div>
-        <div className="mt-8 grid gap-6 md:grid-cols-2">
+        <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <button
+            type="button"
+            onClick={launchBothSummaries}
+            className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={loadingA || loadingB || disabled}
+          >
+            {loadingA || loadingB ? "Réponses en cours…" : "Lancer les deux requêtes"}
+          </button>
+        </div>
+        <div className="grid gap-6 md:grid-cols-2">
           {["A", "B"].map((side) => {
             const config = side === "A" ? configA : configB;
             const summary = side === "A" ? summaryA : summaryB;
@@ -135,15 +152,10 @@ function StepTwo({
             return (
               <div key={side} className="flex flex-col gap-4 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-[color:var(--brand-black)]">Modèle {side}</h3>
-                  <button
-                    type="button"
-                    onClick={() => fetchSummary(side as "A" | "B", config, setSummary, setError, setLoading)}
-                    className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white"
-                    disabled={loading || disabled}
-                  >
-                    {loading ? "Réponse en cours…" : "Lancer la requête"}
-                  </button>
+                  <h3 className="text-base font-semibold text-[color:var(--brand-black)]">Profil {side}</h3>
+                  <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                    {loading ? "Réponse en cours…" : summary ? "Réponse générée" : "En attente"}
+                  </span>
                 </div>
                 <div className="grid gap-3 text-sm">
                   <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]" htmlFor={`model-${side}`}>
@@ -203,7 +215,7 @@ function StepTwo({
                   <p className="rounded-2xl bg-red-50 p-3 text-xs text-red-600">{error}</p>
                 ) : (
                   <div className="min-h-[140px] rounded-3xl bg-[rgba(18,18,18,0.05)] p-4 text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
-                    {summary ? summary : loading ? "Initialisation du flux…" : "Lancez la requête pour observer le résumé."}
+                    {summary ? summary : loading ? "Initialisation du flux…" : "Résultat en attente."}
                   </div>
                 )}
               </div>
@@ -239,7 +251,7 @@ function StepTwo({
         <button
           type="button"
           onClick={() => navigate("/etape-3")}
-          className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="cta-button cta-button--light disabled:cursor-not-allowed disabled:bg-slate-300"
           disabled={!summaryA.trim() || !summaryB.trim()}
         >
           Passer à l’étape 3

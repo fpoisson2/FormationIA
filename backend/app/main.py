@@ -47,6 +47,32 @@ def _extract_text_from_response(response) -> str:
     return "".join(chunks)
 
 
+def _extract_reasoning_summary(response) -> str:
+    """Retourne le résumé de raisonnement si disponible."""
+
+    summary_chunks: list[str] = []
+    for item in getattr(response, "output", []) or []:
+        item_type = getattr(item, "type", None) or (item.get("type") if isinstance(item, dict) else None)
+        if item_type != "reasoning":
+            continue
+
+        summaries = getattr(item, "summary", None)
+        if summaries is None and isinstance(item, dict):
+            summaries = item.get("summary")
+
+        if not summaries:
+            continue
+
+        for summary in summaries:
+            text = getattr(summary, "text", None)
+            if text is None and isinstance(summary, dict):
+                text = summary.get("text")
+            if text:
+                summary_chunks.append(str(text))
+
+    return "\n".join(summary_chunks).strip()
+
+
 class SummaryRequest(BaseModel):
     text: str = Field(..., min_length=10)
     model: str = Field(default="gpt-5-mini")
@@ -147,7 +173,11 @@ def fetch_summary(payload: SummaryRequest) -> StreamingResponse:
                         yield event.delta
                     elif event.type == "response.error":
                         raise HTTPException(status_code=500, detail=event.error.get("message", "Erreur du service de génération"))
-                stream.get_final_response()
+                final_response = stream.get_final_response()
+                reasoning_summary = _extract_reasoning_summary(final_response)
+                if reasoning_summary:
+                    yield "\n\nRésumé du raisonnement :\n"
+                    yield reasoning_summary
         except HTTPException:
             raise
         except Exception as exc:  # pragma: no cover - defensive catch
