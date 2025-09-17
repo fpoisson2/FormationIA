@@ -17,7 +17,7 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
 
   return (
     <div className="landing-gradient space-y-12">
-      <section className="page-section landing-panel grid gap-10 bg-white/95 animate-section md:grid-cols-[2fr_1fr]">
+      <section className="page-section landing-panel grid gap-10 animate-section md:grid-cols-[2fr_1fr]">
         <div className="flex flex-col gap-4 animate-section-delayed">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 1</span>
@@ -70,7 +70,7 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
         </div>
       </section>
       <div className="section-divider" />
-      <section className="grid gap-4 animate-section md:grid-cols-3">
+      <section className="page-section landing-panel grid gap-4 animate-section md:grid-cols-3">
         <InfoCard
           tone="red"
           title="Biais cognitifs"

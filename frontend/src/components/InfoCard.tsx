@@ -11,7 +11,7 @@ const toneStyles: Record<InfoCardTone, string> = {
   red: "bg-[rgba(237,30,32,0.12)] text-[color:var(--brand-black)] border border-[rgba(237,30,32,0.2)]",
   black: "bg-[color:var(--brand-black)] text-white border border-white/10",
   sand: "bg-white/80 text-[color:var(--brand-black)] border border-white/60",
-  white: "bg-white text-[color:var(--brand-black)] border border-white/60",
+  white: "bg-white/80 text-[color:var(--brand-black)] border border-white/60",
 };
 
 function InfoCard({ title, description, items, tone = "sand" }: InfoCardProps): JSX.Element {
