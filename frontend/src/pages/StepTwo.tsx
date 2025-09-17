@@ -111,7 +111,7 @@ function StepTwo({
 
   return (
     <div className="landing-gradient space-y-12">
-      <section className="page-section landing-panel animate-section">
+      <section className="page-section landing-panel bg-white/95 animate-section">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 2</span>
