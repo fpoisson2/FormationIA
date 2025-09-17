@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    --brand-black: #121212;
+    --brand-red: #ed1e20;
+    --brand-charcoal: #343030;
+    --brand-cream: #fff5eb;
+    --brand-sand: #f7f3ef;
+  }
+
+  html {
+    font-family: 'Poppins', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--brand-sand);
+    color: var(--brand-black);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button {
+    font-weight: 600;
+  }
+}
+
+@layer components {
+  .brand-chip {
+    @apply inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white;
+  }
+
+  .page-section {
+    @apply mb-10 rounded-3xl border border-white/60 bg-white/90 p-8 shadow-sm backdrop-blur;
+  }
+
+  .cta-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition;
+  }
+
+  .cta-button--primary {
+    @apply bg-[color:var(--brand-red)] text-white hover:bg-red-600;
+  }
+
+  .cta-button--light {
+    @apply bg-white text-[color:var(--brand-black)] hover:bg-slate-100;
+  }
+}
