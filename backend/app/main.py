@@ -151,11 +151,7 @@ def _validate_model(model_name: str) -> str:
     return model_name
 
 
-@app.post("/api/summary")
-def fetch_summary(payload: SummaryRequest) -> StreamingResponse:
-    client = _ensure_client()
-    model = _validate_model(payload.model)
-    prompt = _build_summary_prompt(payload)
+def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: SummaryRequest) -> StreamingResponse:
 
     def summary_generator() -> Generator[str, None, None]:
         try:
@@ -186,8 +182,24 @@ def fetch_summary(payload: SummaryRequest) -> StreamingResponse:
     return StreamingResponse(summary_generator(), media_type="text/plain")
 
 
-@app.post("/api/flashcards")
-def generate_flashcards(payload: FlashcardRequest) -> JSONResponse:
+def _handle_summary(payload: SummaryRequest) -> StreamingResponse:
+    client = _ensure_client()
+    model = _validate_model(payload.model)
+    prompt = _build_summary_prompt(payload)
+    return _stream_summary(client, model, prompt, payload)
+
+
+@app.post("/api/summary")
+def fetch_summary(payload: SummaryRequest) -> StreamingResponse:
+    return _handle_summary(payload)
+
+
+@app.post("/summary")
+def fetch_summary_legacy(payload: SummaryRequest) -> StreamingResponse:
+    return _handle_summary(payload)
+
+
+def _handle_flashcards(payload: FlashcardRequest) -> JSONResponse:
     client = _ensure_client()
     model = _validate_model(payload.model)
     prompt = (
@@ -237,3 +249,13 @@ def generate_flashcards(payload: FlashcardRequest) -> JSONResponse:
         raise HTTPException(status_code=500, detail="Aucune carte valide n'a été générée.")
 
     return JSONResponse(content={"cards": normalized_cards})
+
+
+@app.post("/api/flashcards")
+def generate_flashcards(payload: FlashcardRequest) -> JSONResponse:
+    return _handle_flashcards(payload)
+
+
+@app.post("/flashcards")
+def generate_flashcards_legacy(payload: FlashcardRequest) -> JSONResponse:
+    return _handle_flashcards(payload)
