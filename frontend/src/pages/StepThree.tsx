@@ -1,7 +1,7 @@
 import { Dispatch, SetStateAction, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { API_BASE_URL, MODEL_OPTIONS, type ModelConfig } from "../config";
+import { API_BASE_URL, API_AUTH_KEY, MODEL_OPTIONS, type ModelConfig } from "../config";
 import type { Flashcard } from "../App";
 
 interface StepThreeProps {
@@ -49,11 +49,16 @@ function StepThree({
       config: ModelConfig,
       setCards: Dispatch<SetStateAction<Flashcard[]>>
     ) => {
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (API_AUTH_KEY) {
+        headers["X-API-Key"] = API_AUTH_KEY;
+      }
+
       const response = await fetch(`${API_BASE_URL}/flashcards`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({
           text: sourceText,
           model: config.model,
@@ -102,11 +107,16 @@ function StepThree({
     setFinalSummaryLoading(true);
 
     try {
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (API_AUTH_KEY) {
+        headers["X-API-Key"] = API_AUTH_KEY;
+      }
+
       const response = await fetch(`${API_BASE_URL}/summary`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({
           text: `Texte source :\n${sourceText}\n\nProfil rapide :\n${summaryA}\n\nProfil expert :\n${summaryB}\n\nÉcris une synthèse finale en français en trois parties : 1) points communs, 2) différences notables, 3) recommandations pédagogiques.`,
           model: "gpt-5-mini",

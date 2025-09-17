@@ -2,7 +2,7 @@ import { ChangeEvent, Dispatch, SetStateAction, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom";
 
 import InfoCard from "../components/InfoCard";
-import { API_BASE_URL, MODEL_OPTIONS, THINKING_OPTIONS, VERBOSITY_OPTIONS, type ModelConfig } from "../config";
+import { API_BASE_URL, API_AUTH_KEY, MODEL_OPTIONS, THINKING_OPTIONS, VERBOSITY_OPTIONS, type ModelConfig } from "../config";
 
 interface StepTwoProps {
   sourceText: string;
@@ -66,11 +66,16 @@ function StepTwo({
       setLoading(true);
 
       try {
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+        if (API_AUTH_KEY) {
+          headers["X-API-Key"] = API_AUTH_KEY;
+        }
+
         const response = await fetch(`${API_BASE_URL}/summary`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers,
           body: JSON.stringify({
             text: sourceText,
             model: config.model,

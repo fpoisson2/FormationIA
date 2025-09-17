@@ -17,6 +17,7 @@ const isLocalHost =
 const fallbackApiBase = isLocalHost ? "http://localhost:8000/api" : "/api";
 
 export const API_BASE_URL = sanitizedEnvBase ?? fallbackApiBase;
+export const API_AUTH_KEY = import.meta.env.VITE_API_AUTH_KEY ?? "";
 
 export const MODEL_OPTIONS = [
   {

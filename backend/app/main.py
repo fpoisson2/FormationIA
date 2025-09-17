@@ -3,7 +3,7 @@ import os
 from typing import Dict, Generator, Literal, Sequence
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from openai import OpenAI as ResponsesClient
@@ -120,6 +120,16 @@ app.add_middleware(
 
 _api_key = os.getenv("OPENAI_API_KEY")
 _client = ResponsesClient(api_key=_api_key) if _api_key else None
+_api_auth_token = os.getenv("API_AUTH_TOKEN")
+
+
+def _require_api_key(request: Request) -> None:
+    if not _api_auth_token:
+        return
+
+    header_key = request.headers.get("x-api-key")
+    if header_key != _api_auth_token:
+        raise HTTPException(status_code=401, detail="Clé API invalide ou manquante.")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -190,12 +200,12 @@ def _handle_summary(payload: SummaryRequest) -> StreamingResponse:
 
 
 @app.post("/api/summary")
-def fetch_summary(payload: SummaryRequest) -> StreamingResponse:
+def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
 
 
 @app.post("/summary")
-def fetch_summary_legacy(payload: SummaryRequest) -> StreamingResponse:
+def fetch_summary_legacy(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
 
 
@@ -252,10 +262,10 @@ def _handle_flashcards(payload: FlashcardRequest) -> JSONResponse:
 
 
 @app.post("/api/flashcards")
-def generate_flashcards(payload: FlashcardRequest) -> JSONResponse:
+def generate_flashcards(payload: FlashcardRequest, _: None = Depends(_require_api_key)) -> JSONResponse:
     return _handle_flashcards(payload)
 
 
 @app.post("/flashcards")
-def generate_flashcards_legacy(payload: FlashcardRequest) -> JSONResponse:
+def generate_flashcards_legacy(payload: FlashcardRequest, _: None = Depends(_require_api_key)) -> JSONResponse:
     return _handle_flashcards(payload)

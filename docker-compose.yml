@@ -8,6 +8,7 @@ services:
       - .env
     environment:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4173}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN}
     ports:
       - "8000:8000"
 
@@ -18,6 +19,7 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
         VITE_LOGIN_USERNAME: ${VITE_LOGIN_USERNAME}
         VITE_LOGIN_PASSWORD: ${VITE_LOGIN_PASSWORD}
+        VITE_API_AUTH_KEY: ${VITE_API_AUTH_KEY}
     depends_on:
       - backend
     ports:
