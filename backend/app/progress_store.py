@@ -11,11 +11,14 @@ from typing import Any, Dict
 
 
 def _default_store_path() -> Path:
-    default_path = Path(os.getenv("PROGRESS_STORAGE_PATH", ""))
-    if default_path:
-        return default_path
+    raw_path = os.getenv("PROGRESS_STORAGE_PATH")
+    if raw_path:
+        candidate = Path(raw_path).expanduser().resolve()
+        if candidate.is_dir():
+            return candidate / "progress.json"
+        return candidate
     base_dir = Path(__file__).resolve().parent.parent
-    return base_dir / "storage" / "progress.json"
+    return (base_dir / "storage" / "progress.json").resolve()
 
 
 _STORE_PATH = _default_store_path()
