@@ -55,7 +55,7 @@ function AuthGate({ children }: AuthGateProps): JSX.Element {
           <div className="space-y-3 animate-fade-in-up-delayed">
             <h1 className="text-2xl font-semibold text-[color:var(--brand-black)]">Connexion</h1>
             <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
-              Plongez dans un atelier guidé où vous testez deux profils IA, observez leurs différences en direct et repartez avec une synthèse claire. Identifiez-vous pour démarrer la démonstration.
+              Veuillez vous connecter pour accéder à l'expérience.
             </p>
           </div>
         </div>
