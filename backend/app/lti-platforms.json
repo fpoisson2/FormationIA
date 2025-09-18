@@ -1,0 +1,11 @@
+[
+  {
+    "issuer": "https://votre-moodle.example.com",
+    "client_id": "votre_client_id_ici",
+    "authorization_endpoint": "https://votre-moodle.example.com/mod/lti/auth.php",
+    "token_endpoint": "https://votre-moodle.example.com/mod/lti/token.php",
+    "jwks_uri": "https://votre-moodle.example.com/mod/lti/certs.php",
+    "deployment_id": "votre_deployment_id_ici",
+    "audience": null
+  }
+]

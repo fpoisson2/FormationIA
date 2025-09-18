@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import logoPrincipal from "../assets/logo_principal.svg";
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
+import { useLTI } from "../hooks/useLTI";
 
 type Stage = "briefing" | "arena";
 
@@ -116,13 +117,50 @@ function PromptDojo(): JSX.Element {
   const [aiScore, setAiScore] = useState<AiScoreReport | null>(null);
   const [scoreLoading, setScoreLoading] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
+  const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
+
+  const { isLTISession, submitScore, context, error: ltiError } = useLTI();
 
   useEffect(() => {
     setPromptText(mission.defaults.starterPrompt);
     setAiScore(null);
     setScoreError(null);
     setStage("briefing");
+    setLtiScoreSubmitted(false);
   }, [mission]);
+
+  // Submit score to LTI when activity is successfully completed
+  useEffect(() => {
+    const submitLTIScore = async () => {
+      if (
+        isLTISession &&
+        aiScore &&
+        aiScore.total >= mission.targetScore &&
+        !ltiScoreSubmitted
+      ) {
+        const success = await submitScore({
+          missionId: mission.id,
+          success: true,
+          scoreGiven: 1.0,
+          scoreMaximum: 1.0,
+          activityProgress: "Completed",
+          gradingProgress: "FullyGraded",
+          metadata: {
+            aiScore: aiScore.total,
+            targetScore: mission.targetScore,
+            missionTitle: mission.title,
+            badge: mission.badge,
+          },
+        });
+
+        if (success) {
+          setLtiScoreSubmitted(true);
+        }
+      }
+    };
+
+    submitLTIScore();
+  }, [aiScore, mission, isLTISession, submitScore, ltiScoreSubmitted]);
 
   const missionProgress = aiScore
     ? clamp(Math.round((aiScore.total / mission.targetScore) * 100), 0, 120)
@@ -408,14 +446,48 @@ function PromptDojo(): JSX.Element {
             />
           </div>
           {aiScore && (
-            <div className="mt-4 rounded-2xl border border-emerald-300/40 bg-emerald-500/10 p-4 text-sm text-emerald-800">
-              {aiScore.comments && <p className="font-semibold">{aiScore.comments}</p>}
-              {aiScore.advice.length > 0 && (
-                <ul className="mt-2 space-y-1 text-sm">
-                  {aiScore.advice.map((item, index) => (
-                    <li key={`${item}-${index}`}>• {item}</li>
-                  ))}
-                </ul>
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-emerald-300/40 bg-emerald-500/10 p-4 text-sm text-emerald-800">
+                {aiScore.comments && <p className="font-semibold">{aiScore.comments}</p>}
+                {aiScore.advice.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {aiScore.advice.map((item, index) => (
+                      <li key={`${item}-${index}`}>• {item}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* LTI Success Indicator */}
+              {isLTISession && aiScore.total >= mission.targetScore && (
+                <div className="rounded-2xl border border-blue-300/40 bg-blue-500/10 p-4 text-sm text-blue-800">
+                  <div className="flex items-center gap-2">
+                    {ltiScoreSubmitted ? (
+                      <>
+                        <CheckIcon className="h-4 w-4 text-green-600" />
+                        <span className="font-semibold">Réussite envoyée à Moodle</span>
+                      </>
+                    ) : (
+                      <>
+                        <SpinnerIcon className="h-4 w-4 animate-spin" />
+                        <span className="font-semibold">Envoi du résultat à Moodle...</span>
+                      </>
+                    )}
+                  </div>
+                  {ltiScoreSubmitted && context && (
+                    <p className="mt-1 text-xs">
+                      Ta réussite de cette activité a été automatiquement transmise à ton cours Moodle.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* LTI Error Indicator */}
+              {ltiError && isLTISession && (
+                <div className="rounded-2xl border border-red-300/40 bg-red-500/10 p-4 text-sm text-red-800">
+                  <p className="font-semibold">Problème de connexion Moodle</p>
+                  <p className="mt-1 text-xs">{ltiError}</p>
+                </div>
               )}
             </div>
           )}

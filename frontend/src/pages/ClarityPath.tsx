@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
+import { useLTI } from "../hooks/useLTI";
 
 const GRID_SIZE = 10;
 
@@ -387,6 +388,9 @@ function ClarityPath(): JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
+  const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
+
+  const { isLTISession, submitScore, context, error: ltiError } = useLTI();
 
   const runIdRef = useRef<string>(createRunId());
   const controllerRef = useRef<AbortController | null>(null);
@@ -415,6 +419,47 @@ function ClarityPath(): JSX.Element {
       showModalWhenReadyRef.current = false;
     };
   }, []);
+
+  // Submit score to LTI when activity is successfully completed
+  useEffect(() => {
+    const submitLTIScore = async () => {
+      if (
+        isLTISession &&
+        status === "success" &&
+        stats &&
+        stats.success &&
+        !ltiScoreSubmitted
+      ) {
+        const efficiency = stats.optimalPathLength
+          ? Math.max(0, 1 - (stats.surcout || 0) / stats.optimalPathLength)
+          : 1;
+
+        const success = await submitScore({
+          missionId: "clarity-path",
+          success: true,
+          scoreGiven: 1.0,
+          scoreMaximum: 1.0,
+          activityProgress: "Completed",
+          gradingProgress: "FullyGraded",
+          metadata: {
+            attempts: stats.attempts,
+            stepsExecuted: stats.stepsExecuted,
+            optimalPathLength: stats.optimalPathLength,
+            surcout: stats.surcout,
+            efficiency: efficiency,
+            durationMs: stats.durationMs,
+            runId: stats.runId,
+          },
+        });
+
+        if (success) {
+          setLtiScoreSubmitted(true);
+        }
+      }
+    };
+
+    submitLTIScore();
+  }, [status, stats, isLTISession, submitScore, ltiScoreSubmitted]);
 
   const triggerCelebration = useCallback(() => {
     setCelebrating(true);

@@ -593,7 +593,7 @@ def _render_lti_launch_page(target_url: str) -> str:
         "</head>\n"
         "<body style=\"font-family: sans-serif; text-align: center; padding: 3rem;\">\n"
         "  <p>Redirection vers l'activité en cours…\n"
-        f"    <a href=\"{escaped}\">Poursuivre</a>."\n"
+        f"    <a href=\"{escaped}\">Poursuivre</a>."
         "  </p>\n"
         "</body>\n"
         "</html>"
@@ -839,3 +839,110 @@ def generate_plan(payload: PlanRequest, _: None = Depends(_require_api_key)) -> 
 @app.post("/plan")
 def generate_plan_legacy(payload: PlanRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_plan(payload)
+
+
+# LTI 1.3 Endpoints
+
+@app.get("/.well-known/jwks.json")
+def jwks_endpoint() -> JSONResponse:
+    """Expose public keys in JWKS format for LTI platform verification."""
+    service = _resolve_lti_service()
+    jwks = service.jwks_document()
+    return JSONResponse(content=jwks)
+
+
+@app.get("/lti/login")
+def lti_initiate_login(
+    iss: str,
+    login_hint: str,
+    target_link_uri: str,
+    client_id: str | None = None,
+    lti_message_hint: str | None = None,
+    lti_deployment_id: str | None = None,
+) -> RedirectResponse:
+    """Handle OIDC third-party initiated login from LTI platform."""
+    try:
+        service = _resolve_lti_service()
+        redirect_url, state = service.build_login_redirect(
+            issuer=iss,
+            client_id=client_id or "",
+            login_hint=login_hint,
+            message_hint=lti_message_hint,
+            target_link_uri=target_link_uri,
+        )
+        return RedirectResponse(url=redirect_url, status_code=302)
+    except LTILoginError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/lti/launch")
+async def lti_launch(request: Request, id_token: str, state: str) -> HTMLResponse:
+    """Handle LTI resource link launch and establish user session."""
+    try:
+        service = _resolve_lti_service()
+        session = await service.validate_launch(id_token, state)
+
+        response = HTMLResponse(content=_render_lti_launch_page(LTI_POST_LAUNCH_URL))
+        _set_lti_session_cookie(response, session, service)
+        return response
+    except LTILoginError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/lti/context")
+def get_lti_context(session: LTISession = Depends(_require_lti_session)) -> LTIContextResponse:
+    """Get current LTI session context for authenticated users."""
+    return LTIContextResponse(
+        user={
+            "subject": session.subject,
+            "name": session.name,
+            "email": session.email,
+            "roles": session.roles,
+        },
+        context=session.context,
+        ags=session.ags,
+        expiresAt=session.expires_at,
+    )
+
+
+@app.post("/api/lti/score")
+async def post_lti_score(
+    payload: LTIScoreRequest,
+    session: LTISession = Depends(_require_lti_session),
+) -> JSONResponse:
+    """Submit scores back to LTI platform via Assignment and Grade Services."""
+    try:
+        service = _resolve_lti_service()
+        result = await service.post_score(
+            session,
+            score_given=payload.score_given or 0.0,
+            score_maximum=payload.score_maximum or 1.0,
+            activity_progress=payload.activity_progress or "Completed",
+            grading_progress=payload.grading_progress or "FullyGraded",
+            timestamp=payload.timestamp,
+        )
+        return JSONResponse(content={"ok": True, "result": result})
+    except LTIScoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LTIAuthorizationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.delete("/api/lti/session")
+def logout_lti_session(
+    request: Request,
+    response: Response,
+    session: LTISession = Depends(_require_lti_session),
+) -> JSONResponse:
+    """Log out current LTI session."""
+    service = _resolve_lti_service()
+    service.session_store.delete(session.session_id)
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=_LTI_COOKIE_SECURE,
+        samesite=_LTI_COOKIE_SAMESITE,
+        domain=_LTI_COOKIE_DOMAIN,
+        path="/",
+    )
+    return JSONResponse(content={"ok": True})
