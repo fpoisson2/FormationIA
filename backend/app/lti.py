@@ -379,8 +379,10 @@ class LTIPlatformConfig(BaseModel):
 
         resolved = self.resolved_deployments
         if resolved:
-            self.deployment_id = resolved[0]
-            self.deployment_ids = resolved
+            object.__setattr__(self, "deployment_id", resolved[0])
+            object.__setattr__(self, "deployment_ids", resolved)
+        else:
+            object.__setattr__(self, "deployment_ids", [])
         return self
 
     def _default_endpoint(self, suffix: str) -> str:
