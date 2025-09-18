@@ -1,22 +1,7 @@
 const envApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
-const sanitizedEnvBase = (() => {
-  if (!envApiBase) {
-    return undefined;
-  }
-  const trimmed = envApiBase.replace(/\/$/, "");
-  if (/^https?:\/\/[^/]+$/.test(trimmed)) {
-    return `${trimmed}/api`;
-  }
-  if (trimmed === "" || trimmed === "/") {
-    return "/api";
-  }
-  return trimmed;
-})();
-const isLocalHost =
-  typeof window !== "undefined" && window.location.origin.startsWith("http://localhost");
-const fallbackApiBase = isLocalHost ? "http://localhost:8001/api" : "/api";
 
-export const API_BASE_URL = sanitizedEnvBase ?? fallbackApiBase;
+// Simplification : utiliser directement l'URL fournie ou le fallback
+export const API_BASE_URL = envApiBase || "http://localhost:8001/api";
 export const API_AUTH_KEY = import.meta.env.VITE_API_AUTH_KEY ?? "";
 
 export const MODEL_OPTIONS = [

@@ -39,7 +39,7 @@ export function useLTI() {
         const headers: HeadersInit = {};
         if (API_AUTH_KEY) headers['X-API-Key'] = API_AUTH_KEY;
 
-        const response = await fetch(`${API_BASE_URL}/api/lti/context`, {
+        const response = await fetch(`${API_BASE_URL}/lti/context`, {
           method: 'GET',
           headers,
           credentials: 'include',
@@ -79,7 +79,7 @@ export function useLTI() {
       };
       if (API_AUTH_KEY) headers['X-API-Key'] = API_AUTH_KEY;
 
-      const response = await fetch(`${API_BASE_URL}/api/lti/score`, {
+      const response = await fetch(`${API_BASE_URL}/lti/score`, {
         method: 'POST',
         headers,
         credentials: 'include',
@@ -107,7 +107,7 @@ export function useLTI() {
       const headers: HeadersInit = {};
       if (API_AUTH_KEY) headers['X-API-Key'] = API_AUTH_KEY;
 
-      await fetch(`${API_BASE_URL}/api/lti/session`, {
+      await fetch(`${API_BASE_URL}/lti/session`, {
         method: 'DELETE',
         headers,
         credentials: 'include',

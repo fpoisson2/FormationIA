@@ -852,16 +852,35 @@ def jwks_endpoint() -> JSONResponse:
 
 
 @app.get("/lti/login")
-def lti_initiate_login(
-    iss: str,
-    login_hint: str,
-    target_link_uri: str,
+@app.post("/lti/login")
+async def lti_initiate_login(
+    request: Request,
+    iss: str = None,
+    login_hint: str = None,
+    target_link_uri: str = None,
     client_id: str | None = None,
     lti_message_hint: str | None = None,
     lti_deployment_id: str | None = None,
 ) -> RedirectResponse:
     """Handle OIDC third-party initiated login from LTI platform."""
     try:
+        # Pour les requêtes POST, lire les paramètres depuis form data
+        if request.method == "POST":
+            form_data = await request.form()
+            iss = form_data.get("iss") or iss
+            login_hint = form_data.get("login_hint") or login_hint
+            target_link_uri = form_data.get("target_link_uri") or target_link_uri
+            client_id = form_data.get("client_id") or client_id
+            lti_message_hint = form_data.get("lti_message_hint") or lti_message_hint
+            lti_deployment_id = form_data.get("lti_deployment_id") or lti_deployment_id
+
+        if not iss:
+            raise LTILoginError("Paramètre 'iss' manquant dans la requête LTI.")
+        if not login_hint:
+            raise LTILoginError("Paramètre 'login_hint' manquant dans la requête LTI.")
+        if not target_link_uri:
+            raise LTILoginError("Paramètre 'target_link_uri' manquant dans la requête LTI.")
+
         service = _resolve_lti_service()
         redirect_url, state = service.build_login_redirect(
             issuer=iss,
@@ -876,9 +895,24 @@ def lti_initiate_login(
 
 
 @app.post("/lti/launch")
-async def lti_launch(request: Request, id_token: str, state: str) -> HTMLResponse:
+async def lti_launch(
+    request: Request,
+    id_token: str = None,
+    state: str = None
+) -> HTMLResponse:
     """Handle LTI resource link launch and establish user session."""
     try:
+        # Pour les requêtes POST, lire les paramètres depuis form data
+        if request.method == "POST":
+            form_data = await request.form()
+            id_token = form_data.get("id_token") or id_token
+            state = form_data.get("state") or state
+
+        if not id_token:
+            raise LTILoginError("id_token manquant dans la requête de lancement.")
+        if not state:
+            raise LTILoginError("state manquant dans la requête de lancement.")
+
         service = _resolve_lti_service()
         session = await service.validate_launch(id_token, state)
 
@@ -923,8 +957,10 @@ async def post_lti_score(
         )
         return JSONResponse(content={"ok": True, "result": result})
     except LTIScoreError as exc:
+        print(f"DEBUG: LTI Score Error: {exc}")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LTIAuthorizationError as exc:
+        print(f"DEBUG: LTI Authorization Error: {exc}")
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 

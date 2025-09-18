@@ -1,11 +1,11 @@
 [
   {
-    "issuer": "https://votre-moodle.example.com",
-    "client_id": "votre_client_id_ici",
-    "authorization_endpoint": "https://votre-moodle.example.com/mod/lti/auth.php",
-    "token_endpoint": "https://votre-moodle.example.com/mod/lti/token.php",
-    "jwks_uri": "https://votre-moodle.example.com/mod/lti/certs.php",
-    "deployment_id": "votre_deployment_id_ici",
+    "issuer": "http://localhost:8000",
+    "client_id": "BCBfq670a6C4wuF",
+    "authorization_endpoint": "http://localhost:8000/mod/lti/auth.php",
+    "token_endpoint": "http://localhost:8000/mod/lti/token.php",
+    "jwks_uri": "http://localhost:8000/mod/lti/certs.php",
+    "deployment_id": "1",
     "audience": null
   }
 ]

@@ -419,7 +419,8 @@ class LTIService:
         return f"{str(platform.authorization_endpoint)}?{query}", state
 
     async def _retrieve_jwks(self, platform: LTIPlatformConfig) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # Avec network_mode: host, localhost:8000 devrait maintenant fonctionner
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             response = await client.get(str(platform.jwks_uri))
             response.raise_for_status()
             return response.json()
@@ -434,7 +435,33 @@ class LTIService:
                 continue
             if jwk.get("kty") != "RSA":
                 continue
-            return json.dumps(jwk)
+
+            # Convertir JWK en clé RSA pour PyJWT
+            try:
+                from cryptography.hazmat.primitives.asymmetric import rsa
+                from cryptography.hazmat.primitives import serialization
+                import base64
+
+                # Décoder les composants n et e de la clé RSA
+                n = int.from_bytes(base64.urlsafe_b64decode(jwk["n"] + "==="), "big")
+                e = int.from_bytes(base64.urlsafe_b64decode(jwk["e"] + "==="), "big")
+
+                # Créer la clé publique RSA
+                public_numbers = rsa.RSAPublicNumbers(e, n)
+                public_key = public_numbers.public_key()
+
+                # Convertir en format PEM
+                pem = public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                return pem.decode("utf-8")
+
+            except Exception as e:
+                print(f"DEBUG: Erreur conversion JWK->PEM: {e}")
+                # Fallback: retourner le JWK tel quel
+                return json.dumps(jwk)
+
         raise LTILoginError("Clé de signature introuvable dans le JWKS de la plateforme.")
 
     async def validate_launch(self, id_token: str, state: str) -> LTISession:
@@ -468,6 +495,9 @@ class LTIService:
                 issuer=platform.issuer,
             )
         except PyJWTError as exc:
+            print(f"DEBUG: Erreur JWT - audience attendue: {audience}")
+            print(f"DEBUG: Erreur JWT - issuer attendu: {platform.issuer}")
+            print(f"DEBUG: Erreur JWT - erreur: {exc}")
             raise LTILoginError("id_token rejeté par la vérification cryptographique.") from exc
 
         nonce = claims.get("nonce")
@@ -530,7 +560,7 @@ class LTIService:
             "scope": " ".join(scopes),
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             response = await client.post(str(platform.token_endpoint), data=form_data)
             if response.status_code >= 400:
                 raise LTIAuthorizationError(
@@ -578,7 +608,7 @@ class LTIService:
             "timestamp": (timestamp or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             response = await client.post(lineitem.rstrip("/") + "/scores", json=score_payload, headers=headers)
             if response.status_code >= 400:
                 raise LTIScoreError(
