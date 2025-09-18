@@ -57,7 +57,7 @@ Le backend agit aussi comme outil LTI 1.3 (voir `LTI-SETUP.md` pour la procédur
 
 L’intégration est compatible avec les flux LTI Advantage standards et expose aussi un workflow **LTI Deep Linking 2.0** (cf. [spécification IMS](https://www.imsglobal.org/spec/lti-dl/v2p0/)). Une requête `LtiDeepLinkingRequest` ouvre un sélecteur natif listant les parcours FormationIA ; l’outil renvoie un `LtiDeepLinkingResponse` contenant autant de `ltiResourceLink` que d’activités choisies, chacune avec un item de note (`scoreMaximum = 1`).
 
-Les clés publiques/privées sont chargées depuis l’environnement (`LTI_PRIVATE_KEY_PATH`, `LTI_PUBLIC_KEY_PATH`) ou des variables inline, et les plateformes autorisées sont listées dans `backend/app/lti-platforms.json` (ou via `LTI_PLATFORM_CONFIG_PATH`).
+Les clés publiques/privées sont chargées depuis l’environnement (`LTI_PRIVATE_KEY_PATH`, `LTI_PUBLIC_KEY_PATH`) ou des variables inline. Les plateformes LTI peuvent être découvertes dynamiquement à partir des requêtes Moodle : si aucun JSON n’est fourni, le backend dérive automatiquement les endpoints (`/mod/lti/*`) depuis l’`issuer` et enregistre les `deployment_id` rencontrés. Vous pouvez toutefois fournir une configuration statique via `LTI_PLATFORM_CONFIG_PATH` pour figer ces métadonnées.
 
 ### Persistance des progrès
 
@@ -98,7 +98,7 @@ Pour un déploiement durable, ajustez les points suivants :
 - **Clés LTI** : générez-les via `./scripts/generate-lti-keys.sh`, montez-les en lecture seule dans le container backend (`./lti-keys:/app/lti-keys:ro`) et exposez les chemins via
   - `LTI_PRIVATE_KEY_PATH=/app/lti-keys/lti-private.pem`
   - `LTI_PUBLIC_KEY_PATH=/app/lti-keys/lti-public.pem`
-- **Metadata plateforme** : mettez à jour `backend/app/lti-platforms.json` ou fournissez `LTI_PLATFORM_CONFIG_PATH` pour pointer vers un JSON monté en volume.
+- **Metadata plateforme** : optionnel, fournissez `LTI_PLATFORM_CONFIG_PATH` pour pointer vers un JSON monté en volume si vous souhaitez verrouiller explicitement les `issuer`/`client_id`/`deployment_id`. En l’absence de fichier, le backend déduit automatiquement la configuration depuis les paramètres reçus pendant le login/launch.
 - **URLs de redirection** : définissez `LTI_LAUNCH_URL` et `LTI_POST_LAUNCH_URL` sur des URLs HTTPS valides (le front doit être servi sur le même domaine pour éviter les blocages cookies).
 - **Cookies** : adaptez `LTI_COOKIE_DOMAIN`, `LTI_COOKIE_SECURE`, `LTI_COOKIE_SAMESITE` ainsi que leurs équivalents pour le suivi de progression (`PROGRESS_COOKIE_*`). En production, on recommandera `*_SECURE=true` et `*_SAMESITE=none` si le LMS est sur un autre domaine.
 - **Persistance des données** : pour ne pas perdre l’historique des activités, mappez le dossier `backend/storage` ou définissez `PROGRESS_STORAGE_PATH` vers un chemin monté (volume Docker ou stockage partagé).

@@ -38,9 +38,11 @@ LTI_SESSION_TTL=14400  # 4 heures
 LTI_STATE_TTL=600      # 10 minutes
 ```
 
-## Étape 3: Configuration des plateformes LTI
+## Étape 3: (Optionnel) Verrouiller les plateformes autorisées
 
-Modifiez le fichier `backend/app/lti-platforms.json` avec les informations de votre Moodle:
+Le backend peut découvrir automatiquement les plateformes LTI à partir des requêtes de login/launch : il déduit les endpoints (`/mod/lti/*`) depuis l'`issuer`, mémorise les `deployment_id` rencontrés et associe chaque `client_id` au vol. Vous n'avez donc plus besoin d'éditer un fichier JSON pour démarrer.
+
+Pour des environnements plus stricts, vous pouvez tout de même fournir un fichier de configuration via la variable `LTI_PLATFORM_CONFIG_PATH`. Le format reste identique à l'ancien `backend/app/lti-platforms.json` :
 
 ```json
 [
@@ -141,7 +143,7 @@ curl -I https://votre-domaine.com/lti/launch
 ### Erreurs courantes
 
 1. **"Plateforme LTI inconnue"**
-   - Vérifiez les valeurs `issuer` et `client_id` dans `lti-platforms.json`
+   - Assurez-vous que Moodle envoie bien `iss` et `client_id` dans la requête de login (dépend de la configuration de l'outil). Si vous utilisez un fichier via `LTI_PLATFORM_CONFIG_PATH`, vérifiez les valeurs déclarées.
 
 2. **"Session LTI expirée"**
    - L'utilisateur doit relancer l'activité depuis Moodle

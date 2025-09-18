@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import secrets
 import time
@@ -31,10 +32,16 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from jwt import PyJWTError
-from pydantic import AnyUrl, BaseModel, ValidationError
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 
 SESSION_COOKIE_NAME = os.getenv("LTI_SESSION_COOKIE_NAME", "formationia_lti_session")
+
+
+logger = logging.getLogger(__name__)
+
+
+_ANY_URL = TypeAdapter(AnyUrl)
 
 
 class LTIConfigurationError(RuntimeError):
@@ -141,6 +148,7 @@ class LoginState:
     message_hint: str | None
     redirect_uri: str
     target_link_uri: str | None
+    deployment_id_hint: str | None
     created_at: datetime
 
 
@@ -189,6 +197,7 @@ class LTIStateStore:
         message_hint: str | None,
         redirect_uri: str,
         target_link_uri: str | None,
+        deployment_id_hint: str | None,
     ) -> tuple[str, str]:
         now = datetime.now(timezone.utc)
         state = secrets.token_urlsafe(32)
@@ -201,6 +210,7 @@ class LTIStateStore:
             message_hint=message_hint,
             redirect_uri=redirect_uri,
             target_link_uri=target_link_uri,
+            deployment_id_hint=deployment_id_hint,
             created_at=now,
         )
         return state, nonce
@@ -316,14 +326,90 @@ class LTIDeepLinkStore:
 class LTIPlatformConfig(BaseModel):
     issuer: str
     client_id: str
-    authorization_endpoint: AnyUrl
-    token_endpoint: AnyUrl
-    jwks_uri: AnyUrl
-    deployment_id: str
+    authorization_endpoint: AnyUrl | None = None
+    token_endpoint: AnyUrl | None = None
+    jwks_uri: AnyUrl | None = None
+    deployment_id: str | None = None
+    deployment_ids: list[str] = Field(default_factory=list)
     audience: str | None = None
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    @property
+    def primary_deployment(self) -> str | None:
+        if self.deployment_id:
+            return self.deployment_id
+        return self.deployment_ids[0] if self.deployment_ids else None
 
     def cache_key(self) -> tuple[str, str]:
         return (self.issuer, self.client_id)
+
+    @property
+    def resolved_deployments(self) -> list[str]:
+        unique = []
+        for value in [self.deployment_id, *self.deployment_ids]:
+            if value and value not in unique:
+                unique.append(value)
+        return unique
+
+    def allows_deployment(self, deployment_id: str | None) -> bool:
+        if not deployment_id:
+            return False
+        return deployment_id in self.resolved_deployments
+
+    def with_deployment(self, deployment_id: str) -> "LTIPlatformConfig":
+        if self.allows_deployment(deployment_id):
+            return self
+        new_ids = [*self.resolved_deployments, deployment_id]
+        return self.model_copy(update={
+            "deployment_id": new_ids[0],
+            "deployment_ids": new_ids,
+        })
+
+    @model_validator(mode="after")
+    def _normalize_deployments(self) -> "LTIPlatformConfig":
+        if not self.authorization_endpoint:
+            self.authorization_endpoint = _ANY_URL.validate_python(
+                self._default_endpoint("/mod/lti/auth.php")
+            )
+        if not self.token_endpoint:
+            self.token_endpoint = _ANY_URL.validate_python(self._default_endpoint("/mod/lti/token.php"))
+        if not self.jwks_uri:
+            self.jwks_uri = _ANY_URL.validate_python(self._default_endpoint("/mod/lti/certs.php"))
+
+        resolved = self.resolved_deployments
+        if resolved:
+            self.deployment_id = resolved[0]
+            self.deployment_ids = resolved
+        return self
+
+    def _default_endpoint(self, suffix: str) -> str:
+        base = self.issuer.rstrip("/")
+        endpoint = f"{base}{suffix}"
+        logger.debug("Endpoint par défaut %s généré pour %s", endpoint, self.issuer)
+        return endpoint
+
+    @classmethod
+    def auto_configured(
+        cls,
+        *,
+        issuer: str,
+        client_id: str,
+        deployment_id: str | None = None,
+        audience: str | None = None,
+    ) -> "LTIPlatformConfig":
+        deployments = [deployment_id] if deployment_id else []
+        return cls(
+            issuer=issuer,
+            client_id=client_id,
+            authorization_endpoint=None,
+            token_endpoint=None,
+            jwks_uri=None,
+            deployment_id=deployment_id,
+            deployment_ids=deployments,
+            audience=audience,
+        )
+
 
 
 def _load_platform_configurations() -> dict[tuple[str, str], LTIPlatformConfig]:
@@ -420,17 +506,41 @@ class LTIService:
             ]
         }
 
-    def get_platform(self, issuer: str, client_id: str | None) -> LTIPlatformConfig:
+    def get_platform(
+        self,
+        issuer: str,
+        client_id: str | None,
+        *,
+        allow_autodiscovery: bool = False,
+        deployment_hint: str | None = None,
+    ) -> LTIPlatformConfig:
         if not issuer:
             raise LTILoginError("Paramètre 'iss' manquant dans la requête LTI.")
         if not client_id:
             raise LTILoginError("Paramètre 'client_id' manquant dans la requête LTI.")
         key = (issuer, client_id)
         config = self._platforms.get(key)
+        if not config and allow_autodiscovery:
+            config = LTIPlatformConfig.auto_configured(
+                issuer=issuer,
+                client_id=client_id,
+                deployment_id=deployment_hint,
+            )
+            self._platforms[key] = config
+            logger.info(
+                "Création automatique d'une configuration LTI pour %s (client_id=%s)",
+                issuer,
+                client_id,
+            )
         if not config:
             raise LTILoginError(
                 "Plateforme LTI inconnue. Vérifie issuer/client_id dans la configuration." 
             )
+        if deployment_hint:
+            updated = config.with_deployment(deployment_hint)
+            if updated is not config:
+                self._platforms[key] = updated
+                config = updated
         return config
 
     def build_login_redirect(
@@ -441,8 +551,14 @@ class LTIService:
         login_hint: str | None,
         message_hint: str | None,
         target_link_uri: str | None,
+        deployment_hint: str | None,
     ) -> tuple[str, str]:
-        platform = self.get_platform(issuer, client_id)
+        platform = self.get_platform(
+            issuer,
+            client_id,
+            allow_autodiscovery=True,
+            deployment_hint=deployment_hint,
+        )
         redirect_uri = os.getenv("LTI_LAUNCH_URL") or target_link_uri or os.getenv("LTI_DEFAULT_REDIRECT_URI", "")
         if not redirect_uri:
             raise LTILoginError(
@@ -455,6 +571,7 @@ class LTIService:
             message_hint=message_hint,
             redirect_uri=redirect_uri,
             target_link_uri=target_link_uri,
+            deployment_id_hint=deployment_hint,
         )
         params = {
             "response_type": "id_token",
@@ -530,7 +647,12 @@ class LTIService:
         if not login_state:
             raise LTILoginError("state expiré ou inconnu. Relance l'authentification LTI.")
 
-        platform = self.get_platform(login_state.issuer, login_state.client_id)
+        platform = self.get_platform(
+            login_state.issuer,
+            login_state.client_id,
+            allow_autodiscovery=True,
+            deployment_hint=login_state.deployment_id_hint,
+        )
 
         try:
             header = jwt.get_unverified_header(id_token)
@@ -571,8 +693,18 @@ class LTIService:
         if message_type != "LtiResourceLinkRequest":
             raise LTILoginError("Type de message LTI non supporté par cet outil.")
         deployment_id = claims.get("https://purl.imsglobal.org/spec/lti/claim/deployment_id")
-        if deployment_id != platform.deployment_id:
-            raise LTILoginError("deployment_id inconnu pour cette plateforme.")
+        if not platform.allows_deployment(deployment_id):
+            if deployment_id:
+                logger.info(
+                    "Découverte d'un nouveau deployment_id %s pour %s (message launch)",
+                    deployment_id,
+                    platform.issuer,
+                )
+                updated = platform.with_deployment(deployment_id)
+                self._platforms[platform.cache_key()] = updated
+                platform = updated
+            else:
+                raise LTILoginError("deployment_id inconnu pour cette plateforme.")
 
         subject = str(claims.get("sub"))
         roles = claims.get("https://purl.imsglobal.org/spec/lti/claim/roles") or []
@@ -592,7 +724,7 @@ class LTIService:
         session = self.session_store.create(
             issuer=platform.issuer,
             client_id=platform.client_id,
-            deployment_id=deployment_id,
+            deployment_id=deployment_id or platform.deployment_id,
             subject=subject,
             name=name,
             email=email,
@@ -616,8 +748,18 @@ class LTIService:
         if not return_url:
             raise LTILoginError("deep_link_return_url manquant dans la requête de deep linking.")
         deployment_id = claims.get("https://purl.imsglobal.org/spec/lti/claim/deployment_id")
-        if deployment_id != platform.deployment_id:
-            raise LTILoginError("deployment_id inconnu pour cette plateforme.")
+        if not platform.allows_deployment(deployment_id):
+            if deployment_id:
+                logger.info(
+                    "Découverte d'un nouveau deployment_id %s pour %s (deep linking)",
+                    deployment_id,
+                    platform.issuer,
+                )
+                updated = platform.with_deployment(deployment_id)
+                self._platforms[platform.cache_key()] = updated
+                platform = updated
+            else:
+                raise LTILoginError("deployment_id inconnu pour cette plateforme.")
         accept_multiple = bool(settings.get("accept_multiple", False))
         data = settings.get("data") if isinstance(settings.get("data"), str) else None
         context = self.deep_link_store.create(
@@ -720,7 +862,11 @@ class LTIService:
         if score_scope not in scopes:
             raise LTIScoreError("La plateforme n'a pas accordé le scope score pour cette ressource.")
 
-        platform = self.get_platform(session.issuer, session.client_id)
+        platform = self.get_platform(
+            session.issuer,
+            session.client_id,
+            allow_autodiscovery=True,
+        )
         token_response = await self.obtain_access_token(platform, scopes)
         access_token = token_response.get("access_token")
         if not access_token:

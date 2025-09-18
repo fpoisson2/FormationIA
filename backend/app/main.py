@@ -1176,6 +1176,7 @@ async def lti_initiate_login(
             login_hint=login_hint,
             message_hint=lti_message_hint,
             target_link_uri=target_link_uri,
+            deployment_hint=lti_deployment_id,
         )
         return RedirectResponse(url=redirect_url, status_code=302)
     except LTILoginError as exc:
