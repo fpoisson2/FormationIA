@@ -127,7 +127,7 @@ function StepTwo({
           </div>
           <button
             type="button"
-            onClick={() => navigate("/etape-1")}
+            onClick={() => navigate("/atelier/etape-1")}
             className="cta-button cta-button--light"
           >
             Revenir à l’étape 1
@@ -259,7 +259,7 @@ function StepTwo({
       <div className="flex justify-end animate-section">
         <button
           type="button"
-          onClick={() => navigate("/etape-3")}
+          onClick={() => navigate("/atelier/etape-3")}
           className="cta-button cta-button--light disabled:cursor-not-allowed disabled:bg-slate-300"
           disabled={!summaryA.trim() || !summaryB.trim()}
         >

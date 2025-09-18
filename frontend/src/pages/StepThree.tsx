@@ -120,7 +120,6 @@ function StepThree({
         body: JSON.stringify({
           text: `Texte source :\n${sourceText}\n\nProfil rapide :\n${summaryA}\n\nProfil expert :\n${summaryB}\n\nÉcris une synthèse finale en français en trois parties : 1) points communs, 2) différences notables, 3) recommandations pédagogiques.`,
           model: "gpt-5-mini",
-          verbosity: "medium",
           thinking: "minimal",
         }),
       });
@@ -162,7 +161,7 @@ function StepThree({
           </div>
           <button
             type="button"
-            onClick={() => navigate("/etape-2")}
+            onClick={() => navigate("/atelier/etape-2")}
             className="cta-button cta-button--light"
           >
             Revenir à l’étape 2

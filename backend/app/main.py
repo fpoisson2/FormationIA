@@ -1,26 +1,325 @@
 import json
 import os
-from typing import Dict, Generator, Literal, Sequence
+from collections import deque
+from typing import Any, Generator, Literal, Sequence
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from openai import OpenAI as ResponsesClient
-from pydantic import BaseModel, Field
-
-# Mapping helpers to apply user-selected styles to the prompt
-VERBOSITY_DIRECTIVES: Dict[str, str] = {
-    "low": "Priorise un résumé succinct en deux ou trois phrases.",
-    "medium": "Fournis un résumé équilibré couvrant les idées majeures.",
-    "high": "Déploie un résumé détaillé avec exemples et nuances explicites.",
-}
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 SUPPORTED_MODELS = (
     "gpt-5",
     "gpt-5-mini",
     "gpt-5-nano",
 )
+
+GRID_SIZE = 10
+MAX_PLAN_ACTIONS = 30
+MAX_STEPS_PER_ACTION = 20
+
+PLAN_SYSTEM_PROMPT = (
+    "Tu convertis des instructions naturelles en plan d'actions discret sur une grille 10×10. "
+    "Origine (0,0) en haut-gauche. Directions autorisées : left, right, up, down. "
+    "Si l'instruction est ambiguë, fais une hypothèse prudente et note-la dans 'notes'. "
+    "Ne dépasse pas 30 actions."
+)
+
+
+class Coordinate(BaseModel):
+    x: int = Field(..., ge=0, le=GRID_SIZE - 1)
+    y: int = Field(..., ge=0, le=GRID_SIZE - 1)
+
+
+class PlanRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    start: Coordinate
+    goal: Coordinate
+    blocked: list[tuple[int, int]] = Field(default_factory=list)
+    instruction: str = Field(..., min_length=3, max_length=500)
+    run_id: str = Field(
+        ..., alias="runId", min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_blocked(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        blocked = data.get("blocked", [])
+        normalized: list[tuple[int, int]] = []
+        if isinstance(blocked, Sequence):
+            for item in blocked:
+                x: Any
+                y: Any
+                if isinstance(item, dict):
+                    x = item.get("x")
+                    y = item.get("y")
+                elif isinstance(item, Sequence) and len(item) >= 2:
+                    x = item[0]
+                    y = item[1]
+                else:
+                    continue
+                try:
+                    xi = int(x)
+                    yi = int(y)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= xi < GRID_SIZE and 0 <= yi < GRID_SIZE:
+                    normalized.append((xi, yi))
+        data["blocked"] = normalized
+        instruction = data.get("instruction")
+        if isinstance(instruction, str):
+            data["instruction"] = instruction.strip()
+        return data
+
+
+class PlanAction(BaseModel):
+    dir: Literal["left", "right", "up", "down"]
+    steps: int = Field(..., ge=1, le=MAX_STEPS_PER_ACTION)
+
+
+class PlanModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    plan: list[PlanAction]
+    notes: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def _trim_notes(self) -> "PlanModel":
+        if self.notes is not None:
+            trimmed = self.notes.strip()
+            self.notes = trimmed[:80] if len(trimmed) > 80 else trimmed
+        return self
+
+
+class PlanGenerationError(Exception):
+    """Raised when the plan model output cannot be parsed or validated."""
+
+
+_RUN_ATTEMPTS: dict[str, int] = {}
+
+
+def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, str]]:
+    instruction_repr = payload.instruction.strip()
+    constraint_section = (
+        "CONTRAINTES:\n"
+        "- Réponds en JSON strict: {\"plan\":[{\"dir\":\"left|right|up|down\",\"steps\":int}], \"notes\":\"...\"}\n"
+        "- Plan complet vers la cible, ≤ 30 actions, steps ∈ [1..20].\n"
+        "- Ajoute 'notes' uniquement pour mentionner une hypothèse (≤80 caractères)."
+    )
+    user_payload = f"{constraint_section}\n\nINSTRUCTION:\n{instruction_repr}"
+
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+        {"role": "user", "content": user_payload},
+    ]
+
+    if attempt > 0:
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Rappel: ta réponse doit être strictement le JSON demandé, "
+                    "sans texte supplémentaire."
+                ),
+            }
+        )
+
+    return messages
+
+
+def _extract_plan_from_response(response: Any) -> PlanModel | None:
+    if response is None:
+        return None
+
+    direct_parsed = getattr(response, "parsed", None)
+    if direct_parsed:
+        try:
+            if isinstance(direct_parsed, PlanModel):
+                return direct_parsed
+            if isinstance(direct_parsed, dict):
+                return PlanModel.model_validate(direct_parsed)
+        except ValidationError:
+            return None
+
+    output_items = getattr(response, "output", None)
+    if output_items is None and isinstance(response, dict):
+        output_items = response.get("output")
+    if not output_items:
+        return None
+
+    for item in output_items:
+        content = getattr(item, "content", None)
+        if content is None and isinstance(item, dict):
+            content = item.get("content")
+        if not content:
+            continue
+        for part in content:
+            parsed = getattr(part, "parsed", None)
+            if parsed:
+                try:
+                    if isinstance(parsed, PlanModel):
+                        return parsed
+                    if isinstance(parsed, dict):
+                        return PlanModel.model_validate(parsed)
+                except ValidationError:
+                    continue
+            if isinstance(part, dict) and "parsed" in part:
+                try:
+                    return PlanModel.model_validate(part["parsed"])
+                except ValidationError:
+                    continue
+            text = getattr(part, "text", None)
+            if text is None and isinstance(part, dict):
+                text = part.get("text")
+            if not text:
+                continue
+            try:
+                as_dict = json.loads(text)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            try:
+                return PlanModel.model_validate(as_dict)
+            except ValidationError:
+                continue
+    return None
+
+
+def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> PlanModel:
+    last_error: PlanGenerationError | None = None
+    for attempt in range(2):
+        messages = _build_plan_messages(payload, attempt)
+        try:
+            with client.responses.stream(
+                model="gpt-5-nano",
+                input=messages,
+                text_format=PlanModel,
+                text={"verbosity": "low"},
+                reasoning={"effort": "minimal", "summary": "auto"},
+                timeout=8,
+            ) as stream:
+                for event in stream:
+                    if event.type == "response.error":
+                        error_message = "Erreur du modèle de planification"
+                        details = getattr(event, "error", None)
+                        if isinstance(details, dict):
+                            error_message = details.get("message", error_message)
+                        raise PlanGenerationError(error_message)
+                final_response = stream.get_final_response()
+        except PlanGenerationError as exc:
+            last_error = exc
+            continue
+        except Exception as exc:  # pragma: no cover - communication failure
+            last_error = PlanGenerationError(str(exc))
+            continue
+
+        plan_payload = _extract_plan_from_response(final_response)
+        if plan_payload is None:
+            last_error = PlanGenerationError("Sortie JSON manquante ou invalide")
+            continue
+        if not plan_payload.plan:
+            last_error = PlanGenerationError("Le plan renvoyé est vide")
+            continue
+        if len(plan_payload.plan) > MAX_PLAN_ACTIONS:
+            last_error = PlanGenerationError("Le plan dépasse la limite de 30 actions")
+            continue
+        return plan_payload
+
+    raise last_error or PlanGenerationError("Impossible de générer un plan valide")
+
+
+DIRECTION_VECTORS = {
+    "up": (0, -1),
+    "down": (0, 1),
+    "left": (-1, 0),
+    "right": (1, 0),
+}
+
+
+def _simulate_plan(
+    payload: PlanRequest, plan: Sequence[PlanAction]
+) -> dict[str, Any]:
+    x, y = payload.start.x, payload.start.y
+    blocked_cells = set(payload.blocked)
+    steps_output: list[dict[str, int | str]] = []
+    failure_reason: str | None = None
+    failure_payload: dict[str, Any] | None = None
+
+    for action in plan:
+        dx, dy = DIRECTION_VECTORS[action.dir]
+        step_count = min(action.steps, MAX_STEPS_PER_ACTION)
+        for _ in range(step_count):
+            nx = max(0, min(GRID_SIZE - 1, x + dx))
+            ny = max(0, min(GRID_SIZE - 1, y + dy))
+            x, y = nx, ny
+            step_index = len(steps_output)
+            steps_output.append({"x": x, "y": y, "dir": action.dir, "i": step_index})
+            if (x, y) in blocked_cells:
+                failure_reason = "obstacle"
+                failure_payload = {"x": x, "y": y}
+                break
+        if failure_reason:
+            break
+
+    success = (x, y) == (payload.goal.x, payload.goal.y) and failure_reason is None
+    if not success and failure_reason is None:
+        failure_reason = "goal_not_reached"
+
+    return {
+        "steps": steps_output,
+        "final_position": {"x": x, "y": y},
+        "success": success,
+        "failure_reason": failure_reason,
+        "failure_payload": failure_payload,
+    }
+
+
+def _compute_optimal_path_length(
+    start: Coordinate, goal: Coordinate, blocked: Sequence[tuple[int, int]]
+) -> int | None:
+    start_pos = (start.x, start.y)
+    goal_pos = (goal.x, goal.y)
+    if start_pos == goal_pos:
+        return 0
+
+    blocked_set = set(blocked)
+    queue: deque[tuple[tuple[int, int], int]] = deque()
+    queue.append((start_pos, 0))
+    visited = {start_pos}
+
+    while queue:
+        (x, y), distance = queue.popleft()
+        for dx, dy in DIRECTION_VECTORS.values():
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE):
+                continue
+            if (nx, ny) in blocked_set or (nx, ny) in visited:
+                continue
+            next_distance = distance + 1
+            if (nx, ny) == goal_pos:
+                return next_distance
+            visited.add((nx, ny))
+            queue.append(((nx, ny), next_distance))
+
+    return None
+
+
+def _sse_event(event: str, data: Any | None = None) -> str:
+    payload = "null" if data is None else json.dumps(data, ensure_ascii=True)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _sse_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
 
 
 def _extract_text_from_response(response) -> str:
@@ -144,11 +443,9 @@ def _ensure_client() -> ResponsesClient:
 
 
 def _build_summary_prompt(payload: SummaryRequest) -> str:
-    verbosity_instruction = VERBOSITY_DIRECTIVES[payload.verbosity]
     return (
         "Tu es un assistant pédagogique qui crée des synthèses fiables pour des étudiantes et étudiants du cégep. "
         "Identifie les messages clés puis livre un résumé cohérent en français.\n"
-        f"{verbosity_instruction}\n"
         "Texte à résumer :\n"
         f"{payload.text.strip()}"
     )
@@ -215,7 +512,6 @@ def _handle_flashcards(payload: FlashcardRequest) -> JSONResponse:
     prompt = (
         "Tu es un tuteur qui crée des cartes d'étude. Génère des paires question/réponse en français.\n"
         f"Crée exactement {payload.card_count} cartes. Pour chaque carte, propose une question précise suivie d'une réponse concise.\n"
-        f"Niveau de détail: {VERBOSITY_DIRECTIVES[payload.verbosity]}\n"
         "Format de sortie JSON strict: [{\"question\": \"...\", \"reponse\": \"...\"}]\n"
         "Texte source:\n"
         f"{payload.text.strip()}"
@@ -269,3 +565,66 @@ def generate_flashcards(payload: FlashcardRequest, _: None = Depends(_require_ap
 @app.post("/flashcards")
 def generate_flashcards_legacy(payload: FlashcardRequest, _: None = Depends(_require_api_key)) -> JSONResponse:
     return _handle_flashcards(payload)
+
+
+def _handle_plan(payload: PlanRequest) -> StreamingResponse:
+    client = _ensure_client()
+    try:
+        plan_payload = _request_plan_from_llm(client, payload)
+    except PlanGenerationError as exc:
+        def error_stream() -> Generator[str, None, None]:
+            yield _sse_event("error", {"message": str(exc)})
+
+        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=_sse_headers())
+
+    attempts = _RUN_ATTEMPTS.get(payload.run_id, 0) + 1
+    _RUN_ATTEMPTS[payload.run_id] = attempts
+
+    simulation = _simulate_plan(payload, plan_payload.plan)
+    optimal_length = _compute_optimal_path_length(payload.start, payload.goal, payload.blocked)
+    steps_executed = len(simulation["steps"])
+    surcout = None
+    if optimal_length is not None:
+        surcout = steps_executed - optimal_length
+
+    stats_payload: dict[str, Any] = {
+        "runId": payload.run_id,
+        "attempts": attempts,
+        "stepsExecuted": steps_executed,
+        "optimalPathLength": optimal_length,
+        "surcout": surcout,
+        "success": simulation["success"],
+        "finalPosition": simulation["final_position"],
+    }
+    if plan_payload.notes:
+        stats_payload["ambiguity"] = plan_payload.notes
+
+    def plan_stream() -> Generator[str, None, None]:
+        plan_dump = plan_payload.model_dump(exclude_none=True)
+        plan_dump["plan"] = [action.model_dump() for action in plan_payload.plan]
+        yield _sse_event("plan", plan_dump)
+        for step in simulation["steps"]:
+            yield _sse_event("step", step)
+        if simulation["success"]:
+            yield _sse_event("done", simulation["final_position"])
+        else:
+            failure_payload = {
+                "reason": simulation["failure_reason"],
+                "position": simulation["final_position"],
+            }
+            if simulation["failure_payload"]:
+                failure_payload["details"] = simulation["failure_payload"]
+            yield _sse_event("blocked", failure_payload)
+        yield _sse_event("stats", stats_payload)
+
+    return StreamingResponse(plan_stream(), media_type="text/event-stream", headers=_sse_headers())
+
+
+@app.post("/api/plan")
+def generate_plan(payload: PlanRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
+    return _handle_plan(payload)
+
+
+@app.post("/plan")
+def generate_plan_legacy(payload: PlanRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
+    return _handle_plan(payload)

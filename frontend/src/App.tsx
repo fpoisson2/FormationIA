@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 
-import Layout from "./components/Layout";
-import StepOne from "./pages/StepOne";
-import StepTwo from "./pages/StepTwo";
-import StepThree from "./pages/StepThree";
+import ActivitySelector from "./pages/ActivitySelector";
+import PromptDojo from "./pages/PromptDojo";
+import ClarityPath from "./pages/ClarityPath";
+import WorkshopRoutes from "./pages/WorkshopRoutes";
 import type { ModelConfig } from "./config";
 import { MODEL_OPTIONS } from "./config";
 
@@ -28,15 +28,6 @@ const DEFAULT_CONFIG_B: ModelConfig = {
 };
 
 function App(): JSX.Element {
-  const location = useLocation();
-
-  const stepIndex = useMemo(() => {
-    if (location.pathname.startsWith("/etape-1")) return 1;
-    if (location.pathname.startsWith("/etape-2")) return 2;
-    if (location.pathname.startsWith("/etape-3")) return 3;
-    return 1;
-  }, [location.pathname]);
-
   const [sourceText, setSourceText] = useState(DEFAULT_TEXT);
   const [configA, setConfigA] = useState<ModelConfig>(DEFAULT_CONFIG_A);
   const [configB, setConfigB] = useState<ModelConfig>(DEFAULT_CONFIG_B);
@@ -46,56 +37,34 @@ function App(): JSX.Element {
   const [flashcardsB, setFlashcardsB] = useState<Flashcard[]>([]);
 
   return (
-    <Layout currentStep={stepIndex}>
-      <Routes>
-        <Route
-          path="/"
-          element={<Navigate to="/etape-1" replace />}
-        />
-        <Route
-          path="/etape-1"
-          element={
-            <StepOne
-              sourceText={sourceText}
-              onSourceTextChange={setSourceText}
-            />
-          }
-        />
-        <Route
-          path="/etape-2"
-          element={
-            <StepTwo
-              sourceText={sourceText}
-              configA={configA}
-              configB={configB}
-              setConfigA={setConfigA}
-              setConfigB={setConfigB}
-              summaryA={summaryA}
-              summaryB={summaryB}
-              setSummaryA={setSummaryA}
-              setSummaryB={setSummaryB}
-            />
-          }
-        />
-        <Route
-          path="/etape-3"
-          element={
-            <StepThree
-              sourceText={sourceText}
-              summaryA={summaryA}
-              summaryB={summaryB}
-              flashcardsA={flashcardsA}
-              flashcardsB={flashcardsB}
-              setFlashcardsA={setFlashcardsA}
-              setFlashcardsB={setFlashcardsB}
-              configA={configA}
-              configB={configB}
-            />
-          }
-        />
-        <Route path="*" element={<Navigate to="/etape-1" replace />} />
-      </Routes>
-    </Layout>
+    <Routes>
+      <Route path="/" element={<Navigate to="/activites" replace />} />
+      <Route path="/activites" element={<ActivitySelector />} />
+      <Route path="/prompt-dojo" element={<PromptDojo />} />
+      <Route path="/parcours-clarte" element={<ClarityPath />} />
+      <Route
+        path="/atelier/*"
+        element={
+          <WorkshopRoutes
+            sourceText={sourceText}
+            setSourceText={setSourceText}
+            configA={configA}
+            configB={configB}
+            setConfigA={setConfigA}
+            setConfigB={setConfigB}
+            summaryA={summaryA}
+            summaryB={summaryB}
+            setSummaryA={setSummaryA}
+            setSummaryB={setSummaryB}
+            flashcardsA={flashcardsA}
+            flashcardsB={flashcardsB}
+            setFlashcardsA={setFlashcardsA}
+            setFlashcardsB={setFlashcardsB}
+          />
+        }
+      />
+      <Route path="*" element={<Navigate to="/activites" replace />} />
+    </Routes>
   );
 }
 

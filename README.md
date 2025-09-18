@@ -37,10 +37,11 @@ docker-compose up --build
 - Backend  (FastAPI + client Responses) : http://localhost:8000
 - L’écran de connexion utilise les variables `VITE_LOGIN_USERNAME` / `VITE_LOGIN_PASSWORD` (défaut : `test` / `Telecom2025$`).
 
-Le backend ouvre deux routes principales :
+Le backend expose désormais trois agents principaux :
 
 - `POST /api/summary` — Résumé envoyé en flux continu (texte brut) avec contrôle du modèle GPT-5, de la verbosité (`low`/`medium`/`high`) et de l’effort de raisonnement (`minimal`/`medium`/`high`).
 - `POST /api/flashcards` — Génération de cartes d’étude (JSON) en réutilisant les mêmes paramètres.
+- `POST /api/plan` — Conversion d’une consigne naturelle en plan JSON structuré (≤30 actions) pour piloter le « Parcours de la clarté ». La réponse est streamée en SSE (`plan`, `step`, `done|blocked`, `stats`).
 
 Un endpoint `GET /health` permet de vérifier la disponibilité du service et la présence de la clé configurée.
 
@@ -71,8 +72,9 @@ Définissez les mêmes variables d’environnement (`OPENAI_API_KEY`, `VITE_API_
 1. **Étape 1 — Préparer** : contextualisez votre texte et découvrez les bonnes pratiques de cadrage.
 2. **Étape 2 — Explorer** : choisissez le modèle, la verbosité et l’effort de raisonnement pour deux configurations, puis observez les résumés apparaître en flux continu (avec un court résumé du raisonnement fourni automatiquement).
 3. **Étape 3 — Synthétiser** : comparez les deux profils, générez des cartes d’étude si besoin, puis produisez une synthèse finale structurée.
+4. **Parcours de la clarté** : nouvelle activité ludique (React + SSE) où l’étudiant formule une consigne précise pour déplacer un bonhomme sur une grille 10×10. Le backend récupère un plan complet via `gpt-5-nano`, simule la trajectoire puis renvoie les statistiques clés (tentatives, surcoût, temps de résolution, hypothèses du modèle).
 
-Chaque étape intègre des encarts pédagogiques sur l’IA afin de rythmer l’apprentissage et d’ancrer les notions clés.
+Chaque module intègre des encarts pédagogiques pour ancrer les notions clés et illustrer les bonnes pratiques de prompting.
 
 ## Notes
 

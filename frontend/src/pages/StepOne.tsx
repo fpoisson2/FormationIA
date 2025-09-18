@@ -44,7 +44,7 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
             </p>
             <button
               type="button"
-              onClick={() => navigate("/etape-2")}
+            onClick={() => navigate("/atelier/etape-2")}
               className="cta-button cta-button--primary"
             >
               Passer à l’étape 2
