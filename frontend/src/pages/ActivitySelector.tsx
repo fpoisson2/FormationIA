@@ -1,15 +1,17 @@
 import { Link } from "react-router-dom";
 
+import logoPrincipal from "../assets/logo_principal.svg";
+
 const ACTIVITIES = [
   {
     id: "atelier",
     title: "Atelier comparatif IA",
     description:
-      "Parcourez trois étapes guidées pour cadrer une demande, comparer deux profils IA et transformer les sorties en ressources pédagogiques.",
+      "Objectif : cadrer ta demande, comparer deux configurations IA et capitaliser sur les essais.",
     highlights: [
-      "Préparez un contexte détaillé",
-      "Ajustez modèle, verbosité et raisonnement",
-      "Générez cartes d’étude et synthèse finale",
+      "Définir le contexte et les attentes",
+      "Tester modèle, verbosité et raisonnement",
+      "Assembler une synthèse réutilisable",
     ],
     cta: "Lancer l’atelier",
     to: "/atelier/etape-1",
@@ -18,11 +20,11 @@ const ACTIVITIES = [
     id: "prompt-dojo",
     title: "Prompt Dojo — Mission débutant",
     description:
-      "Progressez dans trois missions gamifiées pour apprendre à cadrer une consigne, avec score en direct et feedback IA.",
+      "Objectif : t’entraîner à affiner une consigne en suivant des défis progressifs.",
     highlights: [
-      "Missions à difficulté progressive",
-      "Score en direct, badges et coach IA",
-      "Export du prompt final personnalisé",
+      "Défis à difficulté graduelle",
+      "Retour immédiat sur la qualité du prompt",
+      "Construction d’une version finale personnalisée",
     ],
     cta: "Entrer dans le dojo",
     to: "/prompt-dojo",
@@ -31,14 +33,27 @@ const ACTIVITIES = [
     id: "clarity",
     title: "Parcours de la clarté",
     description:
-      "Formule une instruction limpide pour piloter un bonhomme sur une grille 10×10, du brief initial jusqu’au récapitulatif statistique.",
+      "Objectif : expérimenter la précision des consignes sur un parcours 10×10.",
     highlights: [
-      "Plan structuré généré (gpt-5-nano) avant l’animation",
-      "Visualisation pas à pas, obstacles optionnels",
-      "Tentatives, surcoût et temps de résolution analysés",
+      "Plan d’action IA généré avant l’animation",
+      "Visualisation pas à pas avec obstacles",
+      "Analyse des tentatives et du surcoût",
     ],
     cta: "Tester la clarté",
     to: "/parcours-clarte",
+  },
+  {
+    id: "clarte-dabord",
+    title: "Clarté d’abord !",
+    description:
+      "Objectif : mesurer l’impact d’un brief incomplet et révéler la checklist idéale.",
+    highlights: [
+      "Deux missions thématiques en trois manches",
+      "Champs guidés avec validations pédagogiques",
+      "Révélation finale et export JSON du menu",
+    ],
+    cta: "Lancer Clarté d’abord !",
+    to: "/clarte-dabord",
   },
 ];
 
@@ -46,16 +61,26 @@ function ActivitySelector(): JSX.Element {
   return (
     <div className="landing-gradient min-h-screen px-6 py-16 text-[color:var(--brand-black)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-12">
-        <header className="space-y-4 text-center animate-section">
-          <span className="inline-flex items-center justify-center gap-2 rounded-full bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]">
-            Choisissez votre activité
-          </span>
-          <h1 className="text-3xl font-semibold md:text-4xl">
-            Une plateforme, trois expériences pour apprivoiser l’IA
-          </h1>
-          <p className="mx-auto max-w-3xl text-sm text-[color:var(--brand-charcoal)] md:text-base">
-            Selon vos objectifs, explorez l’atelier comparatif, mesurez vos progrès dans le dojo de prompts ou entraînez-vous à la précision avec le parcours de la clarté. Trois approches, une même identité visuelle et des repères pédagogiques communs.
-          </p>
+        <header className="space-y-6 rounded-3xl border border-white/70 bg-white/90 p-8 shadow-sm backdrop-blur animate-section">
+          <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
+            <Link to="/" className="flex items-center gap-3">
+              <img src={logoPrincipal} alt="Cégep Limoilou" className="h-12 w-auto md:h-14" />
+              <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70">
+                Choisis ton activité
+              </span>
+            </Link>
+            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+              Objectifs pédagogiques
+            </span>
+          </div>
+          <div className="space-y-3 text-center md:text-left">
+            <h1 className="text-3xl font-semibold md:text-4xl">
+              Quelle compétence veux-tu travailler avec l’IA ?
+            </h1>
+            <p className="mx-auto max-w-3xl text-sm text-[color:var(--brand-charcoal)] md:text-base">
+              Chaque activité se concentre sur une intention distincte : cadrer une demande, affiner un prompt, tester une consigne ou vérifier l’exhaustivité d’un brief.
+            </p>
+          </div>
         </header>
 
         <div className="grid gap-6 md:grid-cols-2 animate-section-delayed">

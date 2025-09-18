@@ -1,14 +1,31 @@
+import html
 import json
 import os
+import secrets
 from collections import deque
+from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Generator, Literal, Sequence
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from openai import OpenAI as ResponsesClient
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from .lti import (
+    SESSION_COOKIE_NAME,
+    LTIAuthorizationError,
+    LTIConfigurationError,
+    LTILoginError,
+    LTIScoreError,
+    LTISession,
+    LTIService,
+    get_lti_boot_error,
+    get_lti_service,
+)
 
 SUPPORTED_MODELS = (
     "gpt-5",
@@ -19,6 +36,8 @@ SUPPORTED_MODELS = (
 GRID_SIZE = 10
 MAX_PLAN_ACTIONS = 30
 MAX_STEPS_PER_ACTION = 20
+
+MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 
 PLAN_SYSTEM_PROMPT = (
     "Tu convertis des instructions naturelles en plan d'actions discret sur une grille 10×10. "
@@ -102,6 +121,34 @@ class PlanGenerationError(Exception):
 
 
 _RUN_ATTEMPTS: dict[str, int] = {}
+
+
+@lru_cache(maxsize=1)
+def _load_missions_from_disk() -> list[dict[str, Any]]:
+    if not MISSIONS_PATH.exists():
+        raise HTTPException(status_code=500, detail="Le fichier missions.json est introuvable côté serveur.")
+
+    try:
+        with MISSIONS_PATH.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as exc:  # pragma: no cover - cas de production
+        raise HTTPException(status_code=500, detail="missions.json contient un JSON invalide.") from exc
+
+    if not isinstance(data, list):
+        raise HTTPException(status_code=500, detail="missions.json doit contenir un tableau de missions.")
+
+    return data
+
+
+def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
+    missions = _load_missions_from_disk()
+    for mission in missions:
+        if isinstance(mission, dict) and mission.get("id") == mission_id:
+            return mission
+    raise HTTPException(status_code=404, detail="Mission introuvable.")
+
+
+_RUN_RESPONSES: dict[str, dict[str, dict[int, Any]]] = {}
 
 
 def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, str]]:
@@ -388,9 +435,58 @@ class HealthResponse(BaseModel):
     openai_key_loaded: bool
 
 
+class SubmissionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    mission_id: str = Field(..., alias="missionId", min_length=1, max_length=40)
+    stage_index: int = Field(..., alias="stageIndex", ge=0, le=29)
+    payload: Any
+    run_id: str | None = Field(default=None, alias="runId")
+
+
+class LTIScoreRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    mission_id: str | None = Field(default=None, alias="missionId", min_length=1, max_length=64)
+    stage_index: int | None = Field(default=None, alias="stageIndex", ge=0, le=99)
+    run_id: str | None = Field(default=None, alias="runId", min_length=3, max_length=64)
+    success: bool | None = None
+    score_given: float | None = Field(default=None, alias="scoreGiven", ge=0.0)
+    score_maximum: float | None = Field(default=None, alias="scoreMaximum", gt=0.0)
+    activity_progress: str | None = Field(default=None, alias="activityProgress")
+    grading_progress: str | None = Field(default=None, alias="gradingProgress")
+    timestamp: datetime | None = None
+    metadata: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _defaults(self) -> "LTIScoreRequest":
+        if self.score_maximum is None:
+            self.score_maximum = 1.0
+        if self.score_given is None:
+            self.score_given = self.score_maximum if self.success is not False else 0.0
+        if self.score_given is not None and self.score_maximum is not None:
+            if self.score_given > self.score_maximum:
+                raise ValueError("scoreGiven ne peut pas dépasser scoreMaximum.")
+        if not self.activity_progress:
+            self.activity_progress = "Completed"
+        if not self.grading_progress:
+            self.grading_progress = "FullyGraded"
+        return self
+
+
+class LTIContextResponse(BaseModel):
+    user: dict[str, Any]
+    context: dict[str, Any]
+    ags: dict[str, Any] | None = None
+    expires_at: datetime = Field(alias="expiresAt")
+
+
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
 
-frontend_origin = os.getenv("FRONTEND_ORIGIN", "https://formationia.ve2fpd.com")
+frontend_origin = os.getenv(
+    "FRONTEND_ORIGIN",
+    "https://formationia.ve2fpd.com,http://localhost:5173",
+)
 allow_origins: list[str] = []
 for item in frontend_origin.split(","):
     origin = item.strip()
@@ -403,11 +499,30 @@ for item in frontend_origin.split(","):
         alternate = parsed._replace(netloc=f"{swap_host}:{parsed.port}" if parsed.port else swap_host).geturl()
         allow_origins.append(alternate)
 
+extra_local_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+for extra in extra_local_origins:
+    if extra not in allow_origins:
+        allow_origins.append(extra)
+
 # remove duplicates while preserving order
 seen: set[str] = set()
 allow_origins = [origin for origin in allow_origins if not (origin in seen or seen.add(origin))]
 if not allow_origins:
     allow_origins = ["*"]
+
+_default_frontend_url: str | None = None
+for item in frontend_origin.split(","):
+    candidate = item.strip()
+    if candidate:
+        _default_frontend_url = candidate
+        break
+
+LTI_POST_LAUNCH_URL = os.getenv("LTI_POST_LAUNCH_URL") or _default_frontend_url or "/"
+_LTI_COOKIE_SECURE = os.getenv("LTI_COOKIE_SECURE", "true").lower() not in {"false", "0", "no"}
+_LTI_COOKIE_DOMAIN = os.getenv("LTI_COOKIE_DOMAIN") or None
+_LTI_COOKIE_SAMESITE = os.getenv("LTI_COOKIE_SAMESITE", "none").lower()
+if _LTI_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    _LTI_COOKIE_SAMESITE = "none"
 
 app.add_middleware(
     CORSMiddleware,
@@ -431,9 +546,105 @@ def _require_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Clé API invalide ou manquante.")
 
 
+def _resolve_lti_service() -> LTIService:
+    try:
+        return get_lti_service()
+    except LTIConfigurationError as exc:  # pragma: no cover - configuration missing in tests
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive catch
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _require_lti_session(request: Request) -> LTISession:
+    service = _resolve_lti_service()
+    session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_cookie:
+        raise HTTPException(
+            status_code=401,
+            detail="Session LTI introuvable. Relancez l'activité à partir de Moodle.",
+        )
+    session = service.session_store.get(session_cookie)
+    if session is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Session LTI expirée. Merci de redémarrer l'activité depuis Moodle.",
+        )
+    return session
+
+
+def _render_lti_launch_page(target_url: str) -> str:
+    escaped = html.escape(target_url, quote=True)
+    return (
+        "<!DOCTYPE html>\n"
+        "<html lang=\"fr\">\n"
+        "<head>\n"
+        "  <meta charset=\"utf-8\" />\n"
+        "  <meta http-equiv=\"refresh\" content=\"0;url="
+        + escaped
+        + "\" />\n"
+        "  <title>FormationIA - Redirection</title>\n"
+        "  <script>\n"
+        "    window.addEventListener('DOMContentLoaded', function () {\n"
+        "      window.location.replace('"
+        + escaped
+        + "');\n"
+        "    });\n"
+        "  </script>\n"
+        "</head>\n"
+        "<body style=\"font-family: sans-serif; text-align: center; padding: 3rem;\">\n"
+        "  <p>Redirection vers l'activité en cours…\n"
+        f"    <a href=\"{escaped}\">Poursuivre</a>."\n"
+        "  </p>\n"
+        "</body>\n"
+        "</html>"
+    )
+
+
+def _set_lti_session_cookie(response: Response, session: LTISession, service: LTIService) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session.session_id,
+        httponly=True,
+        secure=_LTI_COOKIE_SECURE,
+        samesite=_LTI_COOKIE_SAMESITE,
+        domain=_LTI_COOKIE_DOMAIN,
+        max_age=service.session_store.ttl_seconds,
+        path="/",
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     return HealthResponse(status="ok", openai_key_loaded=bool(_api_key))
+
+
+@app.get("/api/missions")
+def list_missions(_: None = Depends(_require_api_key)) -> list[dict[str, Any]]:
+    return _load_missions_from_disk()
+
+
+@app.get("/api/missions/{mission_id}")
+def get_mission(mission_id: str, _: None = Depends(_require_api_key)) -> dict[str, Any]:
+    return _get_mission_by_id(mission_id)
+
+
+@app.post("/api/submit")
+def submit_stage(payload: SubmissionRequest, _: None = Depends(_require_api_key)) -> JSONResponse:
+    mission = _get_mission_by_id(payload.mission_id)
+    stages = mission.get("stages") or []
+    if payload.stage_index >= len(stages):
+        raise HTTPException(status_code=400, detail="Indice de manche invalide pour cette mission.")
+
+    run_id = (payload.run_id or "").strip()
+    if run_id and not all(ch.isalnum() or ch in {"-", "_"} for ch in run_id):
+        raise HTTPException(status_code=400, detail="runId doit contenir uniquement lettres, chiffres, tirets ou soulignés.")
+    if not run_id:
+        run_id = secrets.token_hex(8)
+
+    mission_store = _RUN_RESPONSES.setdefault(run_id, {}).setdefault(payload.mission_id, {})
+    mission_store[payload.stage_index] = payload.payload
+
+    return JSONResponse(content={"ok": True, "runId": run_id})
 
 
 def _ensure_client() -> ResponsesClient:

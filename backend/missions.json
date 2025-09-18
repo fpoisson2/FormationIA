@@ -1,0 +1,127 @@
+[
+  {
+    "id": "menu",
+    "title": "Menu étudiant",
+    "ui_help": "Réponses courtes. Utilise les champs guidés.",
+    "stages": [
+      {
+        "prompt": "Fais un menu pour 2 jours avec les aliments suivants : pain, pâtes, tomates, pommes, lait, poulet.",
+        "fields": [
+          {
+            "type": "bulleted_list",
+            "id": "jour1_idées",
+            "label": "Jour 1 — Idées de plats (1–3 puces)",
+            "minBullets": 1,
+            "maxBullets": 3,
+            "maxWordsPerBullet": 6,
+            "mustContainAny": ["pain", "pâtes", "tomates", "pommes", "lait", "poulet"]
+          },
+          {
+            "type": "bulleted_list",
+            "id": "jour2_idées",
+            "label": "Jour 2 — Idées de plats (1–3 puces)",
+            "minBullets": 1,
+            "maxBullets": 3,
+            "maxWordsPerBullet": 6,
+            "mustContainAny": ["pain", "pâtes", "tomates", "pommes", "lait", "poulet"]
+          }
+        ]
+      },
+      {
+        "prompt": "Ah, j’avais oublié… Il faudrait que chaque jour ait 3 repas complets (déjeuner, dîner, souper).",
+        "fields": [
+          {
+            "type": "table_menu_day",
+            "id": "menu_jour1",
+            "label": "Jour 1 — 3 repas (uniquement 'plat')",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          },
+          {
+            "type": "table_menu_day",
+            "id": "menu_jour2",
+            "label": "Jour 2 — 3 repas (uniquement 'plat')",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          }
+        ]
+      },
+      {
+        "prompt": "Et aussi, ajoute une boisson et un dessert à chaque repas.",
+        "fields": [
+          {
+            "type": "table_menu_full",
+            "id": "menu_complet_jour1",
+            "label": "Jour 1 — plat / boisson / dessert",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          },
+          {
+            "type": "table_menu_full",
+            "id": "menu_complet_jour2",
+            "label": "Jour 2 — plat / boisson / dessert",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          }
+        ]
+      }
+    ],
+    "summary_hint": "Tu as dû compléter ton menu parce que la demande n'était pas assez précise au départ.",
+    "revelation": "Ce qui aurait dû être demandé dès le départ :\\n- Crée un menu complet de 2 jours.\\n- Chaque jour doit comporter 3 repas : déjeuner, dîner, souper.\\n- Chaque repas doit inclure un plat, une boisson et un dessert.\\n- Utilise uniquement les aliments listés : pain, pâtes, tomates, pommes, lait, poulet.\\n- Présente le tout en JSON structuré : jour → repas → {plat, boisson, dessert}."
+  },
+  {
+    "id": "resume",
+    "title": "Résumé d’article",
+    "ui_help": "Réponses courtes. Respecte les longueurs.",
+    "stages": [
+      {
+        "prompt": "Résume ce court texte : « Le sommeil est vital pour la mémoire et la concentration. Un manque de sommeil chronique réduit les performances et augmente le stress. »",
+        "fields": [
+          {
+            "type": "textarea_with_counter",
+            "id": "resume_brut",
+            "label": "Résumé (20–60 mots)",
+            "minWords": 20,
+            "maxWords": 60,
+            "forbidWords": ["génial", "horrible", "nul"]
+          }
+        ]
+      },
+      {
+        "prompt": "Oups, j’aurais dû préciser… Ce serait bien que ton résumé fasse environ 40 mots.",
+        "fields": [
+          {
+            "type": "textarea_with_counter",
+            "id": "resume_cible",
+            "label": "Résumé ≈ 40 mots (35–45)",
+            "minWords": 35,
+            "maxWords": 45,
+            "tone": "neutre"
+          }
+        ]
+      },
+      {
+        "prompt": "Et termine ton résumé par 2 idées clés en puces.",
+        "fields": [
+          {
+            "type": "textarea_with_counter",
+            "id": "resume_final",
+            "label": "Résumé final (35–45 mots)",
+            "minWords": 35,
+            "maxWords": 45,
+            "tone": "neutre"
+          },
+          {
+            "type": "two_bullets",
+            "id": "idees_cles",
+            "label": "2 idées clés (puces courtes)",
+            "maxWordsPerBullet": 8
+          },
+          {
+            "type": "reference_line",
+            "id": "reference",
+            "label": "Référence (Auteur, Année)"
+          }
+        ]
+      }
+    ],
+    "summary_hint": "Tu as dû reformater et ajuster la longueur car le format attendu n'était pas clair dès le début.",
+    "revelation": "Ce qui aurait dû être demandé dès le départ :\\n- Écrire un résumé neutre de 40 mots ±5.\\n- Conclure par exactement 2 idées clés en puces.\\n- Terminer par une référence bibliographique (Auteur, Année)."
+  }
+]

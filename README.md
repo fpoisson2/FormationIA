@@ -24,8 +24,8 @@ Cette version transforme le prototype purement client en une application complè
 
 2. Modifiez `.env` si nécessaire :
    - `OPENAI_API_KEY` · clé d’accès au service utilisée par le backend
-   - `FRONTEND_ORIGIN` · origine autorisée pour la couche CORS du backend
-   - `VITE_API_BASE_URL` · URL du backend vue par le navigateur (par défaut `http://localhost:8000`)
+   - `FRONTEND_ORIGIN` · origine autorisée pour la couche CORS du backend (défaut `https://formationia.ve2fpd.com,http://localhost:5173`)
+   - `VITE_API_BASE_URL` · URL du backend vue par le navigateur (par défaut `http://localhost:8001`)
 
 ## Lancer l’environnement Docker
 
@@ -34,7 +34,7 @@ docker-compose up --build
 ```
 
 - Frontend : http://localhost:4173
-- Backend  (FastAPI + client Responses) : http://localhost:8000
+- Backend  (FastAPI + client Responses) : http://localhost:8001
 - L’écran de connexion utilise les variables `VITE_LOGIN_USERNAME` / `VITE_LOGIN_PASSWORD` (défaut : `test` / `Telecom2025$`).
 
 Le backend expose désormais trois agents principaux :
@@ -73,6 +73,7 @@ Définissez les mêmes variables d’environnement (`OPENAI_API_KEY`, `VITE_API_
 2. **Étape 2 — Explorer** : choisissez le modèle, la verbosité et l’effort de raisonnement pour deux configurations, puis observez les résumés apparaître en flux continu (avec un court résumé du raisonnement fourni automatiquement).
 3. **Étape 3 — Synthétiser** : comparez les deux profils, générez des cartes d’étude si besoin, puis produisez une synthèse finale structurée.
 4. **Parcours de la clarté** : nouvelle activité ludique (React + SSE) où l’étudiant formule une consigne précise pour déplacer un bonhomme sur une grille 10×10. Le backend récupère un plan complet via `gpt-5-nano`, simule la trajectoire puis renvoie les statistiques clés (tentatives, surcoût, temps de résolution, hypothèses du modèle).
+5. **Clarté d’abord !** : jeu auto-portant en trois manches pour deux missions (menu étudiant, résumé d’article). Des champs guidés et validés côté frontend aident à constater l’impact d’un brief incomplet avant la révélation finale (checklist et export JSON pour la mission menu).
 
 Chaque module intègre des encarts pédagogiques pour ancrer les notions clés et illustrer les bonnes pratiques de prompting.
 

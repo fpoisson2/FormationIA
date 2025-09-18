@@ -153,7 +153,7 @@ function StepThree({
       <section className="page-section landing-panel bg-white/95 space-y-6 animate-section">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="space-y-3">
-            <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 3</span>
+            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">Étape 3</span>
             <h2 className="text-2xl text-[color:var(--brand-black)]">Comparer, capitaliser, transmettre</h2>
             <p className="text-sm text-[color:var(--brand-charcoal)]">
               Analysez les formulations produites par chaque profil IA et relevez ce qui change (niveau de détail, ton, structure). Notez ces observations pendant qu’elles sont fraîches : elles guideront vos choix ultérieurs.

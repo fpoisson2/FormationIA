@@ -14,7 +14,7 @@ const sanitizedEnvBase = (() => {
 })();
 const isLocalHost =
   typeof window !== "undefined" && window.location.origin.startsWith("http://localhost");
-const fallbackApiBase = isLocalHost ? "http://localhost:8000/api" : "/api";
+const fallbackApiBase = isLocalHost ? "http://localhost:8001/api" : "/api";
 
 export const API_BASE_URL = sanitizedEnvBase ?? fallbackApiBase;
 export const API_AUTH_KEY = import.meta.env.VITE_API_AUTH_KEY ?? "";

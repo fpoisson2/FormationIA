@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import ActivitySelector from "./pages/ActivitySelector";
 import PromptDojo from "./pages/PromptDojo";
 import ClarityPath from "./pages/ClarityPath";
+import ClarteDabord from "./pages/ClarteDabord";
 import WorkshopRoutes from "./pages/WorkshopRoutes";
 import type { ModelConfig } from "./config";
 import { MODEL_OPTIONS } from "./config";
@@ -42,6 +43,7 @@ function App(): JSX.Element {
       <Route path="/activites" element={<ActivitySelector />} />
       <Route path="/prompt-dojo" element={<PromptDojo />} />
       <Route path="/parcours-clarte" element={<ClarityPath />} />
+      <Route path="/clarte-dabord" element={<ClarteDabord />} />
       <Route
         path="/atelier/*"
         element={

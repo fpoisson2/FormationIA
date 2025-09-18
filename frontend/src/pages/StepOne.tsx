@@ -20,7 +20,7 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
       <section className="page-section landing-panel grid gap-10 bg-white/95 animate-section md:grid-cols-[2fr_1fr]">
         <div className="flex flex-col gap-4 animate-section-delayed">
           <div className="space-y-3">
-            <span className="brand-chip bg-[color:var(--brand-red)] text-white/95">Étape 1</span>
+            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">Étape 1</span>
             <h2 className="text-2xl leading-tight text-[color:var(--brand-black)]">
               Préparez un contexte clair pour guider l’IA
             </h2>
