@@ -26,6 +26,8 @@ from .lti import (
     get_lti_boot_error,
     get_lti_service,
 )
+from .lti import DeepLinkContext
+from .progress_store import ActivityRecord, get_progress_store
 
 SUPPORTED_MODELS = (
     "gpt-5",
@@ -146,9 +148,6 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
         if isinstance(mission, dict) and mission.get("id") == mission_id:
             return mission
     raise HTTPException(status_code=404, detail="Mission introuvable.")
-
-
-_RUN_RESPONSES: dict[str, dict[str, dict[int, Any]]] = {}
 
 
 def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, str]]:
@@ -444,6 +443,13 @@ class SubmissionRequest(BaseModel):
     run_id: str | None = Field(default=None, alias="runId")
 
 
+class ActivityProgressRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    activity_id: str = Field(..., alias="activityId", min_length=1, max_length=64)
+    completed: bool = Field(default=True)
+
+
 class LTIScoreRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
@@ -518,11 +524,52 @@ for item in frontend_origin.split(","):
         break
 
 LTI_POST_LAUNCH_URL = os.getenv("LTI_POST_LAUNCH_URL") or _default_frontend_url or "/"
+LTI_LAUNCH_URL = os.getenv("LTI_LAUNCH_URL")
 _LTI_COOKIE_SECURE = os.getenv("LTI_COOKIE_SECURE", "true").lower() not in {"false", "0", "no"}
 _LTI_COOKIE_DOMAIN = os.getenv("LTI_COOKIE_DOMAIN") or None
 _LTI_COOKIE_SAMESITE = os.getenv("LTI_COOKIE_SAMESITE", "none").lower()
 if _LTI_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     _LTI_COOKIE_SAMESITE = "none"
+
+PROGRESS_COOKIE_NAME = os.getenv("PROGRESS_COOKIE_NAME", "formationia_progress")
+_PROGRESS_COOKIE_SECURE = os.getenv("PROGRESS_COOKIE_SECURE", "false").lower() not in {"false", "0", "no"}
+_PROGRESS_COOKIE_DOMAIN = os.getenv("PROGRESS_COOKIE_DOMAIN") or None
+_PROGRESS_COOKIE_SAMESITE = os.getenv("PROGRESS_COOKIE_SAMESITE", "lax").lower()
+if _PROGRESS_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    _PROGRESS_COOKIE_SAMESITE = "lax"
+_PROGRESS_COOKIE_MAX_AGE = int(os.getenv("PROGRESS_COOKIE_MAX_AGE", str(365 * 24 * 60 * 60)))
+
+DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
+    {
+        "id": "atelier",
+        "title": "Atelier comparatif IA",
+        "description": "Comparer deux configurations de modèle et produire une synthèse finale.",
+        "route": "/atelier/etape-1",
+        "scoreMaximum": 1.0,
+    },
+    {
+        "id": "prompt-dojo",
+        "title": "Prompt Dojo — Mission débutant",
+        "description": "Affiner un prompt à travers une mission progressive et soumettre un score IA.",
+        "route": "/prompt-dojo",
+        "scoreMaximum": 1.0,
+    },
+    {
+        "id": "clarity",
+        "title": "Parcours de la clarté",
+        "description": "Tester la précision d’une consigne sur une grille 10×10 en temps réel.",
+        "route": "/parcours-clarte",
+        "scoreMaximum": 1.0,
+    },
+    {
+        "id": "clarte-dabord",
+        "title": "Clarté d’abord !",
+        "description": "Explorer trois manches guidées pour révéler la checklist idéale.",
+        "route": "/clarte-dabord",
+        "scoreMaximum": 1.0,
+    },
+]
+_DEEP_LINK_ACTIVITY_MAP = {item["id"]: item for item in DEEP_LINK_ACTIVITIES}
 
 app.add_middleware(
     CORSMiddleware,
@@ -555,6 +602,144 @@ def _resolve_lti_service() -> LTIService:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _front_url_with_route(route: str | None) -> str:
+    if not route:
+        return LTI_POST_LAUNCH_URL
+    if route.startswith("http://") or route.startswith("https://"):
+        return route
+    base = LTI_POST_LAUNCH_URL or "/"
+    if base.endswith("/") and route.startswith("/"):
+        return base.rstrip("/") + route
+    if not base.endswith("/") and not route.startswith("/"):
+        return f"{base}/{route}"
+    return base + route
+
+
+def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
+    multiple = context.accept_multiple
+    input_type = "checkbox" if multiple else "radio"
+    intro_title = context.settings.get("title")
+    intro_text = context.settings.get("text")
+    action = html.escape("/lti/deep-link/submit", quote=True)
+    rows = []
+    for activity in DEEP_LINK_ACTIVITIES:
+        value = html.escape(activity["id"], quote=True)
+        title = html.escape(activity["title"], quote=True)
+        description = html.escape(activity["description"], quote=True)
+        rows.append(
+            """
+            <label class=\"dl-option\">
+              <input type=\"{input_type}\" name=\"activity\" value=\"{value}\" />
+              <span class=\"dl-option__content\">
+                <span class=\"dl-option__title\">{title}</span>
+                <span class=\"dl-option__desc\">{description}</span>
+              </span>
+            </label>
+            """.format(input_type=input_type, value=value, title=title, description=description)
+        )
+    options_html = "\n".join(rows)
+    context_id = html.escape(context.request_id, quote=True)
+    intro_block = ""
+    if intro_title:
+        intro_block += f"<h2 class=\"dl-title\">{html.escape(intro_title)}</h2>"
+    else:
+        intro_block += "<h2 class=\"dl-title\">Choisir les activités FormationIA</h2>"
+    if intro_text:
+        intro_block += f"<p class=\"dl-lead\">{html.escape(intro_text)}</p>"
+    else:
+        intro_block += (
+            "<p class=\"dl-lead\">Sélectionne une ou plusieurs activités à intégrer dans ton cours." \
+            " Chaque ressource créera un lien LTI noté (1 point) vers l’expérience FormationIA.</p>"
+        )
+    submit_label = "Ajouter l’activité" if not multiple else "Ajouter les activités"
+    return (
+        "<!DOCTYPE html>\n"
+        "<html lang=\"fr\">\n"
+        "<head>\n"
+        "  <meta charset=\"utf-8\" />\n"
+        "  <title>FormationIA · Deep Linking</title>\n"
+        "  <style>\n"
+        "    body { font-family: system-ui, sans-serif; background: #f5f5f5; margin: 0; padding: 0; }\n"
+        "    .dl-container { max-width: 720px; margin: 4rem auto; background: white; padding: 2.5rem; border-radius: 20px; box-shadow: 0 25px 60px rgba(15,23,42,0.05); }\n"
+        "    .dl-title { margin: 0 0 0.75rem; font-size: 1.75rem; color: #111827; }\n"
+        "    .dl-lead { margin: 0 0 1.5rem; color: #4b5563; line-height: 1.5; }\n"
+        "    form { display: flex; flex-direction: column; gap: 1.25rem; }\n"
+        "    .dl-option { display: flex; gap: 1rem; border: 1px solid rgba(148, 163, 184, 0.4); border-radius: 16px; padding: 1rem 1.25rem; background: rgba(250, 250, 250, 0.9); transition: border-color 0.2s, transform 0.2s; align-items: flex-start; }\n"
+        "    .dl-option:hover { border-color: rgba(220, 38, 38, 0.45); transform: translateY(-2px); }\n"
+        "    .dl-option input { margin-top: 0.35rem; }\n"
+        "    .dl-option__content { display: flex; flex-direction: column; gap: 0.35rem; }\n"
+        "    .dl-option__title { font-weight: 600; color: #111827; }\n"
+        "    .dl-option__desc { color: #475569; font-size: 0.95rem; line-height: 1.4; }\n"
+        "    .dl-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }\n"
+        "    button { cursor: pointer; border: none; border-radius: 999px; padding: 0.75rem 1.75rem; font-size: 0.95rem; font-weight: 600; }\n"
+        "    .dl-submit { background: #dc2626; color: white; }\n"
+        "    .dl-cancel { background: rgba(148, 163, 184, 0.2); color: #334155; }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "  <div class=\"dl-container\">\n"
+        f"    {intro_block}\n"
+        f"    <form method=\"post\" action=\"{action}\">\n"
+        f"      <input type=\"hidden\" name=\"deep_link_id\" value=\"{context_id}\" />\n"
+        f"      {options_html}\n"
+        "      <div class=\"dl-actions\">\n"
+        f"        <button type=\"submit\" name=\"submit_action\" value=\"submit\" class=\"dl-submit\">{html.escape(submit_label)}</button>\n"
+        "        <button type=\"submit\" name=\"submit_action\" value=\"cancel\" class=\"dl-cancel\">Annuler</button>\n"
+        "      </div>\n"
+        "    </form>\n"
+        "  </div>\n"
+        "</body>\n"
+        "</html>"
+    )
+
+
+def _render_deep_link_response_page(return_url: str, jwt_token: str) -> str:
+    escaped_url = html.escape(return_url, quote=True)
+    escaped_jwt = html.escape(jwt_token, quote=True)
+    return f"""<!DOCTYPE html>
+<html lang=\"fr\">
+<head>
+  <meta charset=\"utf-8\" />
+  <title>Transmission du lien FormationIA</title>
+  <script>
+    window.addEventListener('DOMContentLoaded', function () {{
+      document.forms[0].submit();
+    }});
+  </script>
+</head>
+<body style=\"font-family: system-ui, sans-serif; background: #f5f5f5; display: flex; align-items: center; justify-content: center; height: 100vh;\">
+  <form method=\"post\" action=\"{escaped_url}\" style=\"display:none;\">
+    <input type=\"hidden\" name=\"JWT\" value=\"{escaped_jwt}\" />
+  </form>
+  <p style=\"color:#334155;\">Retour vers la plateforme…</p>
+</body>
+</html>"""
+
+
+def _build_deep_link_content_items(selected_ids: list[str], launch_url: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for activity_id in selected_ids:
+        activity = _DEEP_LINK_ACTIVITY_MAP.get(activity_id)
+        if not activity:
+            continue
+        custom = {
+            "activity_id": activity["id"],
+            "route": activity["route"],
+        }
+        item: dict[str, Any] = {
+            "type": "ltiResourceLink",
+            "title": activity["title"],
+            "text": activity["description"],
+            "url": launch_url,
+            "custom": custom,
+            "lineItem": {
+                "scoreMaximum": activity.get("scoreMaximum", 1.0),
+                "label": activity["title"],
+                "resourceId": activity["id"],
+            },
+        }
+        items.append(item)
+    return items
 def _require_lti_session(request: Request) -> LTISession:
     service = _resolve_lti_service()
     session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
@@ -570,6 +755,32 @@ def _require_lti_session(request: Request) -> LTISession:
             detail="Session LTI expirée. Merci de redémarrer l'activité depuis Moodle.",
         )
     return session
+
+
+def _optional_lti_session(request: Request) -> LTISession | None:
+    try:
+        service = get_lti_service()
+    except Exception:
+        return None
+    session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_cookie:
+        return None
+    return service.session_store.get(session_cookie)
+
+
+def _resolve_progress_identity(
+    request: Request,
+    session: LTISession | None,
+) -> tuple[str, str | None]:
+    if session is not None:
+        return f"lti::{session.issuer}::{session.subject}", None
+
+    cookie_value = request.cookies.get(PROGRESS_COOKIE_NAME)
+    if cookie_value:
+        return f"anon::{cookie_value}", None
+
+    new_id = secrets.token_urlsafe(16)
+    return f"anon::{new_id}", new_id
 
 
 def _render_lti_launch_page(target_url: str) -> str:
@@ -628,23 +839,100 @@ def get_mission(mission_id: str, _: None = Depends(_require_api_key)) -> dict[st
     return _get_mission_by_id(mission_id)
 
 
+@app.get("/api/progress")
+def get_progress(
+    request: Request,
+    session: LTISession | None = Depends(_optional_lti_session),
+    _: None = Depends(_require_api_key),
+) -> JSONResponse:
+    identity, new_cookie = _resolve_progress_identity(request, session)
+    store = get_progress_store()
+    snapshot = store.snapshot(identity)
+    result = JSONResponse(content={
+        "activities": snapshot.get("activities", {}),
+        "missions": snapshot.get("missions", {}),
+    })
+    if new_cookie:
+        result.set_cookie(
+            key=PROGRESS_COOKIE_NAME,
+            value=new_cookie,
+            httponly=False,
+            secure=_PROGRESS_COOKIE_SECURE,
+            samesite=_PROGRESS_COOKIE_SAMESITE,
+            domain=_PROGRESS_COOKIE_DOMAIN,
+            max_age=_PROGRESS_COOKIE_MAX_AGE,
+            path="/",
+        )
+    return result
+
+
+@app.post("/api/progress/activity")
+def update_activity_progress(
+    payload: ActivityProgressRequest,
+    request: Request,
+    session: LTISession | None = Depends(_optional_lti_session),
+    _: None = Depends(_require_api_key),
+) -> JSONResponse:
+    identity, new_cookie = _resolve_progress_identity(request, session)
+    store = get_progress_store()
+    record: ActivityRecord = store.update_activity(identity, payload.activity_id, payload.completed)
+    result = JSONResponse(
+        content={
+            "ok": True,
+            "activity": {
+                "activityId": payload.activity_id,
+                **record.as_dict(),
+            },
+        }
+    )
+    if new_cookie:
+        result.set_cookie(
+            key=PROGRESS_COOKIE_NAME,
+            value=new_cookie,
+            httponly=False,
+            secure=_PROGRESS_COOKIE_SECURE,
+            samesite=_PROGRESS_COOKIE_SAMESITE,
+            domain=_PROGRESS_COOKIE_DOMAIN,
+            max_age=_PROGRESS_COOKIE_MAX_AGE,
+            path="/",
+        )
+    return result
+
+
 @app.post("/api/submit")
-def submit_stage(payload: SubmissionRequest, _: None = Depends(_require_api_key)) -> JSONResponse:
+def submit_stage(
+    payload: SubmissionRequest,
+    request: Request,
+    session: LTISession | None = Depends(_optional_lti_session),
+    _: None = Depends(_require_api_key),
+) -> JSONResponse:
     mission = _get_mission_by_id(payload.mission_id)
     stages = mission.get("stages") or []
     if payload.stage_index >= len(stages):
         raise HTTPException(status_code=400, detail="Indice de manche invalide pour cette mission.")
 
-    run_id = (payload.run_id or "").strip()
-    if run_id and not all(ch.isalnum() or ch in {"-", "_"} for ch in run_id):
+    raw_run_id = (payload.run_id or "").strip()
+    if raw_run_id and not all(ch.isalnum() or ch in {"-", "_"} for ch in raw_run_id):
         raise HTTPException(status_code=400, detail="runId doit contenir uniquement lettres, chiffres, tirets ou soulignés.")
-    if not run_id:
-        run_id = secrets.token_hex(8)
 
-    mission_store = _RUN_RESPONSES.setdefault(run_id, {}).setdefault(payload.mission_id, {})
-    mission_store[payload.stage_index] = payload.payload
+    identity, new_cookie = _resolve_progress_identity(request, session)
+    store = get_progress_store()
+    run_id = store.assign_run_id(raw_run_id or None)
+    store.record_stage(identity, payload.mission_id, run_id, payload.stage_index, payload.payload)
 
-    return JSONResponse(content={"ok": True, "runId": run_id})
+    result = JSONResponse(content={"ok": True, "runId": run_id})
+    if new_cookie:
+        result.set_cookie(
+            key=PROGRESS_COOKIE_NAME,
+            value=new_cookie,
+            httponly=False,
+            secure=_PROGRESS_COOKIE_SECURE,
+            samesite=_PROGRESS_COOKIE_SAMESITE,
+            domain=_PROGRESS_COOKIE_DOMAIN,
+            max_age=_PROGRESS_COOKIE_MAX_AGE,
+            path="/",
+        )
+    return result
 
 
 def _ensure_client() -> ResponsesClient:
@@ -914,13 +1202,57 @@ async def lti_launch(
             raise LTILoginError("state manquant dans la requête de lancement.")
 
         service = _resolve_lti_service()
-        session = await service.validate_launch(id_token, state)
+        claims, platform = await service.decode_launch(id_token, state)
+        message_type = claims.get("https://purl.imsglobal.org/spec/lti/claim/message_type")
 
-        response = HTMLResponse(content=_render_lti_launch_page(LTI_POST_LAUNCH_URL))
+        if message_type == "LtiDeepLinkingRequest":
+            context = service.create_deep_link_context(claims, platform)
+            page = _render_deep_link_selection_page(context)
+            return HTMLResponse(content=page)
+
+        session = service.create_session_from_claims(claims, platform)
+        custom_claim = claims.get("https://purl.imsglobal.org/spec/lti/claim/custom")
+        route = None
+        if isinstance(custom_claim, dict):
+            route = custom_claim.get("route")
+            if not route and isinstance(custom_claim.get("activity_id"), str):
+                mapped = _DEEP_LINK_ACTIVITY_MAP.get(custom_claim["activity_id"])
+                if mapped:
+                    route = mapped.get("route")
+        target_url = _front_url_with_route(route)
+
+        response = HTMLResponse(content=_render_lti_launch_page(target_url))
         _set_lti_session_cookie(response, session, service)
         return response
     except LTILoginError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/lti/deep-link/submit")
+async def lti_deep_link_submit(request: Request) -> HTMLResponse:
+    form_data = await request.form()
+    context_id = form_data.get("deep_link_id")
+    if not context_id:
+        raise HTTPException(status_code=400, detail="Identifiant de requête deep linking manquant.")
+    submit_action = (form_data.get("submit_action") or "submit").lower()
+    selected_ids = [item for item in form_data.getlist("activity") if item]
+
+    service = _resolve_lti_service()
+    context = service.consume_deep_link_context(context_id)
+    if context is None:
+        raise HTTPException(
+            status_code=410,
+            detail="La requête de deep linking a expiré. Relancez la sélection depuis la plateforme.",
+        )
+
+    if submit_action == "cancel":
+        selected_ids = []
+
+    launch_url = LTI_LAUNCH_URL or str(request.url_for("lti_launch"))
+    content_items = _build_deep_link_content_items(selected_ids, launch_url)
+    jwt_token = service.generate_deep_link_response(context, content_items)
+    page = _render_deep_link_response_page(context.return_url, jwt_token)
+    return HTMLResponse(content=page)
 
 
 @app.get("/api/lti/context")

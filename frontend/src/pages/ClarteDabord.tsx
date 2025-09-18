@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Mission, StageAnswer, StageRecord } from "../api";
-import { getMissions, submitStage } from "../api";
+import { getMissions, submitStage, updateActivityProgress } from "../api";
 import FinalReveal from "../components/FinalReveal";
 import MissionSelector from "../components/MissionSelector";
 import PromptStage from "../components/PromptStage";
@@ -25,6 +25,7 @@ function ClarteDabord(): JSX.Element {
   const [runId, setRunId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +88,29 @@ function ClarteDabord(): JSX.Element {
     setRunId(generateRunId());
     setServerError(null);
   }, [selectedMission]);
+
+  useEffect(() => {
+    if (!selectedMission) {
+      return;
+    }
+    if (stageIndex < selectedMission.stages.length) {
+      return;
+    }
+    if (activityProgressMarked) {
+      return;
+    }
+
+    const markProgress = async () => {
+      try {
+        await updateActivityProgress({ activityId: "clarte-dabord", completed: true });
+        setActivityProgressMarked(true);
+      } catch (error) {
+        console.error("Unable to persist Clarté d'abord progress", error);
+      }
+    };
+
+    void markProgress();
+  }, [selectedMission, stageIndex, activityProgressMarked]);
 
   const handleSubmitStage = useCallback(
     async (values: StageAnswer) => {

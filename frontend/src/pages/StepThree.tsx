@@ -1,8 +1,9 @@
-import { Dispatch, SetStateAction, useMemo, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { API_BASE_URL, API_AUTH_KEY, MODEL_OPTIONS, type ModelConfig } from "../config";
 import type { Flashcard } from "../App";
+import { updateActivityProgress } from "../api";
 
 interface StepThreeProps {
   sourceText: string;
@@ -33,6 +34,7 @@ function StepThree({
   const [finalSummary, setFinalSummary] = useState("");
   const [finalSummaryLoading, setFinalSummaryLoading] = useState(false);
   const [finalSummaryError, setFinalSummaryError] = useState<string | null>(null);
+  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
 
   const canGenerate = useMemo(() => Boolean(sourceText.trim()), [sourceText]);
 
@@ -147,6 +149,21 @@ function StepThree({
       setFinalSummaryLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!finalSummary.trim() || activityProgressMarked) {
+      return;
+    }
+    const markProgress = async () => {
+      try {
+        await updateActivityProgress({ activityId: "atelier", completed: true });
+        setActivityProgressMarked(true);
+      } catch (error) {
+        console.error("Unable to persist atelier progress", error);
+      }
+    };
+    void markProgress();
+  }, [finalSummary, activityProgressMarked]);
 
   return (
     <div className="space-y-12">

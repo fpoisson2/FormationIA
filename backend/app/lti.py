@@ -160,6 +160,19 @@ class LTISession:
     expires_at: datetime
 
 
+@dataclass(slots=True)
+class DeepLinkContext:
+    request_id: str
+    issuer: str
+    client_id: str
+    deployment_id: str
+    return_url: str
+    data: str | None
+    accept_multiple: bool
+    settings: dict[str, Any]
+    created_at: datetime
+
+
 class LTIStateStore:
     """In-memory store for login state + nonce with TTL."""
 
@@ -258,6 +271,48 @@ class LTISessionStore:
         self._sessions.pop(session_id, None)
 
 
+class LTIDeepLinkStore:
+    def __init__(self, ttl_seconds: int = 600):
+        self._ttl_seconds = ttl_seconds
+        self._items: dict[str, DeepLinkContext] = {}
+
+    def create(
+        self,
+        *,
+        issuer: str,
+        client_id: str,
+        deployment_id: str,
+        return_url: str,
+        data: str | None,
+        accept_multiple: bool,
+        settings: dict[str, Any],
+    ) -> DeepLinkContext:
+        now = datetime.now(timezone.utc)
+        request_id = secrets.token_urlsafe(16)
+        context = DeepLinkContext(
+            request_id=request_id,
+            issuer=issuer,
+            client_id=client_id,
+            deployment_id=deployment_id,
+            return_url=return_url,
+            data=data,
+            accept_multiple=accept_multiple,
+            settings=settings,
+            created_at=now,
+        )
+        self._items[request_id] = context
+        return context
+
+    def consume(self, request_id: str) -> DeepLinkContext | None:
+        context = self._items.pop(request_id, None)
+        if context is None:
+            return None
+        now = datetime.now(timezone.utc)
+        if now - context.created_at > timedelta(seconds=self._ttl_seconds):
+            return None
+        return context
+
+
 class LTIPlatformConfig(BaseModel):
     issuer: str
     client_id: str
@@ -335,6 +390,7 @@ class LTIService:
         session_ttl = int(os.getenv("LTI_SESSION_TTL", str(4 * 60 * 60)))
         self.state_store = LTIStateStore(ttl_seconds=state_ttl)
         self.session_store = LTISessionStore(ttl_seconds=session_ttl)
+        self.deep_link_store = LTIDeepLinkStore(ttl_seconds=state_ttl)
 
     @property
     def key_set(self) -> LTIKeySet:
@@ -464,7 +520,9 @@ class LTIService:
 
         raise LTILoginError("Clé de signature introuvable dans le JWKS de la plateforme.")
 
-    async def validate_launch(self, id_token: str, state: str) -> LTISession:
+    async def decode_launch(
+        self, id_token: str, state: str
+    ) -> tuple[dict[str, Any], LTIPlatformConfig]:
         if not id_token:
             raise LTILoginError("id_token manquant dans la requête de lancement.")
 
@@ -504,10 +562,14 @@ class LTIService:
         if nonce != login_state.nonce:
             raise LTILoginError("nonce invalide dans le launch LTI.")
 
+        return claims, platform
+
+    def create_session_from_claims(
+        self, claims: dict[str, Any], platform: LTIPlatformConfig
+    ) -> LTISession:
         message_type = claims.get("https://purl.imsglobal.org/spec/lti/claim/message_type")
         if message_type != "LtiResourceLinkRequest":
             raise LTILoginError("Type de message LTI non supporté par cet outil.")
-
         deployment_id = claims.get("https://purl.imsglobal.org/spec/lti/claim/deployment_id")
         if deployment_id != platform.deployment_id:
             raise LTILoginError("deployment_id inconnu pour cette plateforme.")
@@ -539,6 +601,65 @@ class LTIService:
             ags=ags_claim,
         )
         return session
+
+    async def validate_launch(self, id_token: str, state: str) -> LTISession:
+        claims, platform = await self.decode_launch(id_token, state)
+        return self.create_session_from_claims(claims, platform)
+
+    def create_deep_link_context(
+        self,
+        claims: dict[str, Any],
+        platform: LTIPlatformConfig,
+    ) -> DeepLinkContext:
+        settings = claims.get("https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings") or {}
+        return_url = settings.get("deep_link_return_url")
+        if not return_url:
+            raise LTILoginError("deep_link_return_url manquant dans la requête de deep linking.")
+        deployment_id = claims.get("https://purl.imsglobal.org/spec/lti/claim/deployment_id")
+        if deployment_id != platform.deployment_id:
+            raise LTILoginError("deployment_id inconnu pour cette plateforme.")
+        accept_multiple = bool(settings.get("accept_multiple", False))
+        data = settings.get("data") if isinstance(settings.get("data"), str) else None
+        context = self.deep_link_store.create(
+            issuer=platform.issuer,
+            client_id=platform.client_id,
+            deployment_id=deployment_id,
+            return_url=return_url,
+            data=data,
+            accept_multiple=accept_multiple,
+            settings=settings,
+        )
+        return context
+
+    def consume_deep_link_context(self, request_id: str) -> DeepLinkContext | None:
+        return self.deep_link_store.consume(request_id)
+
+    def generate_deep_link_response(
+        self,
+        context: DeepLinkContext,
+        content_items: list[dict[str, Any]],
+    ) -> str:
+        private_key = serialization.load_pem_private_key(
+            self._key_set.private_key_pem.encode("utf-8"),
+            password=None,
+        )
+        now = int(time.time())
+        payload: dict[str, Any] = {
+            "iss": context.client_id,
+            "aud": context.issuer,
+            "iat": now,
+            "exp": now + 300,
+            "nonce": secrets.token_urlsafe(8),
+            "https://purl.imsglobal.org/spec/lti/claim/message_type": "LtiDeepLinkingResponse",
+            "https://purl.imsglobal.org/spec/lti/claim/version": "1.3.0",
+            "https://purl.imsglobal.org/spec/lti/claim/deployment_id": context.deployment_id,
+        }
+        if context.data:
+            payload["https://purl.imsglobal.org/spec/lti-dl/claim/data"] = context.data
+        if content_items:
+            payload["https://purl.imsglobal.org/spec/lti-dl/claim/content_items"] = content_items
+        headers = {"kid": self._key_set.key_id, "alg": "RS256", "typ": "JWT"}
+        return jwt.encode(payload, private_key, algorithm="RS256", headers=headers)
 
     async def obtain_access_token(self, platform: LTIPlatformConfig, scopes: Iterable[str]) -> dict[str, Any]:
         # Load the private key as a cryptography object for PyJWT

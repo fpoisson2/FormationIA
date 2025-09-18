@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import logoPrincipal from "../assets/logo_principal.svg";
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
+import { updateActivityProgress } from "../api";
 
 type Stage = "briefing" | "arena";
 
@@ -118,6 +119,7 @@ function PromptDojo(): JSX.Element {
   const [scoreLoading, setScoreLoading] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
+  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
 
   const { isLTISession, submitScore, context, error: ltiError } = useLTI();
 
@@ -131,7 +133,7 @@ function PromptDojo(): JSX.Element {
 
   // Submit score to LTI when activity is successfully completed
   useEffect(() => {
-    const submitLTIScore = async () => {
+    const synchronizeProgress = async () => {
       if (
         isLTISession &&
         aiScore &&
@@ -157,10 +159,19 @@ function PromptDojo(): JSX.Element {
           setLtiScoreSubmitted(true);
         }
       }
+
+      if (aiScore && aiScore.total >= mission.targetScore && !activityProgressMarked) {
+        try {
+          await updateActivityProgress({ activityId: "prompt-dojo", completed: true });
+          setActivityProgressMarked(true);
+        } catch (error) {
+          console.error("Unable to persist Prompt Dojo progress", error);
+        }
+      }
     };
 
-    submitLTIScore();
-  }, [aiScore, mission, isLTISession, submitScore, ltiScoreSubmitted]);
+    synchronizeProgress();
+  }, [aiScore, mission, isLTISession, submitScore, ltiScoreSubmitted, activityProgressMarked]);
 
   const missionProgress = aiScore
     ? clamp(Math.round((aiScore.total / mission.targetScore) * 100), 0, 120)

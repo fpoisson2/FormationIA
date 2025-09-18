@@ -112,6 +112,22 @@ export interface SubmitStageResponse {
   runId: string;
 }
 
+export interface ActivityProgressRecord {
+  completed: boolean;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface ProgressResponse {
+  activities: Record<string, ActivityProgressRecord>;
+  missions: Record<string, any>;
+}
+
+export interface UpdateActivityProgressPayload {
+  activityId: string;
+  completed: boolean;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: HeadersInit = {
     Accept: "application/json",
@@ -148,6 +164,25 @@ export async function submitStage(payload: SubmitStagePayload): Promise<SubmitSt
     headers: {
       "Content-Type": "application/json",
     },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getProgress(): Promise<ProgressResponse> {
+  return fetchJson<ProgressResponse>(`${API_BASE_URL}/progress`, {
+    method: "GET",
+    credentials: "include",
+  });
+}
+
+export async function updateActivityProgress(payload: UpdateActivityProgressPayload): Promise<void> {
+  await fetchJson(`${API_BASE_URL}/progress/activity`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
     body: JSON.stringify(payload),
   });
 }

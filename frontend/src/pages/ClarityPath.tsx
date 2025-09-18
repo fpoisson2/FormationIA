@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
+import { updateActivityProgress } from "../api";
 
 const GRID_SIZE = 10;
 
@@ -389,6 +390,7 @@ function ClarityPath(): JSX.Element {
   const [celebrating, setCelebrating] = useState(false);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
+  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
 
   const { isLTISession, submitScore, context, error: ltiError } = useLTI();
 
@@ -422,7 +424,7 @@ function ClarityPath(): JSX.Element {
 
   // Submit score to LTI when activity is successfully completed
   useEffect(() => {
-    const submitLTIScore = async () => {
+    const synchronizeProgress = async () => {
       if (
         isLTISession &&
         status === "success" &&
@@ -456,10 +458,19 @@ function ClarityPath(): JSX.Element {
           setLtiScoreSubmitted(true);
         }
       }
+
+      if (status === "success" && stats?.success && !activityProgressMarked) {
+        try {
+          await updateActivityProgress({ activityId: "clarity", completed: true });
+          setActivityProgressMarked(true);
+        } catch (error) {
+          console.error("Unable to persist clarity path progress", error);
+        }
+      }
     };
 
-    submitLTIScore();
-  }, [status, stats, isLTISession, submitScore, ltiScoreSubmitted]);
+    synchronizeProgress();
+  }, [status, stats, isLTISession, submitScore, ltiScoreSubmitted, activityProgressMarked]);
 
   const triggerCelebration = useCallback(() => {
     setCelebrating(true);

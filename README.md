@@ -45,6 +45,30 @@ Le backend expose désormais trois agents principaux :
 
 Un endpoint `GET /health` permet de vérifier la disponibilité du service et la présence de la clé configurée.
 
+### Intégration LTI 1.3
+
+Le backend agit aussi comme outil LTI 1.3 (voir `LTI-SETUP.md` pour la procédure complète). Principales routes côté serveur :
+
+- `GET/POST /lti/login` : point d’entrée OIDC tiers qui redirige l’usager vers Moodle avec les paramètres `state`/`nonce`.
+- `POST /lti/launch` : valide l’`id_token`, crée la session LTI et redirige vers le frontend. La session est stockée côté serveur pendant `LTI_SESSION_TTL` secondes (par défaut 4 h).
+- `GET /api/lti/context` : retourne l’identité et le contexte du lancement (protégé par le cookie de session LTI).
+- `POST /api/lti/score` : publie un score via Assignment & Grade Services lorsque l’activité est réussie.
+- `DELETE /api/lti/session` : termine la session (nettoie le cookie côté navigateur et le store en mémoire).
+
+L’intégration est compatible avec les flux LTI Advantage standards et expose aussi un workflow **LTI Deep Linking 2.0** (cf. [spécification IMS](https://www.imsglobal.org/spec/lti-dl/v2p0/)). Une requête `LtiDeepLinkingRequest` ouvre un sélecteur natif listant les parcours FormationIA ; l’outil renvoie un `LtiDeepLinkingResponse` contenant autant de `ltiResourceLink` que d’activités choisies, chacune avec un item de note (`scoreMaximum = 1`).
+
+Les clés publiques/privées sont chargées depuis l’environnement (`LTI_PRIVATE_KEY_PATH`, `LTI_PUBLIC_KEY_PATH`) ou des variables inline, et les plateformes autorisées sont listées dans `backend/app/lti-platforms.json` (ou via `LTI_PLATFORM_CONFIG_PATH`).
+
+### Persistance des progrès
+
+Chaque page d’activité notifie désormais le backend via `POST /api/progress/activity` lorsqu’elle est complétée. Le backend conserve ces informations dans un fichier JSON durable (`storage/progress.json` par défaut ou `PROGRESS_STORAGE_PATH`).
+
+- Les usagers LTI sont identifiés par `issuer + sub`. Les utilisateurs non authentifiés reçoivent un cookie `formationia_progress` qui permet de retenir leur état entre les visites.
+- Les missions « Clarté d’abord » enregistrent aussi les réponses stade par stade (`POST /api/submit`) afin qu’un run puisse être repris ultérieurement.
+- `GET /api/progress` fournit l’état courant (utilisé sur l’écran `ActivitySelector` pour afficher un crochet vert).
+
+Lorsque l’activité est validée, le frontend déclenche automatiquement `POST /api/lti/score` (si une session LTI est active) pour envoyer un score « 1/1 » dans le carnet de notes de la plateforme. Chaque activité (« Parcours de la clarté », « Prompt Dojo », « Clarté d’abord », Atelier comparatif) renvoie ainsi son résultat au LMS pour alimenter le suivi global des apprenants.
+
 ## Lancer sans Docker
 
 Backend :
@@ -66,6 +90,22 @@ npm run dev -- --host
 ```
 
 Définissez les mêmes variables d’environnement (`OPENAI_API_KEY`, `VITE_API_BASE_URL`, etc.) dans votre shell ou via des fichiers `.env` locaux (`frontend/.env.local`).
+
+## Configuration production & Docker
+
+Pour un déploiement durable, ajustez les points suivants :
+
+- **Clés LTI** : générez-les via `./scripts/generate-lti-keys.sh`, montez-les en lecture seule dans le container backend (`./lti-keys:/app/lti-keys:ro`) et exposez les chemins via
+  - `LTI_PRIVATE_KEY_PATH=/app/lti-keys/lti-private.pem`
+  - `LTI_PUBLIC_KEY_PATH=/app/lti-keys/lti-public.pem`
+- **Metadata plateforme** : mettez à jour `backend/app/lti-platforms.json` ou fournissez `LTI_PLATFORM_CONFIG_PATH` pour pointer vers un JSON monté en volume.
+- **URLs de redirection** : définissez `LTI_LAUNCH_URL` et `LTI_POST_LAUNCH_URL` sur des URLs HTTPS valides (le front doit être servi sur le même domaine pour éviter les blocages cookies).
+- **Cookies** : adaptez `LTI_COOKIE_DOMAIN`, `LTI_COOKIE_SECURE`, `LTI_COOKIE_SAMESITE` ainsi que leurs équivalents pour le suivi de progression (`PROGRESS_COOKIE_*`). En production, on recommandera `*_SECURE=true` et `*_SAMESITE=none` si le LMS est sur un autre domaine.
+- **Persistance des données** : pour ne pas perdre l’historique des activités, mappez le dossier `backend/storage` ou définissez `PROGRESS_STORAGE_PATH` vers un chemin monté (volume Docker ou stockage partagé).
+- **Réseau Docker** : le `docker-compose.yml` est prêt à se connecter au réseau `moodle-docker_default` afin de dialoguer avec une instance Moodle locale. Adaptez `network_mode`/`networks` selon votre architecture ou supprimez la section si vous n’en avez pas besoin.
+- **Variables Responses** : gardez `OPENAI_API_KEY` hors du dépôt (fichiers `.env` injectés à l’exécution).
+
+Référez-vous à `LTI-SETUP.md` pour la configuration détaillée côté Moodle (client ID, JWKS, services AGS/NRPS).
 
 ## Parcours pédagogique
 

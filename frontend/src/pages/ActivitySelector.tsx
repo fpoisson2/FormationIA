@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
+import { getProgress, type ProgressResponse } from "../api";
 
 const ACTIVITIES = [
   {
@@ -58,6 +60,34 @@ const ACTIVITIES = [
 ];
 
 function ActivitySelector(): JSX.Element {
+  const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProgress = async () => {
+      try {
+        const progress = await getProgress();
+        if (!cancelled) {
+          const activities = Object.entries(progress.activities ?? {}).reduce<Record<string, boolean>>(
+            (acc, [activityId, record]) => {
+              acc[activityId] = Boolean(record?.completed);
+              return acc;
+            },
+            {}
+          );
+          setCompletedMap(activities);
+        }
+      } catch (error) {
+        console.warn("Progress unavailable", error);
+      }
+    };
+
+    void loadProgress();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="landing-gradient min-h-screen px-6 py-16 text-[color:var(--brand-black)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-12">
@@ -87,8 +117,13 @@ function ActivitySelector(): JSX.Element {
           {ACTIVITIES.map((activity) => (
             <article
               key={activity.id}
-              className="group flex h-full flex-col gap-6 rounded-3xl border border-white/60 bg-white/90 p-8 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg"
+              className="group relative flex h-full flex-col gap-6 rounded-3xl border border-white/60 bg-white/90 p-8 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg"
             >
+              {completedMap[activity.id] ? (
+                <span className="absolute right-6 top-6 flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-sm">
+                  ✓
+                </span>
+              ) : null}
               <div className="space-y-3">
                 <h2 className="text-2xl font-semibold text-[color:var(--brand-black)]">
                   {activity.title}
