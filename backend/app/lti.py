@@ -541,7 +541,11 @@ class LTIService:
         return session
 
     async def obtain_access_token(self, platform: LTIPlatformConfig, scopes: Iterable[str]) -> dict[str, Any]:
-        private_key = self._key_set.private_key_pem
+        # Load the private key as a cryptography object for PyJWT
+        private_key = serialization.load_pem_private_key(
+            self._key_set.private_key_pem.encode("utf-8"),
+            password=None
+        )
         now = int(time.time())
         payload = {
             "iss": platform.client_id,
@@ -553,6 +557,12 @@ class LTIService:
         }
         headers = {"kid": self._key_set.key_id, "alg": "RS256", "typ": "JWT"}
         assertion = jwt.encode(payload, private_key, algorithm="RS256", headers=headers)
+
+        # Debug logging
+        print(f"DEBUG: Client assertion payload: {payload}")
+        print(f"DEBUG: Client assertion headers: {headers}")
+        print(f"DEBUG: Token endpoint: {platform.token_endpoint}")
+
         form_data = {
             "grant_type": "client_credentials",
             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
