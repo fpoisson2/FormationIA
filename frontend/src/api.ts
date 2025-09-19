@@ -331,12 +331,45 @@ export interface AdminLocalUserResponse {
   user: AdminLocalUser;
 }
 
+export interface ActivityCardConfig {
+  title?: string;
+  description?: string;
+  highlights?: string[];
+  cta?: {
+    label?: string;
+    to?: string;
+  };
+}
+
+export interface ActivityConfigEntry {
+  id: string;
+  path?: string;
+  completionId?: string;
+  header?: {
+    eyebrow?: string;
+    title?: string;
+    subtitle?: string;
+    badge?: string;
+    titleAlign?: "left" | "center";
+  };
+  layout?: {
+    activityId?: string;
+    outerClassName?: string;
+    innerClassName?: string;
+    headerClassName?: string;
+    contentClassName?: string;
+    contentAs?: string;
+  };
+  card?: ActivityCardConfig;
+  enabled?: boolean;
+}
+
 export interface ActivityConfig {
-  activities: any[];
+  activities: ActivityConfigEntry[];
 }
 
 export interface ActivityConfigResponse {
-  activities: any[];
+  activities: ActivityConfigEntry[];
 }
 
 export interface SaveActivityConfigResponse {

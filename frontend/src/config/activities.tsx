@@ -2,7 +2,7 @@ import React, { useCallback, useState, useEffect, type ComponentType, type React
 import { useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
-import { admin, activities as activitiesClient } from "../api";
+import { admin, activities as activitiesClient, type ActivityConfigEntry } from "../api";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
@@ -52,6 +52,7 @@ export interface ActivityProps {
   resetLayoutOverrides: () => void;
   navigateToActivities: () => void;
   isEditMode?: boolean;
+  enabled?: boolean;
 }
 
 export interface ActivityDefinition {
@@ -62,6 +63,82 @@ export interface ActivityDefinition {
   header: ActivityHeaderConfig;
   layout?: ActivityLayoutOptions;
   card: ActivityCardDefinition;
+  enabled?: boolean;
+}
+
+export function mergeActivityDefinition(
+  definition: ActivityDefinition,
+  saved?: ActivityConfigEntry | null
+): ActivityDefinition {
+  const mergedHeader: ActivityHeaderConfig = {
+    ...definition.header,
+    ...(saved?.header ?? {}),
+  };
+
+  const mergedLayout: ActivityLayoutOptions | undefined =
+    definition.layout || saved?.layout
+      ? {
+          ...(definition.layout ?? {}),
+          ...(saved?.layout ?? {}),
+        }
+      : undefined;
+
+  const savedCard = saved?.card ?? {};
+  const mergedCard: ActivityCardDefinition = {
+    ...definition.card,
+    ...savedCard,
+    highlights: savedCard.highlights ?? definition.card.highlights,
+    cta: {
+      ...definition.card.cta,
+      ...(savedCard.cta ?? {}),
+    },
+  };
+
+  return {
+    ...definition,
+    ...saved,
+    header: mergedHeader,
+    layout: mergedLayout,
+    card: mergedCard,
+    enabled: saved?.enabled ?? definition.enabled ?? true,
+  };
+}
+
+export function serializeActivityDefinition(
+  definition: ActivityDefinition
+): ActivityConfigEntry {
+  return {
+    id: definition.id,
+    path: definition.path,
+    completionId: definition.completionId,
+    header: {
+      eyebrow: definition.header.eyebrow,
+      title: definition.header.title,
+      subtitle: definition.header.subtitle,
+      badge: definition.header.badge,
+      titleAlign: definition.header.titleAlign,
+    },
+    layout: definition.layout
+      ? {
+          activityId: definition.layout.activityId,
+          outerClassName: definition.layout.outerClassName,
+          innerClassName: definition.layout.innerClassName,
+          headerClassName: definition.layout.headerClassName,
+          contentClassName: definition.layout.contentClassName,
+          contentAs: definition.layout.contentAs as string | undefined,
+        }
+      : undefined,
+    card: {
+      title: definition.card.title,
+      description: definition.card.description,
+      highlights: [...definition.card.highlights],
+      cta: {
+        label: definition.card.cta.label,
+        to: definition.card.cta.to,
+      },
+    },
+    enabled: definition.enabled ?? true,
+  };
 }
 
 function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
@@ -93,7 +170,9 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
     const navigate = useNavigate();
     const { token, isEditMode, setEditMode, status: adminStatus, user: adminUser } = useAdminAuth();
     const [overrides, setOverrides] = useState<Partial<ActivityLayoutConfig>>({});
-    const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(definition);
+    const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(
+      mergeActivityDefinition(definition)
+    );
 
     const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
     const normaliseRoles = (roles: string[] | undefined | null): string[] =>
@@ -117,15 +196,18 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
           }
           if (response.activities && response.activities.length > 0) {
             const savedActivity = response.activities.find(
-              (activity: any) => activity.id === definition.id
+              (activity: ActivityConfigEntry) => activity.id === definition.id
             );
             if (savedActivity) {
-              setCurrentDefinition(savedActivity as ActivityDefinition);
+              setCurrentDefinition(mergeActivityDefinition(definition, savedActivity));
+              return;
             }
           }
+          setCurrentDefinition(mergeActivityDefinition(definition));
         } catch (error) {
           if (!cancelled) {
             console.warn('Aucune configuration sauvegardée trouvée pour cette activité');
+            setCurrentDefinition(mergeActivityDefinition(definition));
           }
         }
       };
@@ -135,7 +217,7 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
       return () => {
         cancelled = true;
       };
-    }, [definition.id]);
+    }, [definition]);
 
     const currentBaseLayout = buildBaseLayout(currentDefinition);
     const mergedLayout: ActivityLayoutConfig = {
@@ -164,9 +246,21 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
       ) : baseLayout.actions,
     };
 
+    const isEnabled = currentDefinition.enabled !== false;
+    const disabledNotice = !isEnabled && isEditMode ? (
+      <div className="animate-section rounded-3xl border border-red-200/80 bg-red-50/90 p-4 text-red-800 shadow-sm backdrop-blur">
+        <p className="text-xs font-semibold uppercase tracking-wider text-red-600/80">
+          Activité désactivée
+        </p>
+        <p className="text-sm leading-relaxed">
+          Cette activité est masquée pour les usagers tant que vous ne l&rsquo;activez pas dans le catalogue.
+        </p>
+      </div>
+    ) : null;
+
     const handleNavigateToActivities = useCallback(() => {
       navigate("/activites", { state: { completed: completionId } });
-    }, [navigate]);
+    }, [navigate, completionId]);
 
     const handleSetOverrides = useCallback((next: Partial<ActivityLayoutConfig>) => {
       setOverrides(next);
@@ -176,6 +270,15 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
       setOverrides({});
     }, []);
 
+    useEffect(() => {
+      if (!isEditMode && currentDefinition.enabled === false) {
+        navigate("/activites", {
+          replace: true,
+          state: { disabled: currentDefinition.id },
+        });
+      }
+    }, [isEditMode, currentDefinition.enabled, currentDefinition.id, navigate]);
+
     const handleHeaderEdit = useCallback((field: 'eyebrow' | 'title' | 'subtitle' | 'badge', value: string) => {
       setOverrides(prev => ({
         ...prev,
@@ -184,33 +287,42 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
     }, []);
 
     const handleSaveActivity = useCallback(async () => {
-      // Créer la configuration mise à jour basée sur la définition actuelle
-      const updatedDefinition = {
+      const updatedDefinition: ActivityDefinition = {
         ...currentDefinition,
         header: {
           ...currentDefinition.header,
-          ...overrides
-        }
+          ...overrides,
+        },
       };
 
-      // Charger toutes les activités actuelles
+      const serializedUpdated = serializeActivityDefinition(updatedDefinition);
+
       try {
         const response = await activitiesClient.getConfig();
+        const defaultActivities = ACTIVITY_DEFINITIONS.map((activity) =>
+          serializeActivityDefinition(activity)
+        );
         const allActivities =
           response.activities && response.activities.length > 0
             ? response.activities
-            : ACTIVITY_DEFINITIONS;
+            : defaultActivities;
 
-        // Mettre à jour l'activité courante
-        const updatedActivities = allActivities.map((activity: any) =>
-          activity.id === currentDefinition.id ? updatedDefinition : activity
-        );
+        let hasUpdatedActivity = false;
+        const updatedActivities = allActivities.map((activity) => {
+          if (activity.id === serializedUpdated.id) {
+            hasUpdatedActivity = true;
+            return serializedUpdated;
+          }
+          return { ...activity, enabled: activity.enabled ?? true };
+        });
 
-        // Sauvegarder
+        if (!hasUpdatedActivity) {
+          updatedActivities.push(serializedUpdated);
+        }
+
         await admin.activities.save({ activities: updatedActivities }, token);
 
-        // Mettre à jour l'état local avec la nouvelle définition
-        setCurrentDefinition(updatedDefinition);
+        setCurrentDefinition(mergeActivityDefinition(definition, serializedUpdated));
         setOverrides({});
 
         alert('Activité sauvegardée avec succès !');
@@ -218,11 +330,17 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
         console.error('Erreur lors de la sauvegarde:', error);
         throw error;
       }
-    }, [currentDefinition, overrides, token]);
+    }, [currentDefinition, overrides, token, definition]);
 
     return (
       <ActivityLayout
         {...mergedLayout}
+        beforeHeader={
+          <>
+            {disabledNotice}
+            {mergedLayout.beforeHeader}
+          </>
+        }
         onHeaderEdit={handleHeaderEdit}
         activityConfig={currentDefinition}
         onSaveActivity={handleSaveActivity}
@@ -238,6 +356,7 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
           resetLayoutOverrides={handleResetOverrides}
           navigateToActivities={handleNavigateToActivities}
           isEditMode={isEditMode}
+          enabled={isEnabled}
         />
       </ActivityLayout>
     );
@@ -254,6 +373,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     path: "/atelier/*",
     component: WorkshopExperience,
     completionId: "atelier",
+    enabled: true,
     header: {
       eyebrow: "Atelier comparatif IA",
       title: "Cadrez, comparez, synthétisez vos essais IA",
@@ -285,6 +405,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     id: "prompt-dojo",
     path: "/prompt-dojo",
     component: PromptDojo,
+    enabled: true,
     header: {
       eyebrow: "Prompt Dojo",
       title: "Affûte ton prompt mission par mission",
@@ -315,6 +436,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     id: "clarity",
     path: "/parcours-clarte",
     component: ClarityPath,
+    enabled: true,
     header: {
       eyebrow: "Parcours de la clarté",
       title: "Guide le bonhomme avec une consigne limpide",
@@ -346,6 +468,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     id: "clarte-dabord",
     path: "/clarte-dabord",
     component: ClarteDabord,
+    enabled: true,
     header: {
       eyebrow: "Clarté d'abord !",
       title: "Identifie ce qu'il fallait dire dès la première consigne",

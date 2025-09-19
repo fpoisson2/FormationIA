@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import html
 import json
 import os
@@ -52,6 +54,7 @@ MAX_STEPS_PER_ACTION = 20
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 ACTIVITIES_CONFIG_PATH = Path(__file__).resolve().parent.parent / "activities_config.json"
+ACTIVITIES_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
 _ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
@@ -276,6 +279,30 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Mission introuvable.")
 
 
+def _serialize_activity_entries(
+    activities: Sequence[ActivityConfigEntryModel | dict[str, Any]],
+    *,
+    error_status: int,
+) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for index, raw_entry in enumerate(activities):
+        try:
+            entry = (
+                raw_entry
+                if isinstance(raw_entry, ActivityConfigEntryModel)
+                else ActivityConfigEntryModel.model_validate(raw_entry)
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=error_status,
+                detail=f"Configuration d'activité invalide à l'index {index}: {exc}",
+            ) from exc
+        serialized.append(
+            entry.model_dump(mode="json", by_alias=True, exclude_none=True)
+        )
+    return serialized
+
+
 def _load_activities_config() -> list[dict[str, Any]]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
     if not ACTIVITIES_CONFIG_PATH.exists():
@@ -291,14 +318,18 @@ def _load_activities_config() -> list[dict[str, Any]]:
     if not isinstance(data, list):
         raise HTTPException(status_code=500, detail="activities_config.json doit contenir un tableau d'activités.")
 
-    return data
+    return _serialize_activity_entries(data, error_status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def _save_activities_config(activities: list[dict[str, Any]]) -> None:
+def _save_activities_config(activities: Sequence[ActivityConfigEntryModel | dict[str, Any]]) -> None:
     """Sauvegarde la configuration des activités dans le fichier."""
+    serialized = _serialize_activity_entries(
+        list(activities),
+        error_status=status.HTTP_400_BAD_REQUEST,
+    )
     try:
         with ACTIVITIES_CONFIG_PATH.open("w", encoding="utf-8") as handle:
-            json.dump(activities, handle, ensure_ascii=False, indent=2)
+            json.dump(serialized, handle, ensure_ascii=False, indent=2)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
 
@@ -603,10 +634,34 @@ class ActivityProgressRequest(BaseModel):
     completed: bool = Field(default=True)
 
 
+class ActivityConfigEntryModel(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        str_strip_whitespace=True,
+        extra="allow",
+    )
+
+    id: str = Field(..., min_length=1, max_length=128)
+    path: str | None = Field(default=None, max_length=512)
+    completion_id: str | None = Field(default=None, alias="completionId", max_length=128)
+    enabled: bool | None = Field(default=True)
+    header: dict[str, Any] | None = None
+    layout: dict[str, Any] | None = None
+    card: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _ensure_enabled_boolean(self) -> "ActivityConfigEntryModel":
+        # Autoriser les valeurs falsy mais normaliser None vers True par défaut
+        enabled = getattr(self, "enabled", True)
+        if enabled is None:
+            object.__setattr__(self, "enabled", True)
+        return self
+
+
 class ActivityConfigRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
-    activities: list[dict[str, Any]] = Field(..., min_items=1)
+    activities: list[ActivityConfigEntryModel] = Field(..., min_items=1)
 
 class LTIScoreRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)

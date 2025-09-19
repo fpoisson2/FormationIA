@@ -7,9 +7,12 @@ import {
   admin,
   activities as activitiesClient,
   type ProgressResponse,
+  type ActivityConfigEntry,
 } from "../api";
 import {
   ACTIVITY_DEFINITIONS,
+  mergeActivityDefinition,
+  serializeActivityDefinition,
   type ActivityDefinition,
 } from "../config/activities";
 import { useLTI } from "../hooks/useLTI";
@@ -26,7 +29,9 @@ const canAccessAdmin = (roles: string[]): boolean =>
 function ActivitySelector(): JSX.Element {
   const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
   const [completedActivity, setCompletedActivity] = useState<ActivityDefinition | null>(null);
-  const [editableActivities, setEditableActivities] = useState<ActivityDefinition[]>(ACTIVITY_DEFINITIONS);
+  const [editableActivities, setEditableActivities] = useState<ActivityDefinition[]>(
+    ACTIVITY_DEFINITIONS.map((definition) => mergeActivityDefinition(definition))
+  );
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -148,6 +153,21 @@ function ActivitySelector(): JSX.Element {
     );
   };
 
+  const handleToggleActivityEnabled = (activityId: string, nextEnabled: boolean) => {
+    if (!isEditMode) return;
+
+    setEditableActivities(prev =>
+      prev.map(activity =>
+        activity.id === activityId
+          ? {
+              ...activity,
+              enabled: nextEnabled,
+            }
+          : activity
+      )
+    );
+  };
+
   const handleUpdateHighlight = (activityId: string, highlightIndex: number, value: string) => {
     if (!isEditMode) return;
 
@@ -235,14 +255,9 @@ function ActivitySelector(): JSX.Element {
 
     setIsSaving(true);
     try {
-      const serializedActivities = editableActivities.map(activity => ({
-        id: activity.id,
-        path: activity.path,
-        completionId: activity.completionId,
-        header: activity.header,
-        layout: activity.layout,
-        card: activity.card
-      }));
+      const serializedActivities = editableActivities.map(activity =>
+        serializeActivityDefinition(activity)
+      );
 
       await admin.activities.save({ activities: serializedActivities }, token);
       setEditMode(false);
@@ -274,16 +289,43 @@ function ActivitySelector(): JSX.Element {
     try {
       const response = await activitiesClient.getConfig();
       if (response.activities && response.activities.length > 0) {
-        setEditableActivities(response.activities as ActivityDefinition[]);
+        const mergedActivities = response.activities
+          .map((activity: ActivityConfigEntry) => {
+            const baseDefinition = ACTIVITY_DEFINITIONS.find(
+              (definition) => definition.id === activity.id
+            );
+            return baseDefinition
+              ? mergeActivityDefinition(baseDefinition, activity)
+              : null;
+          })
+          .filter((activity): activity is ActivityDefinition => activity !== null);
+
+        const knownIds = new Set(mergedActivities.map((activity) => activity.id));
+        for (const definition of ACTIVITY_DEFINITIONS) {
+          if (!knownIds.has(definition.id)) {
+            mergedActivities.push(mergeActivityDefinition(definition));
+          }
+        }
+
+        setEditableActivities(mergedActivities);
+      } else {
+        setEditableActivities(
+          ACTIVITY_DEFINITIONS.map((definition) => mergeActivityDefinition(definition))
+        );
       }
     } catch (error) {
       console.warn('Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut');
+      setEditableActivities(
+        ACTIVITY_DEFINITIONS.map((definition) => mergeActivityDefinition(definition))
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const activitiesToDisplay = editableActivities;
+  const activitiesToDisplay = isEditMode
+    ? editableActivities
+    : editableActivities.filter(activity => activity.enabled !== false);
 
 
   const defaultHeader = {
@@ -410,56 +452,82 @@ function ActivitySelector(): JSX.Element {
       contentAs="div"
     >
       <div className="grid gap-6 md:grid-cols-2">
-        {activitiesToDisplay.map((activity: ActivityDefinition, index: number) => (
-          <article
-            key={activity.id}
-            draggable={isEditMode}
-            onDragStart={() => handleDragStart(index)}
-            onDragOver={(e) => handleDragOver(e, index)}
-            onDragEnd={handleDragEnd}
-            className={`group relative flex h-full flex-col gap-6 rounded-3xl border p-8 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg ${
-              completedMap[activity.id]
-                ? 'border-green-200 bg-green-50/90 ring-2 ring-green-100'
-                : 'border-white/60 bg-white/90'
-            } ${
-              isEditMode ? 'border-orange-200 ring-2 ring-orange-100 cursor-move' : ''
-            } ${
-              draggedIndex === index ? 'opacity-50' : ''
-            } ${
-              dragOverIndex === index && draggedIndex !== index ? 'scale-105 ring-4 ring-blue-200' : ''
-            }`}
-          >
-            {isEditMode && (
-              <div className="absolute left-4 top-4 flex flex-col gap-1">
-                <div className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs text-orange-600 shadow-sm">
-                  ⋮⋮
+        {activitiesToDisplay.map((activity: ActivityDefinition, index: number) => {
+          const isDisabled = activity.enabled === false;
+          const isCompleted = completedMap[activity.id];
+          const cardClassName = [
+            "group relative flex h-full flex-col gap-6 rounded-3xl border p-8 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg",
+            isCompleted
+              ? "border-green-200 bg-green-50/90 ring-2 ring-green-100"
+              : "border-white/60 bg-white/90",
+            isEditMode ? "border-orange-200 ring-2 ring-orange-100 cursor-move" : "",
+            draggedIndex === index ? "opacity-50" : "",
+            dragOverIndex === index && draggedIndex !== index ? "scale-105 ring-4 ring-blue-200" : "",
+            isDisabled ? "border-dashed border-gray-300 bg-gray-100/80 opacity-80" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const completionBadgeTop = isEditMode ? "top-16" : "top-6";
+
+          return (
+            <article
+              key={activity.id}
+              draggable={isEditMode}
+              onDragStart={() => handleDragStart(index)}
+              onDragOver={(e) => handleDragOver(e, index)}
+              onDragEnd={handleDragEnd}
+              className={cardClassName}
+            >
+              {isDisabled && (
+                <>
+                  <div className="pointer-events-none absolute inset-0 rounded-3xl border-2 border-dashed border-gray-300"></div>
+                  <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-gray-800/80 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white shadow-sm">
+                    Désactivée
+                  </div>
+                </>
+              )}
+              {isEditMode && (
+                <div className="absolute left-4 top-4 z-20 flex flex-col gap-1">
+                  <div className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs text-orange-600 shadow-sm">
+                    ⋮⋮
+                  </div>
+                  <button
+                    onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
+                    disabled={index === 0}
+                    className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
+                    disabled={index === activitiesToDisplay.length - 1}
+                    className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    ↓
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
-                  disabled={index === 0}
-                  className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
-                  disabled={index === activitiesToDisplay.length - 1}
-                  className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
-                >
-                  ↓
-                </button>
-              </div>
-            )}
-            {completedMap[activity.id] ? (
-              <div className="absolute right-6 top-6 flex flex-col items-center gap-1">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-sm">
-                  ✓
-                </span>
-                <span className="text-xs font-medium text-green-700 uppercase tracking-wide">
-                  Complété
-                </span>
-              </div>
-            ) : null}
+              )}
+              {isEditMode && (
+                <label className="absolute right-6 top-4 z-20 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-gray-700 shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={activity.enabled !== false}
+                    onChange={(e) => handleToggleActivityEnabled(activity.id, e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                  />
+                  Activée
+                </label>
+              )}
+              {isCompleted ? (
+                <div className={`absolute right-6 ${completionBadgeTop} flex flex-col items-center gap-1`}>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-sm">
+                    ✓
+                  </span>
+                  <span className="text-xs font-medium text-green-700 uppercase tracking-wide">
+                    Complété
+                  </span>
+                </div>
+              ) : null}
             <div className="space-y-3">
               {isEditMode ? (
                 <>
@@ -549,7 +617,8 @@ function ActivitySelector(): JSX.Element {
               )}
             </div>
           </article>
-        ))}
+        );
+      })}
       </div>
     </ActivityLayout>
   );
