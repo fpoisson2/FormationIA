@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
+import bcrypt
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 
@@ -120,31 +121,78 @@ class LtiUserStat(BaseModel):
         return (self.issuer, self.subject)
 
 
-class AdminUser(BaseModel):
+class LocalUser(BaseModel):
     username: str
-    password_hash: str
-    password_salt: str
-    is_active: bool = True
-    created_at: str = Field(default_factory=_now_iso)
-    updated_at: str = Field(default_factory=_now_iso)
-    from_env: bool = False
+    password_hash: str = Field(alias="passwordHash")
+    roles: list[str] = Field(default_factory=lambda: ["admin"])
+    is_active: bool = Field(default=True, alias="isActive")
+    created_at: str = Field(default_factory=_now_iso, alias="createdAt")
+    updated_at: str = Field(default_factory=_now_iso, alias="updatedAt")
+    from_env: bool = Field(default=False, alias="fromEnv")
+
+    model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "LocalUser":
+        normalized_roles: list[str] = []
+        for role in self.roles:
+            if not isinstance(role, str):
+                continue
+            trimmed = role.strip().lower()
+            if not trimmed or trimmed in normalized_roles:
+                continue
+            normalized_roles.append(trimmed)
+        if not normalized_roles:
+            normalized_roles = ["admin"]
+        object.__setattr__(self, "roles", normalized_roles)
+        return self
 
     def verify_password(self, password: str) -> bool:
-        expected = _derive_password(password, self.password_salt)
-        return secrets.compare_digest(expected, self.password_hash)
+        return _verify_password_hash(password, self.password_hash)
+
+    def has_role(self, role: str) -> bool:
+        return role in self.roles
 
 
-def _derive_password(password: str, salt_b64: str | None = None) -> str:
-    if salt_b64:
-        salt = base64.urlsafe_b64decode(_pad_b64(salt_b64))
-    else:
-        salt = secrets.token_bytes(16)
+def _hash_password(password: str) -> str:
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    return f"bcrypt${hashed.decode('utf-8')}"
+
+
+def _pbkdf2_hash(password: str, salt_b64: str) -> str:
+    salt = base64.urlsafe_b64decode(_pad_b64(salt_b64))
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 48000)
     return base64.urlsafe_b64encode(derived).decode("ascii")
 
 
-def _generate_salt() -> str:
-    return base64.urlsafe_b64encode(secrets.token_bytes(16)).decode("ascii")
+def _verify_password_hash(password: str, stored: str) -> bool:
+    if not stored:
+        return False
+    if stored.startswith("bcrypt$"):
+        hashed = stored.split("$", 1)[1]
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+        except ValueError:  # pragma: no cover - invalid hash format
+            return False
+    if stored.startswith("argon2$"):
+        try:
+            from argon2 import PasswordHasher  # type: ignore import-not-found
+        except Exception:  # pragma: no cover - optional dependency missing
+            return False
+        ph = PasswordHasher()
+        try:
+            ph.verify(stored, password)
+            return True
+        except Exception:  # pragma: no cover - invalid hash
+            return False
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt_b64, hashed = stored.split("$", 2)
+        except ValueError:
+            return False
+        expected = _pbkdf2_hash(password, salt_b64)
+        return secrets.compare_digest(expected, hashed)
+    return False
 
 
 def _pad_b64(value: str) -> str:
@@ -219,8 +267,20 @@ class AdminStore:
                 with self._path.open("r", encoding="utf-8") as handle:
                     return json.load(handle)
             except json.JSONDecodeError:  # pragma: no cover - defensive
-                return {"platforms": [], "users": [], "keyset": {}, "lti_users": []}
-        return {"platforms": [], "users": [], "keyset": {}, "lti_users": []}
+                return {
+                    "platforms": [],
+                    "users": [],
+                    "local_users": [],
+                    "keyset": {},
+                    "lti_users": [],
+                }
+        return {
+            "platforms": [],
+            "users": [],
+            "local_users": [],
+            "keyset": {},
+            "lti_users": [],
+        }
 
     def _write(self) -> None:
         temp_path = self._path.with_suffix(".tmp")
@@ -246,6 +306,9 @@ class AdminStore:
             self._data["lti_users"] = []
             changed = True
 
+        local_users_changed = self._ensure_local_users_table()
+        changed = changed or local_users_changed
+
         if changed:
             self._write()
 
@@ -257,19 +320,81 @@ class AdminStore:
         if not username or not password:
             return
         with self._lock:
-            if any(user.get("username") == username for user in self._data.get("users", [])):
+            users = self._data.setdefault("local_users", [])
+            if any(user.get("username") == username for user in users):
                 return
-            salt = _generate_salt()
-            password_hash = _derive_password(password, salt)
-            record = AdminUser(
-                username=username,
-                password_hash=password_hash,
-                password_salt=salt,
+            record = LocalUser(
+                username=username.strip(),
+                password_hash=_hash_password(password),
+                roles=["admin"],
                 from_env=True,
             )
-            users = self._data.setdefault("users", [])
             users.append(record.model_dump())
             self._write()
+
+    def _ensure_local_users_table(self) -> bool:
+        raw_local = self._data.get("local_users")
+        if not isinstance(raw_local, list):
+            raw_local = []
+        normalized: dict[str, dict[str, Any]] = {}
+        changed = False
+
+        for item in raw_local:
+            if not isinstance(item, dict):
+                changed = True
+                continue
+            try:
+                user = LocalUser.model_validate(item)
+            except ValidationError:
+                changed = True
+                continue
+            normalized[user.username] = user.model_dump()
+
+        legacy_users = self._data.get("users")
+        if isinstance(legacy_users, list) and legacy_users:
+            for raw_item in legacy_users:
+                user = self._convert_legacy_user(raw_item)
+                if not user:
+                    continue
+                normalized[user.username] = user.model_dump()
+                changed = True
+            self._data["users"] = []
+            changed = True
+
+        self._data["local_users"] = list(normalized.values())
+        return changed
+
+    def _convert_legacy_user(self, raw_item: Any) -> LocalUser | None:
+        if not isinstance(raw_item, dict):
+            return None
+        username = str(raw_item.get("username") or raw_item.get("user") or "").strip()
+        if not username:
+            return None
+
+        password_hash = str(raw_item.get("password_hash") or raw_item.get("passwordHash") or "")
+        salt = raw_item.get("password_salt") or raw_item.get("passwordSalt")
+        if salt and password_hash and not password_hash.startswith("pbkdf2$"):
+            password_hash = f"pbkdf2${salt}${password_hash}"
+        elif password_hash and not password_hash.startswith(("bcrypt$", "argon2$", "pbkdf2$")):
+            password_hash = f"bcrypt${password_hash}"
+
+        payload: dict[str, Any] = {
+            "username": username,
+            "password_hash": password_hash,
+            "roles": raw_item.get("roles") or ["admin"],
+            "is_active": raw_item.get("is_active", raw_item.get("isActive", True)),
+            "created_at": raw_item.get("created_at")
+            or raw_item.get("createdAt")
+            or _now_iso(),
+            "updated_at": raw_item.get("updated_at")
+            or raw_item.get("updatedAt")
+            or _now_iso(),
+            "from_env": raw_item.get("from_env", raw_item.get("fromEnv", False)),
+        }
+        try:
+            return LocalUser.model_validate(payload)
+        except ValidationError:
+            return None
 
     def _load_legacy_platforms(self) -> list[LtiPlatform]:
         config_path_env = os.getenv("LTI_PLATFORM_CONFIG_PATH")
@@ -413,49 +538,64 @@ class AdminStore:
     # ------------------------------------------------------------------
     # admin accounts management
     # ------------------------------------------------------------------
-    def list_users(self) -> list[AdminUser]:
+    def list_users(self) -> list[LocalUser]:
         with self._lock:
-            users = self._data.get("users", [])
-            return [AdminUser.model_validate(item) for item in users]
+            users = self._data.get("local_users", [])
+            return [LocalUser.model_validate(item) for item in users]
 
-    def get_user(self, username: str) -> AdminUser | None:
+    def get_user(self, username: str) -> LocalUser | None:
+        username_value = username.strip()
         for user in self.list_users():
-            if user.username == username:
+            if user.username == username_value:
                 return user
         return None
 
-    def create_user(self, username: str, password: str, *, from_env: bool = False) -> AdminUser:
-        if not username:
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        *,
+        roles: Iterable[str] | None = None,
+        is_active: bool = True,
+        from_env: bool = False,
+    ) -> LocalUser:
+        username_value = username.strip()
+        if not username_value:
             raise AdminStoreError("Le nom d'utilisateur ne peut pas être vide.")
-        if self.get_user(username):
+        if self.get_user(username_value):
             raise AdminStoreError("Un compte avec ce nom existe déjà.")
-        salt = _generate_salt()
-        password_hash = _derive_password(password, salt)
-        record = AdminUser(
-            username=username,
-            password_hash=password_hash,
-            password_salt=salt,
-            from_env=from_env,
-        )
+
+        payload: dict[str, Any] = {
+            "username": username_value,
+            "password_hash": _hash_password(password),
+            "is_active": bool(is_active),
+            "from_env": from_env,
+        }
+        if roles is not None:
+            payload["roles"] = [
+                str(role).strip() for role in roles if isinstance(role, str) and role.strip()
+            ]
+
+        record = LocalUser.model_validate(payload)
         with self._lock:
-            users = self._data.setdefault("users", [])
+            users = self._data.setdefault("local_users", [])
             users.append(record.model_dump())
             self._write()
         return record
 
-    def set_password(self, username: str, password: str) -> AdminUser:
+    def set_password(self, username: str, password: str) -> LocalUser:
+        username_value = username.strip()
+        if not username_value:
+            raise AdminStoreError("Compte administrateur introuvable.")
         with self._lock:
-            users = self._data.setdefault("users", [])
+            users = self._data.setdefault("local_users", [])
             for index, item in enumerate(users):
-                if item.get("username") != username:
+                if item.get("username") != username_value:
                     continue
-                salt = _generate_salt()
-                password_hash = _derive_password(password, salt)
-                updated = AdminUser.model_validate(
-                    {
-                        **item,
-                        "password_hash": password_hash,
-                        "password_salt": salt,
+                current = LocalUser.model_validate(item)
+                updated = current.model_copy(
+                    update={
+                        "password_hash": _hash_password(password),
                         "updated_at": _now_iso(),
                         "from_env": False,
                     }
@@ -465,7 +605,36 @@ class AdminStore:
                 return updated
         raise AdminStoreError("Compte administrateur introuvable.")
 
-    def verify_credentials(self, username: str, password: str) -> AdminUser | None:
+    def update_user(
+        self,
+        username: str,
+        *,
+        roles: Iterable[str] | None = None,
+        is_active: bool | None = None,
+    ) -> LocalUser:
+        if roles is None and is_active is None:
+            raise AdminStoreError("Aucune mise à jour demandée.")
+        username_value = username.strip()
+        with self._lock:
+            users = self._data.setdefault("local_users", [])
+            for index, item in enumerate(users):
+                if item.get("username") != username_value:
+                    continue
+                current = LocalUser.model_validate(item)
+                update_payload: dict[str, Any] = {"updated_at": _now_iso(), "from_env": False}
+                if roles is not None:
+                    update_payload["roles"] = [
+                        str(role).strip() for role in roles if isinstance(role, str) and role.strip()
+                    ]
+                if is_active is not None:
+                    update_payload["is_active"] = bool(is_active)
+                updated = current.model_copy(update=update_payload)
+                users[index] = updated.model_dump()
+                self._write()
+                return updated
+        raise AdminStoreError("Compte administrateur introuvable.")
+
+    def verify_credentials(self, username: str, password: str) -> LocalUser | None:
         user = self.get_user(username)
         if not user or not user.is_active:
             return None
@@ -593,10 +762,13 @@ def get_admin_store() -> AdminStore | None:
     return _store_instance
 
 
+AdminUser = LocalUser
+
 __all__ = [
     "AdminAuthError",
     "AdminStore",
     "AdminStoreError",
+    "LocalUser",
     "AdminUser",
     "LtiUserStat",
     "LtiKeyset",
