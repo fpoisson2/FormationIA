@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { admin, type AdminLtiUser, type PaginatedResponse } from "../../api";
-import { ACTIVITY_DEFINITIONS } from "../../config/activities";
+import { getDefaultActivityDefinitions } from "../../config/activities";
 import { AdminSkeleton } from "../../components/admin/AdminSkeleton";
 import { useAdminAuth } from "../../providers/AdminAuthProvider";
 
@@ -19,6 +19,10 @@ interface ActivityStats {
 
 export function AdminActivityTrackingPage(): JSX.Element {
   const { token } = useAdminAuth();
+  const catalogActivities = useMemo(
+    () => getDefaultActivityDefinitions(),
+    []
+  );
   const [users, setUsers] = useState<AdminLtiUser[]>([]);
   const [stats, setStats] = useState<ActivityStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,7 +62,7 @@ export function AdminActivityTrackingPage(): JSX.Element {
         });
       });
 
-      const activityBreakdown = ACTIVITY_DEFINITIONS.map(activity => {
+      const activityBreakdown = catalogActivities.map(activity => {
         const completions = activityCompletions.get(activity.id) || 0;
         return {
           activityId: activity.id,
@@ -82,7 +86,7 @@ export function AdminActivityTrackingPage(): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, catalogActivities]);
 
   useEffect(() => {
     void fetchUsers(1, searchTerm);
@@ -185,7 +189,7 @@ export function AdminActivityTrackingPage(): JSX.Element {
             className="rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
           >
             <option value="all">Toutes les activités</option>
-            {ACTIVITY_DEFINITIONS.map((activity) => (
+            {catalogActivities.map((activity) => (
               <option key={activity.id} value={activity.id}>
                 {activity.card.title}
               </option>
@@ -258,7 +262,7 @@ export function AdminActivityTrackingPage(): JSX.Element {
                         {user.completedActivityIds.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {user.completedActivityIds.map((activityId) => {
-                              const activity = ACTIVITY_DEFINITIONS.find(a => a.id === activityId);
+                              const activity = catalogActivities.find(a => a.id === activityId);
                               return activity ? (
                                 <span
                                   key={activityId}
