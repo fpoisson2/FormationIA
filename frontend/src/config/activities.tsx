@@ -1,4 +1,11 @@
-import React, { useCallback, useState, useEffect, type ComponentType, type ReactNode } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
@@ -52,6 +59,7 @@ export interface ActivityProps {
   resetLayoutOverrides: () => void;
   navigateToActivities: () => void;
   isEditMode?: boolean;
+  enabled?: boolean;
 }
 
 export interface ActivityDefinition {
@@ -62,6 +70,52 @@ export interface ActivityDefinition {
   header: ActivityHeaderConfig;
   layout?: ActivityLayoutOptions;
   card: ActivityCardDefinition;
+  enabled?: boolean;
+}
+
+export function mergeActivityDefinition(
+  base: ActivityDefinition,
+  override?: Partial<ActivityDefinition> | null
+): ActivityDefinition {
+  const mergedHeader: ActivityHeaderConfig = override?.header
+    ? { ...base.header, ...override.header }
+    : base.header;
+
+  const layoutCandidate = {
+    ...(base.layout ?? {}),
+    ...(override?.layout ?? {}),
+  } as ActivityLayoutOptions;
+  const mergedLayout =
+    Object.keys(layoutCandidate).length > 0 ? layoutCandidate : base.layout;
+
+  const overrideCard = override?.card ?? {};
+  const mergedCard: ActivityCardDefinition = {
+    ...base.card,
+    ...overrideCard,
+    highlights: Array.isArray(overrideCard.highlights)
+      ? overrideCard.highlights
+      : base.card.highlights,
+    cta: overrideCard.cta
+      ? { ...base.card.cta, ...overrideCard.cta }
+      : base.card.cta,
+  };
+
+  const enabledValue =
+    override && "enabled" in override
+      ? override.enabled !== false
+      : base.enabled !== false;
+
+  return {
+    ...base,
+    ...override,
+    path: override?.path ?? base.path,
+    completionId: override?.completionId ?? base.completionId,
+    header: mergedHeader,
+    layout: mergedLayout,
+    card: mergedCard,
+    enabled: enabledValue,
+    component: base.component,
+  };
 }
 
 function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
@@ -85,15 +139,22 @@ function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
 }
 
 export function buildActivityElement(definition: ActivityDefinition): JSX.Element {
-  const baseLayout = buildBaseLayout(definition);
   const completionId = definition.completionId ?? definition.id;
   const Component = definition.component;
 
   const ActivityElement = () => {
     const navigate = useNavigate();
     const { token, isEditMode, setEditMode, status: adminStatus, user: adminUser } = useAdminAuth();
+    const baseDefinition = useMemo(
+      () => mergeActivityDefinition(definition),
+      [definition]
+    );
+    const baseLayout = useMemo(
+      () => buildBaseLayout(baseDefinition),
+      [baseDefinition]
+    );
     const [overrides, setOverrides] = useState<Partial<ActivityLayoutConfig>>({});
-    const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(definition);
+    const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(baseDefinition);
 
     const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
     const normaliseRoles = (roles: string[] | undefined | null): string[] =>
@@ -120,9 +181,13 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
               (activity: any) => activity.id === definition.id
             );
             if (savedActivity) {
-              setCurrentDefinition(savedActivity as ActivityDefinition);
+              setCurrentDefinition(
+                mergeActivityDefinition(baseDefinition, savedActivity as Partial<ActivityDefinition>)
+              );
+              return;
             }
           }
+          setCurrentDefinition(baseDefinition);
         } catch (error) {
           if (!cancelled) {
             console.warn('Aucune configuration sauvegardée trouvée pour cette activité');
@@ -135,9 +200,21 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
       return () => {
         cancelled = true;
       };
-    }, [definition.id]);
+    }, [baseDefinition, definition.id]);
 
-    const currentBaseLayout = buildBaseLayout(currentDefinition);
+    useEffect(() => {
+      if (!isEditMode && currentDefinition.enabled === false) {
+        navigate("/activites", {
+          replace: true,
+          state: { disabled: currentDefinition.id },
+        });
+      }
+    }, [currentDefinition.enabled, currentDefinition.id, isEditMode, navigate]);
+
+    const currentBaseLayout = useMemo(
+      () => buildBaseLayout(currentDefinition),
+      [currentDefinition]
+    );
     const mergedLayout: ActivityLayoutConfig = {
       ...currentBaseLayout,
       ...overrides,
@@ -163,6 +240,7 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
         </div>
       ) : baseLayout.actions,
     };
+    const mergedBeforeHeader = mergedLayout.beforeHeader;
 
     const handleNavigateToActivities = useCallback(() => {
       navigate("/activites", { state: { completed: completionId } });
@@ -223,6 +301,16 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
     return (
       <ActivityLayout
         {...mergedLayout}
+        beforeHeader={
+          <>
+            {currentDefinition.enabled === false && (
+              <div className="animate-section rounded-3xl border border-red-200/80 bg-red-50/90 p-4 text-sm text-red-800 shadow-sm backdrop-blur">
+                Cette activité est actuellement désactivée. Elle sera masquée pour les apprenants.
+              </div>
+            )}
+            {mergedBeforeHeader}
+          </>
+        }
         onHeaderEdit={handleHeaderEdit}
         activityConfig={currentDefinition}
         onSaveActivity={handleSaveActivity}
@@ -238,6 +326,7 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
           resetLayoutOverrides={handleResetOverrides}
           navigateToActivities={handleNavigateToActivities}
           isEditMode={isEditMode}
+          enabled={currentDefinition.enabled !== false}
         />
       </ActivityLayout>
     );
@@ -254,6 +343,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     path: "/atelier/*",
     component: WorkshopExperience,
     completionId: "atelier",
+    enabled: true,
     header: {
       eyebrow: "Atelier comparatif IA",
       title: "Cadrez, comparez, synthétisez vos essais IA",
@@ -285,6 +375,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     id: "prompt-dojo",
     path: "/prompt-dojo",
     component: PromptDojo,
+    enabled: true,
     header: {
       eyebrow: "Prompt Dojo",
       title: "Affûte ton prompt mission par mission",
@@ -315,6 +406,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     id: "clarity",
     path: "/parcours-clarte",
     component: ClarityPath,
+    enabled: true,
     header: {
       eyebrow: "Parcours de la clarté",
       title: "Guide le bonhomme avec une consigne limpide",
@@ -346,6 +438,7 @@ export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
     id: "clarte-dabord",
     path: "/clarte-dabord",
     component: ClarteDabord,
+    enabled: true,
     header: {
       eyebrow: "Clarté d'abord !",
       title: "Identifie ce qu'il fallait dire dès la première consigne",
