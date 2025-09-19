@@ -8,9 +8,11 @@ interface FinalRevealProps {
   onReplay: () => void;
   onBack: () => void;
   onNextMission?: () => void;
+  onFinish?: () => void | Promise<void>;
 }
-function FinalReveal({ mission, records, onReplay, onBack, onNextMission }: FinalRevealProps): JSX.Element {
+function FinalReveal({ mission, records, onReplay, onBack, onNextMission, onFinish }: FinalRevealProps): JSX.Element {
   const [showDebrief, setShowDebrief] = useState(true);
+  const [isFinishing, setIsFinishing] = useState(false);
   const checklistLines = useMemo(() => mission.revelation.split("\\n"), [mission.revelation]);
 
   return (
@@ -43,40 +45,57 @@ function FinalReveal({ mission, records, onReplay, onBack, onNextMission }: Fina
               <div className="mt-4 flex flex-wrap justify-end gap-3">
                 <button
                   type="button"
-                  className="cta-button cta-button--primary"
+                  className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => setShowDebrief(false)}
+                  disabled={isFinishing}
                 >
                   Fermer le débrief
                 </button>
                 <button
                   type="button"
-                  className="cta-button cta-button--light"
+                  className="cta-button cta-button--light disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => {
                     setShowDebrief(false);
                     onReplay();
                   }}
+                  disabled={isFinishing}
                 >
                   Rejouer cette mission
                 </button>
                 {onNextMission ? (
                   <button
                     type="button"
-                    className="cta-button cta-button--light"
+                    className="cta-button cta-button--light disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => {
                       setShowDebrief(false);
                       onNextMission();
                     }}
+                    disabled={isFinishing}
                   >
                     Mission suivante
                   </button>
                 ) : null}
                 <button
                   type="button"
-                  className="cta-button cta-button--light"
-                  onClick={() => {
-                    setShowDebrief(false);
-                    onBack();
+                  className="cta-button cta-button--light disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={async () => {
+                    if (isFinishing) {
+                      return;
+                    }
+                    setIsFinishing(true);
+                    try {
+                      if (onFinish) {
+                        await onFinish();
+                      }
+                    } catch (error) {
+                      console.error("Unable to finalize mission", error);
+                    } finally {
+                      setShowDebrief(false);
+                      onBack();
+                      setIsFinishing(false);
+                    }
                   }}
+                  disabled={isFinishing}
                 >
                   Retour à l’accueil
                 </button>

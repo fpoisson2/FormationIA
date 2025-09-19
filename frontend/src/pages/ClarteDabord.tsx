@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import type { Mission, StageAnswer, StageRecord } from "../api";
 import { getMissions, submitStage, updateActivityProgress } from "../api";
 import FinalReveal from "../components/FinalReveal";
@@ -15,6 +15,7 @@ function generateRunId(): string {
 }
 
 function ClarteDabord(): JSX.Element {
+  const navigate = useNavigate();
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +68,7 @@ function ClarteDabord(): JSX.Element {
       setRecords([]);
       setRunId(generateRunId());
       setServerError(null);
+      setActivityProgressMarked(false);
     },
     []
   );
@@ -77,6 +79,7 @@ function ClarteDabord(): JSX.Element {
     setRecords([]);
     setRunId(null);
     setServerError(null);
+    setActivityProgressMarked(false);
   }, []);
 
   const handleReplay = useCallback(() => {
@@ -87,30 +90,8 @@ function ClarteDabord(): JSX.Element {
     setRecords([]);
     setRunId(generateRunId());
     setServerError(null);
+    setActivityProgressMarked(false);
   }, [selectedMission]);
-
-  useEffect(() => {
-    if (!selectedMission) {
-      return;
-    }
-    if (stageIndex < selectedMission.stages.length) {
-      return;
-    }
-    if (activityProgressMarked) {
-      return;
-    }
-
-    const markProgress = async () => {
-      try {
-        await updateActivityProgress({ activityId: "clarte-dabord", completed: true });
-        setActivityProgressMarked(true);
-      } catch (error) {
-        console.error("Unable to persist Clarté d'abord progress", error);
-      }
-    };
-
-    void markProgress();
-  }, [selectedMission, stageIndex, activityProgressMarked]);
 
   const handleSubmitStage = useCallback(
     async (values: StageAnswer) => {
@@ -163,6 +144,18 @@ function ClarteDabord(): JSX.Element {
     }
   }, [missions, resetToSelector, selectedMission, startMission]);
 
+  const handleFinish = useCallback(async () => {
+    if (!activityProgressMarked) {
+      try {
+        await updateActivityProgress({ activityId: "clarte-dabord", completed: true });
+        setActivityProgressMarked(true);
+      } catch (error) {
+        console.error("Unable to persist Clarté d'abord progress", error);
+      }
+    }
+    navigate("/activites", { state: { completed: "clarte-dabord" } });
+  }, [activityProgressMarked, navigate, updateActivityProgress]);
+
   const missionContent = () => {
     if (!selectedMission) {
       return null;
@@ -177,6 +170,7 @@ function ClarteDabord(): JSX.Element {
           onReplay={handleReplay}
           onBack={resetToSelector}
           onNextMission={hasNextMission ? handleNextMission : undefined}
+          onFinish={handleFinish}
         />
       );
     }
