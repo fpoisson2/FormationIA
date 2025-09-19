@@ -59,6 +59,30 @@ L’intégration est compatible avec les flux LTI Advantage standards et expose 
 
 Les clés publiques/privées sont chargées depuis l’environnement (`LTI_PRIVATE_KEY_PATH`, `LTI_PUBLIC_KEY_PATH`) ou des variables inline. Les plateformes LTI peuvent être découvertes dynamiquement à partir des requêtes Moodle : si aucun JSON n’est fourni, le backend dérive automatiquement les endpoints (`/mod/lti/*`) depuis l’`issuer` et enregistre les `deployment_id` rencontrés. Vous pouvez toutefois fournir une configuration statique via `LTI_PLATFORM_CONFIG_PATH` pour figer ces métadonnées.
 
+### Administration LTI
+
+Un store persistant (`storage/admin.json` par défaut ou `ADMIN_STORAGE_PATH`) conserve désormais :
+
+- Les plateformes LTI autorisées (issuer, client ID, endpoints, déploiements)
+- Les chemins des clés privées/publiques
+- Les comptes administrateurs qui peuvent modifier cette configuration
+
+Les opérations s’exposent via un routeur FastAPI protégé par un jeton signé (`ADMIN_AUTH_SECRET`) :
+
+- `POST /api/admin/login` · Authentifie un compte admin et émet un cookie `formationia_admin_session`
+- `GET /api/admin/lti-platforms` · Liste les plateformes connues
+- `POST/PUT/PATCH /api/admin/lti-platforms` · Création/mise à jour des métadonnées (issuer, endpoints, déploiements)
+- `DELETE /api/admin/lti-platforms` · Retire une configuration (si elle n’est pas marquée read-only)
+- `GET /api/admin/lti-keys` · Visualise l’état des chemins de clés
+- `POST /api/admin/lti-keys` · Téléverse ou remplace les fichiers PEM aux emplacements configurés
+
+Variables principales :
+
+- `ADMIN_AUTH_SECRET` (obligatoire) · secret HMAC utilisé pour signer les tokens et cookies admin
+- `ADMIN_STORAGE_PATH` (optionnel) · chemin vers le fichier JSON persistant
+- `ADMIN_SESSION_COOKIE_NAME`, `ADMIN_SESSION_TTL`, `ADMIN_SESSION_REMEMBER_TTL`, `ADMIN_COOKIE_*` · personnalisations du cookie admin
+- `ADMIN_DEFAULT_USERNAME` / `ADMIN_DEFAULT_PASSWORD` · création automatique d’un compte admin au premier démarrage
+
 ### Persistance des progrès
 
 Chaque page d’activité notifie désormais le backend via `POST /api/progress/activity` lorsqu’elle est complétée. Le backend conserve ces informations dans un fichier JSON durable (`storage/progress.json` par défaut ou `PROGRESS_STORAGE_PATH`).
@@ -95,13 +119,13 @@ Définissez les mêmes variables d’environnement (`OPENAI_API_KEY`, `VITE_API_
 
 Pour un déploiement durable, ajustez les points suivants :
 
-- **Clés LTI** : générez-les via `./scripts/generate-lti-keys.sh`, montez-les en lecture seule dans le container backend (`./lti-keys:/app/lti-keys:ro`) et exposez les chemins via
+- **Clés LTI** : générez-les via `./scripts/generate-lti-keys.sh`, montez le dossier dans le container backend (`./lti-keys:/app/lti-keys`) et exposez les chemins via
   - `LTI_PRIVATE_KEY_PATH=/app/lti-keys/lti-private.pem`
   - `LTI_PUBLIC_KEY_PATH=/app/lti-keys/lti-public.pem`
 - **Metadata plateforme** : optionnel, fournissez `LTI_PLATFORM_CONFIG_PATH` pour pointer vers un JSON monté en volume si vous souhaitez verrouiller explicitement les `issuer`/`client_id`/`deployment_id`. En l’absence de fichier, le backend déduit automatiquement la configuration depuis les paramètres reçus pendant le login/launch.
 - **URLs de redirection** : définissez `LTI_LAUNCH_URL` et `LTI_POST_LAUNCH_URL` sur des URLs HTTPS valides (le front doit être servi sur le même domaine pour éviter les blocages cookies).
 - **Cookies** : adaptez `LTI_COOKIE_DOMAIN`, `LTI_COOKIE_SECURE`, `LTI_COOKIE_SAMESITE` ainsi que leurs équivalents pour le suivi de progression (`PROGRESS_COOKIE_*`). En production, on recommandera `*_SECURE=true` et `*_SAMESITE=none` si le LMS est sur un autre domaine.
-- **Persistance des données** : pour ne pas perdre l’historique des activités, mappez le dossier `backend/storage` ou définissez `PROGRESS_STORAGE_PATH` vers un chemin monté (volume Docker ou stockage partagé).
+- **Persistance des données** : pour ne pas perdre l’historique des activités et la configuration admin, mappez le dossier `backend/storage`/`storage` ou définissez `PROGRESS_STORAGE_PATH` et `ADMIN_STORAGE_PATH` vers un chemin monté (volume Docker ou stockage partagé).
 - **Réseau Docker** : le `docker-compose.yml` est prêt à se connecter au réseau `moodle-docker_default` afin de dialoguer avec une instance Moodle locale. Adaptez `network_mode`/`networks` selon votre architecture ou supprimez la section si vous n’en avez pas besoin.
 - **Variables Responses** : gardez `OPENAI_API_KEY` hors du dépôt (fichiers `.env` injectés à l’exécution).
 

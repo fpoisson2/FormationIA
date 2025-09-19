@@ -24,6 +24,12 @@ Ajoutez ces variables à votre fichier `.env`:
 LTI_PRIVATE_KEY_PATH=/chemin/vers/lti-keys/lti-private.pem
 LTI_PUBLIC_KEY_PATH=/chemin/vers/lti-keys/lti-public.pem
 
+# Administration FormationIA
+ADMIN_AUTH_SECRET=change-me
+# Optionnel: création automatique d'un compte admin initial
+ADMIN_DEFAULT_USERNAME=admin
+ADMIN_DEFAULT_PASSWORD=MotDePasseFort123!
+
 # URLs de redirection
 LTI_LAUNCH_URL=https://votre-domaine.com/lti/launch
 LTI_POST_LAUNCH_URL=https://votre-domaine.com
@@ -161,17 +167,25 @@ curl -I https://votre-domaine.com/lti/launch
 
 ### Rotation des clés
 
-Pour renouveler les clés cryptographiques:
+Deux approches possibles:
 
-```bash
-# Sauvegarder les anciennes clés
-mv lti-keys lti-keys-backup
+1. **Via l’API admin** (recommandé)
 
-# Générer de nouvelles clés
-./scripts/generate-lti-keys.sh
+   - Authentifiez-vous sur `/api/admin/login`
+   - Appelez `POST /api/admin/lti-keys` avec les nouvelles clés PEM
+   - Moodle consommera instantanément la nouvelle clé via JWKS (mettez tout de même à jour l’interface Moodle si nécessaire)
 
-# Mettre à jour la clé publique dans Moodle
-```
+2. **Manuellement sur le disque**
+
+   ```bash
+   # Sauvegarder les anciennes clés
+   mv lti-keys lti-keys-backup
+
+   # Générer de nouvelles clés
+   ./scripts/generate-lti-keys.sh
+
+   # Mettre à jour la clé publique dans Moodle
+   ```
 
 ### Monitoring
 
