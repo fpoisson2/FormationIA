@@ -28,9 +28,11 @@ type Progress = {
   visited: QuarterId[];
 };
 
-const GRID_W = 24;
-const GRID_H = 18;
 const TILE = 32;
+const TILE_GAP = 2;
+const CELL_SIZE = TILE + TILE_GAP;
+
+const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
 
 function dataUri(svg: string) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -87,6 +89,146 @@ const SPR_PLAYER = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' h
   <rect x='6' y='14' width='2' height='2' fill='#424242'/>
   <rect x='8' y='14' width='2' height='2' fill='#424242'/>
 </svg>`);
+
+const SPR_TILE_PLAZA = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+  <rect width='16' height='16' fill='#d4c4a1'/>
+  <rect x='0' y='7' width='16' height='2' fill='#c0b091'/>
+  <rect x='7' y='0' width='2' height='16' fill='#c0b091'/>
+  <rect x='2' y='2' width='4' height='4' fill='#e5d4af'/>
+  <rect x='10' y='10' width='4' height='4' fill='#e5d4af'/>
+</svg>`);
+
+function houseRoofTile(color: string, side: "left" | "right") {
+  const darker = side === "left" ? "#4c1d95" : "#5b21b6";
+  const lighter = side === "left" ? "#a855f7" : "#c084fc";
+  const polygon =
+    side === "left"
+      ? "0,12 8,2 8,16 0,16"
+      : "8,2 16,12 16,16 8,16";
+  const edgeX = side === "left" ? 7 : 8;
+  return dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+    <rect width='16' height='16' fill='${color}'/>
+    <polygon points='${polygon}' fill='${lighter}'/>
+    <rect x='${edgeX}' y='2' width='1' height='14' fill='${darker}'/>
+    <rect x='0' y='12' width='16' height='1' fill='${darker}'/>
+  </svg>`);
+}
+
+function houseWallTile(side: "left" | "right") {
+  const offset = side === "left" ? 0 : 8;
+  const windowX = side === "left" ? 2 : 10;
+  const edgeX = side === "left" ? 0 : 15;
+  const shadowX = side === "left" ? 1 : 14;
+  return dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+    <rect width='16' height='16' fill='#f1ede4'/>
+    <rect x='${edgeX}' y='0' width='1' height='16' fill='#bda48c'/>
+    <rect x='${shadowX}' y='0' width='1' height='16' fill='#d7c2aa'/>
+    <rect x='${windowX}' y='6' width='4' height='4' fill='#90caf9'/>
+    <rect x='${windowX}' y='10' width='4' height='1' fill='#64b5f6'/>
+    <rect x='${windowX + 1}' y='11' width='2' height='1' fill='#bbdefb'/>
+    <rect x='${offset + 2}' y='13' width='4' height='3' fill='#795548'/>
+    <rect x='${offset + 2}' y='14' width='4' height='1' fill='#5d4037'/>
+  </svg>`);
+}
+
+const SPR_TILE_ROOF_LEFT = houseRoofTile("#6d28d9", "left");
+const SPR_TILE_ROOF_RIGHT = houseRoofTile("#7c3aed", "right");
+const SPR_TILE_WALL_LEFT = houseWallTile("left");
+const SPR_TILE_WALL_RIGHT = houseWallTile("right");
+
+const SPR_TILE_TREE = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+  <rect width='16' height='16' fill='#46a049'/>
+  <circle cx='8' cy='6' r='5' fill='#2f855a'/>
+  <circle cx='5' cy='8' r='3' fill='#38a169'/>
+  <circle cx='11' cy='8' r='3' fill='#38a169'/>
+  <rect x='7' y='9' width='2' height='5' fill='#6d4c41'/>
+  <rect x='6' y='10' width='4' height='1' fill='#8d6e63'/>
+</svg>`);
+
+const SPR_TILE_FLOWER = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+  <rect width='16' height='16' fill='#5dbb63'/>
+  <circle cx='5' cy='5' r='2' fill='#fcd34d'/>
+  <circle cx='11' cy='5' r='2' fill='#f472b6'/>
+  <circle cx='5' cy='11' r='2' fill='#60a5fa'/>
+  <circle cx='11' cy='11' r='2' fill='#f97316'/>
+  <rect x='7' y='7' width='2' height='2' fill='#f9fafb'/>
+</svg>`);
+
+const SPR_TILE_FIELD = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+  <rect width='16' height='16' fill='#d19a66'/>
+  <rect x='0' y='3' width='16' height='2' fill='#b07846'/>
+  <rect x='0' y='8' width='16' height='2' fill='#b07846'/>
+  <rect x='0' y='13' width='16' height='2' fill='#b07846'/>
+  <rect x='4' y='0' width='2' height='16' fill='#e0b989'/>
+  <rect x='9' y='0' width='2' height='16' fill='#e0b989'/>
+</svg>`);
+
+const SPR_TILE_SAND = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
+  <rect width='16' height='16' fill='#f0e4c3'/>
+  <rect x='0' y='6' width='16' height='1' fill='#e2d3aa'/>
+  <rect x='0' y='12' width='16' height='1' fill='#e2d3aa'/>
+  <rect x='3' y='3' width='2' height='2' fill='#fff3d6'/>
+  <rect x='11' y='9' width='2' height='2' fill='#fff3d6'/>
+</svg>`);
+
+const TILE_KIND = {
+  GRASS: 0,
+  PATH: 1,
+  WATER: 2,
+  PLAZA: 3,
+  ROOF_LEFT: 4,
+  ROOF_RIGHT: 5,
+  WALL_LEFT: 6,
+  WALL_RIGHT: 7,
+  TREE: 8,
+  FLOWER: 9,
+  FIELD: 10,
+  SAND: 11,
+} as const;
+
+type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
+
+const TILE_DEFINITIONS: Record<
+  TileKind,
+  { sprite: string; atlasKey?: keyof Tileset["map"]; highlight?: boolean }
+> = {
+  [TILE_KIND.GRASS]: { sprite: SPR_TILE_GRASS, atlasKey: "grass" },
+  [TILE_KIND.PATH]: {
+    sprite: SPR_TILE_PATH,
+    atlasKey: "path",
+    highlight: true,
+  },
+  [TILE_KIND.WATER]: { sprite: SPR_TILE_WATER, atlasKey: "water" },
+  [TILE_KIND.PLAZA]: {
+    sprite: SPR_TILE_PLAZA,
+    atlasKey: "path",
+    highlight: true,
+  },
+  [TILE_KIND.ROOF_LEFT]: { sprite: SPR_TILE_ROOF_LEFT },
+  [TILE_KIND.ROOF_RIGHT]: { sprite: SPR_TILE_ROOF_RIGHT },
+  [TILE_KIND.WALL_LEFT]: { sprite: SPR_TILE_WALL_LEFT },
+  [TILE_KIND.WALL_RIGHT]: { sprite: SPR_TILE_WALL_RIGHT },
+  [TILE_KIND.TREE]: { sprite: SPR_TILE_TREE },
+  [TILE_KIND.FLOWER]: { sprite: SPR_TILE_FLOWER },
+  [TILE_KIND.FIELD]: { sprite: SPR_TILE_FIELD },
+  [TILE_KIND.SAND]: { sprite: SPR_TILE_SAND },
+};
+
+const BLOCKING_TILES = new Set<TileKind>([
+  TILE_KIND.WATER,
+  TILE_KIND.ROOF_LEFT,
+  TILE_KIND.ROOF_RIGHT,
+  TILE_KIND.WALL_LEFT,
+  TILE_KIND.WALL_RIGHT,
+  TILE_KIND.TREE,
+  TILE_KIND.FLOWER,
+  TILE_KIND.FIELD,
+]);
+
+const HIGHLIGHT_TILES = new Set<TileKind>([
+  TILE_KIND.PATH,
+  TILE_KIND.PLAZA,
+]);
 
 type TilesetMode = "builtin" | "atlas";
 
@@ -298,26 +440,212 @@ function TilesetControls({
   );
 }
 
-const world: number[][] = [
-  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-  [2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2],
-  [2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2],
-  [2, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 2],
-  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
-  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-];
+const WORLD_WIDTH = 60;
+const WORLD_HEIGHT = 44;
+
+function generateWorld(): number[][] {
+  const map = Array.from({ length: WORLD_HEIGHT }, () =>
+    Array.from({ length: WORLD_WIDTH }, () => TILE_KIND.GRASS)
+  );
+
+  const fillRect = (
+    startX: number,
+    startY: number,
+    width: number,
+    height: number,
+    tile: TileKind
+  ) => {
+    for (let y = startY; y < startY + height; y++) {
+      for (let x = startX; x < startX + width; x++) {
+        if (map[y]?.[x] !== undefined) {
+          map[y][x] = tile;
+        }
+      }
+    }
+  };
+
+  const outlineRect = (
+    startX: number,
+    startY: number,
+    width: number,
+    height: number,
+    tile: TileKind
+  ) => {
+    for (let x = startX; x < startX + width; x++) {
+      if (map[startY]?.[x] !== undefined) map[startY][x] = tile;
+      if (map[startY + height - 1]?.[x] !== undefined)
+        map[startY + height - 1][x] = tile;
+    }
+    for (let y = startY; y < startY + height; y++) {
+      if (map[y]?.[startX] !== undefined) map[y][startX] = tile;
+      if (map[y]?.[startX + width - 1] !== undefined)
+        map[y][startX + width - 1] = tile;
+    }
+  };
+
+  const drawHorizontal = (
+    startX: number,
+    endX: number,
+    y: number,
+    tile: TileKind = TILE_KIND.PATH
+  ) => {
+    for (let x = startX; x <= endX; x++) {
+      if (map[y]?.[x] !== undefined) {
+        map[y][x] = tile;
+      }
+    }
+  };
+
+  const drawVertical = (
+    startY: number,
+    endY: number,
+    x: number,
+    tile: TileKind = TILE_KIND.PATH
+  ) => {
+    for (let y = startY; y <= endY; y++) {
+      if (map[y]?.[x] !== undefined) {
+        map[y][x] = tile;
+      }
+    }
+  };
+
+  const plantTree = (x: number, y: number) => {
+    if (map[y]?.[x] !== undefined) {
+      map[y][x] = TILE_KIND.TREE;
+    }
+  };
+
+  const scatterTrees = (points: Array<[number, number]>) => {
+    for (const [x, y] of points) {
+      plantTree(x, y);
+    }
+  };
+
+  const placeHouse = (x: number, y: number) => {
+    if (map[y]?.[x] !== undefined) map[y][x] = TILE_KIND.ROOF_LEFT;
+    if (map[y]?.[x + 1] !== undefined) map[y][x + 1] = TILE_KIND.ROOF_RIGHT;
+    if (map[y + 1]?.[x] !== undefined) map[y + 1][x] = TILE_KIND.WALL_LEFT;
+    if (map[y + 1]?.[x + 1] !== undefined)
+      map[y + 1][x + 1] = TILE_KIND.WALL_RIGHT;
+  };
+
+  const placeHouseWithYard = (x: number, y: number) => {
+    placeHouse(x, y);
+    drawHorizontal(x - 1, x + 2, y + 2);
+    if (map[y + 2]?.[x - 1] !== undefined)
+      map[y + 2][x - 1] = TILE_KIND.FLOWER;
+    if (map[y + 2]?.[x + 2] !== undefined)
+      map[y + 2][x + 2] = TILE_KIND.FLOWER;
+    plantTree(x - 1, y - 1);
+    plantTree(x + 2, y - 1);
+  };
+
+  const placeGarden = (startX: number, startY: number) => {
+    fillRect(startX, startY, 2, 2, TILE_KIND.FLOWER);
+    plantTree(startX - 1, startY);
+    plantTree(startX + 2, startY + 1);
+  };
+
+  const placeNeighborhood = (originX: number, originY: number) => {
+    placeHouseWithYard(originX, originY);
+    placeHouseWithYard(originX + 6, originY);
+    placeHouseWithYard(originX, originY + 6);
+    placeHouseWithYard(originX + 6, originY + 6);
+    placeGarden(originX + 1, originY + 4);
+    placeGarden(originX + 7, originY + 2);
+  };
+
+  // Surround the map with water and sand beaches
+  for (let x = 0; x < WORLD_WIDTH; x++) {
+    map[0][x] = TILE_KIND.WATER;
+    map[WORLD_HEIGHT - 1][x] = TILE_KIND.WATER;
+  }
+  for (let y = 0; y < WORLD_HEIGHT; y++) {
+    map[y][0] = TILE_KIND.WATER;
+    map[y][WORLD_WIDTH - 1] = TILE_KIND.WATER;
+  }
+  for (let x = 1; x < WORLD_WIDTH - 1; x++) {
+    map[1][x] = TILE_KIND.SAND;
+    map[WORLD_HEIGHT - 2][x] = TILE_KIND.SAND;
+  }
+  for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
+    map[y][1] = TILE_KIND.SAND;
+    map[y][WORLD_WIDTH - 2] = TILE_KIND.SAND;
+  }
+
+  // Lakes and leisure areas
+  fillRect(6, 5, 12, 5, TILE_KIND.WATER);
+  outlineRect(5, 4, 14, 7, TILE_KIND.SAND);
+  fillRect(44, 32, 10, 5, TILE_KIND.WATER);
+  outlineRect(43, 31, 12, 7, TILE_KIND.SAND);
+
+  // Farmland
+  fillRect(8, 34, 12, 6, TILE_KIND.FIELD);
+  drawHorizontal(7, 21, 34);
+  drawHorizontal(7, 21, 39);
+  drawVertical(34, 39, 7);
+  drawVertical(34, 39, 21);
+  scatterTrees([
+    [6, 33],
+    [22, 33],
+    [6, 40],
+    [22, 40],
+  ]);
+
+  // Road network connecting quarters
+  drawHorizontal(4, WORLD_WIDTH - 5, 22);
+  drawVertical(6, WORLD_HEIGHT - 7, 30);
+
+  drawVertical(6, 20, 18);
+  drawVertical(6, 20, 42);
+  drawVertical(24, 38, 18);
+  drawVertical(24, 38, 42);
+
+  drawHorizontal(6, 24, 12);
+  drawHorizontal(36, WORLD_WIDTH - 6, 12);
+  drawHorizontal(6, 24, 32);
+  drawHorizontal(36, WORLD_WIDTH - 6, 32);
+
+  drawHorizontal(27, 33, 18);
+  drawHorizontal(27, 33, 26);
+  drawVertical(19, 25, 27);
+  drawVertical(19, 25, 34);
+
+  // Plazas for each quarter and central hub
+  fillRect(10, 9, 10, 7, TILE_KIND.PLAZA);
+  fillRect(40, 9, 10, 7, TILE_KIND.PLAZA);
+  fillRect(10, 29, 10, 7, TILE_KIND.PLAZA);
+  fillRect(40, 29, 10, 7, TILE_KIND.PLAZA);
+  fillRect(26, 20, 10, 6, TILE_KIND.PLAZA);
+
+  // Neighbourhood decorations
+  placeNeighborhood(7, 5);
+  placeNeighborhood(41, 5);
+  placeNeighborhood(7, 25);
+  placeNeighborhood(41, 25);
+
+  scatterTrees([
+    [26, 18],
+    [35, 18],
+    [26, 27],
+    [35, 27],
+    [30, 15],
+    [30, 28],
+    [18, 21],
+    [42, 21],
+  ]);
+
+  placeGarden(24, 16);
+  placeGarden(36, 16);
+  placeGarden(24, 28);
+  placeGarden(36, 28);
+
+  return map;
+}
+
+const world = generateWorld();
+const GRID_H = world.length;
+const GRID_W = world[0]?.length ?? 0;
 
 const buildings: Array<{
   id: QuarterId;
@@ -326,17 +654,21 @@ const buildings: Array<{
   label: string;
   color: string;
 }> = [
-  { id: "mairie", x: 12, y: 9, label: "Mairie (Bilan)", color: "#ffd166" },
-  { id: "clarte", x: 6, y: 5, label: "Quartier Clarté", color: "#06d6a0" },
-  { id: "creation", x: 18, y: 5, label: "Quartier Création", color: "#118ab2" },
-  { id: "decision", x: 7, y: 12, label: "Quartier Décision", color: "#ef476f" },
-  { id: "ethique", x: 17, y: 12, label: "Quartier Éthique", color: "#8338ec" },
+  { id: "mairie", x: 30, y: 22, label: "Mairie (Bilan)", color: "#ffd166" },
+  { id: "clarte", x: 14, y: 12, label: "Quartier Clarté", color: "#06d6a0" },
+  { id: "creation", x: 44, y: 12, label: "Quartier Création", color: "#118ab2" },
+  { id: "decision", x: 14, y: 32, label: "Quartier Décision", color: "#ef476f" },
+  { id: "ethique", x: 44, y: 32, label: "Quartier Éthique", color: "#8338ec" },
 ];
 
-const START = { x: 12, y: 14 };
+const START = { x: 30, y: 24 };
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function PlayerSprite({ ts, step }: { ts: Tileset; step: number }) {
@@ -399,7 +731,8 @@ function isWalkable(x: number, y: number) {
   if (x < 0 || y < 0 || y >= world.length || x >= world[0].length) {
     return false;
   }
-  return world[y][x] !== 2;
+  const tile = world[y][x] as TileKind;
+  return !BLOCKING_TILES.has(tile);
 }
 
 function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
@@ -442,15 +775,14 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   );
 }
 
-function Tile({ kind }: { kind: number }) {
-  const img = kind === 2 ? SPR_TILE_WATER : kind === 1 ? SPR_TILE_PATH : SPR_TILE_GRASS;
+function BuiltinTile({ sprite }: { sprite: string }) {
   return (
     <div
       className="rounded-sm"
       style={{
         width: TILE,
         height: TILE,
-        backgroundImage: `url(${img})`,
+        backgroundImage: `url(${sprite})`,
         backgroundSize: "cover",
         imageRendering: "pixelated",
       }}
@@ -459,12 +791,15 @@ function Tile({ kind }: { kind: number }) {
 }
 
 function TileWithTs({ kind, ts }: { kind: number; ts: Tileset }) {
-  if (ts.mode === "atlas" && ts.url) {
-    const coord =
-      kind === 2 ? ts.map.water : kind === 1 ? ts.map.path : ts.map.grass;
-    return <SpriteFromAtlas ts={ts} coord={coord} scale={TILE} />;
+  const tileKind = (kind as TileKind) ?? TILE_KIND.GRASS;
+  const definition =
+    TILE_DEFINITIONS[tileKind] ?? TILE_DEFINITIONS[TILE_KIND.GRASS];
+  const atlasKey = definition.atlasKey;
+  if (ts.mode === "atlas" && ts.url && atlasKey) {
+    const coord = ts.map[atlasKey];
+    return <SpriteFromAtlas ts={ts} coord={coord as TileCoord} scale={TILE} />;
   }
-  return <Tile kind={kind} />;
+  return <BuiltinTile sprite={definition.sprite} />;
 }
 
 function Modal({
@@ -1130,12 +1465,30 @@ export default function ExplorateurIA({
   const [celebrate, setCelebrate] = useState(false);
   const [tileset, setTileset] = useTileset();
   const [walkStep, setWalkStep] = useState(0);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const worldContainerRef = useRef<HTMLDivElement | null>(null);
+  const firstScrollRef = useRef(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const completionTriggered = useRef(false);
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,
     onCompleted: () => navigateToActivities(),
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const audio = new Audio(BACKGROUND_THEME_URL);
+    audio.loop = true;
+    audio.volume = 0.35;
+    audioRef.current = audio;
+    return () => {
+      audio.pause();
+      audioRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -1168,6 +1521,33 @@ export default function ExplorateurIA({
   }, [player]);
 
   useEffect(() => {
+    const container = worldContainerRef.current;
+    if (!container) {
+      return;
+    }
+    const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const targetLeft = clamp(
+      player.x * CELL_SIZE - container.clientWidth / 2 + TILE / 2,
+      0,
+      maxLeft
+    );
+    const targetTop = clamp(
+      player.y * CELL_SIZE - container.clientHeight / 2 + TILE / 2,
+      0,
+      maxTop
+    );
+    container.scrollTo({
+      left: targetLeft,
+      top: targetTop,
+      behavior: firstScrollRef.current ? "auto" : "smooth",
+    });
+    if (firstScrollRef.current) {
+      firstScrollRef.current = false;
+    }
+  }, [player.x, player.y]);
+
+  useEffect(() => {
     if (completionTriggered.current) {
       return;
     }
@@ -1182,10 +1562,43 @@ export default function ExplorateurIA({
     }
   }, [progress, markCompleted]);
 
+  const attemptPlayMusic = () => {
+    if (isMusicPlaying) {
+      return;
+    }
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.loop = true;
+    audio.volume = 0.35;
+    void audio.play().then(() => setIsMusicPlaying(true)).catch(() => {
+      // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
+    });
+  };
+
+  const toggleMusic = () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    if (isMusicPlaying) {
+      audio.pause();
+      setIsMusicPlaying(false);
+    } else {
+      audio.loop = true;
+      audio.volume = 0.35;
+      void audio.play().then(() => setIsMusicPlaying(true)).catch(() => {
+        // L'utilisateur devra réessayer en cas de blocage navigateur.
+      });
+    }
+  };
+
   const move = (dx: number, dy: number) => {
     const nx = player.x + dx;
     const ny = player.y + dy;
     if (!isWalkable(nx, ny)) return;
+    attemptPlayMusic();
     setPlayer({ x: nx, y: ny });
     setWalkStep((step) => step + 1);
   };
@@ -1257,51 +1670,73 @@ export default function ExplorateurIA({
     <div className="relative space-y-6">
       <Fireworks show={celebrate} />
       <div className="grid md:grid-cols-[minmax(0,1fr)_260px] gap-6">
-        <div className="rounded-2xl border bg-white p-4 shadow relative overflow-hidden">
-          <div className="absolute right-3 top-3 text-[10px] text-slate-500 bg-slate-100/60 px-2 py-1 rounded-full border">
-            Tiny Town
+        <div className="rounded-2xl border bg-white p-4 shadow relative">
+          <div className="absolute right-3 top-3 flex items-center gap-2 text-[11px] text-slate-600 bg-slate-100/80 px-2 py-1 rounded-full border shadow-sm">
+            <span className="tracking-wide uppercase">Tiny Town</span>
+            <button
+              onClick={toggleMusic}
+              className="rounded-full border bg-white px-2 py-[2px] text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              aria-pressed={isMusicPlaying}
+              aria-label={
+                isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
+              }
+              title={isMusicPlaying ? "Pause" : "Lecture"}
+            >
+              {isMusicPlaying ? "⏸" : "♫"}
+            </button>
           </div>
           <div
-            className="grid"
-            style={{
-              gridTemplateColumns: `repeat(${GRID_W}, ${TILE}px)`,
-              gridTemplateRows: `repeat(${GRID_H}, ${TILE}px)`,
-              gap: 2,
-            }}
+            ref={worldContainerRef}
+            className="mt-4 overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
+            style={{ maxHeight: "60vh" }}
           >
-            {world.map((row, y) =>
-              row.map((tileKind, x) => (
-                <div key={`${x}-${y}`} className="relative">
-                  <TileWithTs kind={tileKind} ts={tileset} />
-                  {tileKind === 1 && (
-                    <div className="absolute inset-0 rounded bg-amber-200/30" />
-                  )}
-                  {buildings.map(
-                    (building) =>
-                      building.x === x &&
-                      building.y === y && (
-                        <button
-                          key={building.id}
-                          onClick={() => setOpen(building.id)}
-                          className="absolute inset-1 rounded-lg border-2 flex items-center justify-center shadow"
-                          style={{
-                            borderColor: building.color,
-                            background: "rgba(255,255,255,0.9)",
-                          }}
-                          title={building.label}
-                        >
-                          <BuildingSprite id={building.id} ts={tileset} />
-                        </button>
-                      )
-                  )}
-                  {player.x === x && player.y === y && (
-                    <div className="absolute inset-1 animate-[float_1.2s_ease-in-out_infinite]">
-                      <PlayerSprite ts={tileset} step={walkStep} />
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+            <div className="inline-block p-3">
+              <div
+                className="grid min-w-max"
+                style={{
+                  gridTemplateColumns: `repeat(${GRID_W}, ${TILE}px)`,
+                  gridTemplateRows: `repeat(${GRID_H}, ${TILE}px)`,
+                  gap: TILE_GAP,
+                }}
+              >
+                {world.map((row, y) =>
+                  row.map((tileKind, x) => {
+                    const highlight = HIGHLIGHT_TILES.has(tileKind as TileKind);
+                    return (
+                      <div key={`${x}-${y}`} className="relative">
+                        <TileWithTs kind={tileKind} ts={tileset} />
+                        {highlight && (
+                          <div className="absolute inset-0 rounded bg-amber-200/30" />
+                        )}
+                        {buildings.map(
+                          (building) =>
+                            building.x === x &&
+                            building.y === y && (
+                              <button
+                                key={building.id}
+                                onClick={() => setOpen(building.id)}
+                                className="absolute inset-1 rounded-lg border-2 flex items-center justify-center shadow"
+                                style={{
+                                  borderColor: building.color,
+                                  background: "rgba(255,255,255,0.9)",
+                                }}
+                                title={building.label}
+                              >
+                                <BuildingSprite id={building.id} ts={tileset} />
+                              </button>
+                            )
+                        )}
+                        {player.x === x && player.y === y && (
+                          <div className="absolute inset-1 animate-[float_1.2s_ease-in-out_infinite]">
+                            <PlayerSprite ts={tileset} step={walkStep} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
           <style>{`
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
