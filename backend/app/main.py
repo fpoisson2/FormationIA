@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Generator, Literal, Sequence
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from openai import OpenAI as ResponsesClient
@@ -18,7 +18,9 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, mode
 from .admin_store import (
     AdminAuthError,
     AdminStore,
+    AdminStoreError,
     AdminUser,
+    LtiUserStat,
     create_admin_token,
     decode_admin_token,
     get_admin_store,
@@ -36,7 +38,7 @@ from .lti import (
     get_lti_service,
 )
 from .lti import DeepLinkContext
-from .progress_store import ActivityRecord, get_progress_store
+from .progress_store import ActivityRecord, ProgressStore, get_progress_store
 
 SUPPORTED_MODELS = (
     "gpt-5",
@@ -673,8 +675,6 @@ DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
 ]
 _DEEP_LINK_ACTIVITY_MAP = {item["id"]: item for item in DEEP_LINK_ACTIVITIES}
 
-app.include_router(admin_router)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
@@ -1108,6 +1108,121 @@ def _serialize_keyset(store: AdminStore) -> dict[str, Any]:
     }
 
 
+def _normalize_issuer(value: str) -> str:
+    return value.rstrip("/") if value else value
+
+
+def _split_lti_identity(identity: str) -> tuple[str, str] | None:
+    if not identity.startswith("lti::"):
+        return None
+    parts = identity.split("::", 2)
+    if len(parts) != 3 or not parts[1] or not parts[2]:
+        return None
+    return parts[1], parts[2]
+
+
+def _summarize_completed_activities(snapshot: dict[str, Any]) -> tuple[int, list[str], list[dict[str, Any]]]:
+    activities = snapshot.get("activities", {})
+    if not isinstance(activities, dict):
+        return 0, [], []
+    completed_ids: list[str] = []
+    completed_detail: list[dict[str, Any]] = []
+    for activity_id, record in activities.items():
+        if not isinstance(record, dict):
+            continue
+        if record.get("completed") is not True:
+            continue
+        completed_ids.append(activity_id)
+        completed_detail.append(
+            {
+                "activityId": activity_id,
+                "completedAt": record.get("completedAt"),
+                "updatedAt": record.get("updatedAt"),
+            }
+        )
+    return len(completed_ids), completed_ids, completed_detail
+
+
+def _build_lti_user_entries(
+    store: AdminStore,
+    progress_store: ProgressStore,
+    *,
+    include_details: bool,
+) -> list[dict[str, Any]]:
+    stats = store.list_lti_user_stats()
+    stats_map: dict[tuple[str, str], LtiUserStat] = {}
+    issuer_display: dict[tuple[str, str], str] = {}
+    for stat in stats:
+        issuer_value = str(stat.issuer)
+        key = (_normalize_issuer(issuer_value), stat.subject)
+        stats_map[key] = stat
+        issuer_display[key] = issuer_value
+
+    progress_map: dict[tuple[str, str], dict[str, Any]] = {}
+    for identity in progress_store.list_identities():
+        parts = _split_lti_identity(identity)
+        if not parts:
+            continue
+        issuer_raw, subject = parts
+        key = (_normalize_issuer(issuer_raw), subject)
+        snapshot = progress_store.snapshot(identity)
+        completed_count, completed_ids, completed_detail = _summarize_completed_activities(snapshot)
+        progress_map[key] = {
+            "issuer": issuer_raw,
+            "identity": identity,
+            "count": completed_count,
+            "ids": completed_ids,
+            "detail": completed_detail,
+        }
+
+    entries: list[dict[str, Any]] = []
+    for key in set(stats_map.keys()) | set(progress_map.keys()):
+        issuer_norm, subject = key
+        stat = stats_map.get(key)
+        progress = progress_map.get(key)
+        issuer_value = issuer_display.get(key) or (progress.get("issuer") if progress else issuer_norm)
+        name = (stat.name or "") if stat and stat.name else ""
+        display_name = name.strip() or subject
+        email = stat.email if stat else None
+        login_count = stat.login_count if stat else 0
+        created_at = stat.created_at if stat else None
+        first_login = stat.first_login_at if stat and stat.first_login_at else created_at
+        updated_at = stat.updated_at if stat else None
+        last_login = stat.last_login_at if stat and stat.last_login_at else updated_at or first_login
+        completed_count = progress["count"] if progress else 0
+        completed_ids = progress["ids"] if progress else []
+        entry: dict[str, Any] = {
+            "issuer": issuer_value,
+            "subject": subject,
+            "displayName": display_name,
+            "email": email,
+            "loginCount": login_count,
+            "firstLoginAt": first_login,
+            "lastLoginAt": last_login,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
+            "completedActivities": completed_count,
+            "completedActivityIds": completed_ids,
+            "hasProgress": progress is not None,
+            "profileMissing": not (stat and stat.name and stat.email),
+            "progressIdentity": progress.get("identity") if progress else f"lti::{issuer_value}::{subject}",
+        }
+        if include_details and progress:
+            entry["completedActivitiesDetail"] = progress["detail"]
+        entries.append(entry)
+    return entries
+
+
+def _admin_lti_user_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        entry.get("lastLoginAt") or "",
+        entry.get("updatedAt") or "",
+        entry.get("completedActivities") or 0,
+        entry.get("loginCount") or 0,
+        entry.get("subject") or "",
+    )
+
+
 def _config_to_payload(config: LTIPlatformConfig) -> dict[str, Any]:
     return {
         "issuer": str(config.issuer),
@@ -1363,6 +1478,59 @@ def admin_upload_lti_keys(
     service = _resolve_lti_service()
     service.update_key_paths(private_path_str, public_path_str)
     return {"keyset": _serialize_keyset(store)}
+
+
+@admin_router.get("/lti-users")
+def admin_list_lti_users(
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+    progress_store: ProgressStore = Depends(get_progress_store),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200, alias="pageSize"),
+    issuer: str | None = Query(None),
+    subject: str | None = Query(None),
+    search: str | None = Query(None),
+    include_details: bool = Query(False, alias="includeDetails"),
+) -> dict[str, Any]:
+    entries = _build_lti_user_entries(store, progress_store, include_details=include_details)
+
+    issuer_filter = _normalize_issuer(issuer) if issuer else None
+    search_filter = search.lower() if search else None
+
+    filtered: list[dict[str, Any]] = []
+    for entry in entries:
+        if issuer_filter and _normalize_issuer(entry.get("issuer", "")) != issuer_filter:
+            continue
+        if subject and entry.get("subject") != subject:
+            continue
+        if search_filter:
+            values = [
+                (entry.get("displayName") or ""),
+                (entry.get("email") or ""),
+                (entry.get("subject") or ""),
+            ]
+            if not any(search_filter in value.lower() for value in values if value):
+                continue
+        filtered.append(entry)
+
+    filtered.sort(key=_admin_lti_user_sort_key, reverse=True)
+
+    total = len(filtered)
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated = filtered[start:end]
+
+    return {
+        "page": page,
+        "pageSize": page_size,
+        "total": total,
+        "totalPages": total_pages,
+        "items": paginated,
+    }
+
+
+app.include_router(admin_router)
 
 
 def _validate_model(model_name: str) -> str:
@@ -1627,6 +1795,18 @@ async def lti_launch(
             return HTMLResponse(content=page)
 
         session = service.create_session_from_claims(claims, platform)
+        store = get_admin_store()
+        if store is not None:
+            try:
+                store.record_lti_user_login(
+                    issuer=session.issuer,
+                    subject=session.subject,
+                    name=session.name,
+                    email=session.email,
+                    login_at=session.created_at,
+                )
+            except AdminStoreError:
+                pass
         custom_claim = claims.get("https://purl.imsglobal.org/spec/lti/claim/custom")
         route = None
         if isinstance(custom_claim, dict):

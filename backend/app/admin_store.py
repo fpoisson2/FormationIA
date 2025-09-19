@@ -102,6 +102,24 @@ class LtiKeyset(BaseModel):
     read_only: bool = False
 
 
+class LtiUserStat(BaseModel):
+    issuer: str
+    subject: str
+    name: str | None = None
+    email: str | None = None
+    login_count: int = Field(default=0, ge=0, alias="loginCount")
+    first_login_at: str | None = Field(default=None, alias="firstLoginAt")
+    last_login_at: str | None = Field(default=None, alias="lastLoginAt")
+    created_at: str = Field(default_factory=_now_iso, alias="createdAt")
+    updated_at: str = Field(default_factory=_now_iso, alias="updatedAt")
+
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.issuer, self.subject)
+
+
 class AdminUser(BaseModel):
     username: str
     password_hash: str
@@ -201,8 +219,8 @@ class AdminStore:
                 with self._path.open("r", encoding="utf-8") as handle:
                     return json.load(handle)
             except json.JSONDecodeError:  # pragma: no cover - defensive
-                return {"platforms": [], "users": [], "keyset": {}}
-        return {"platforms": [], "users": [], "keyset": {}}
+                return {"platforms": [], "users": [], "keyset": {}, "lti_users": []}
+        return {"platforms": [], "users": [], "keyset": {}, "lti_users": []}
 
     def _write(self) -> None:
         temp_path = self._path.with_suffix(".tmp")
@@ -223,6 +241,10 @@ class AdminStore:
             if keyset:
                 self._data["keyset"] = keyset.model_dump()
                 changed = True
+
+        if "lti_users" not in self._data:
+            self._data["lti_users"] = []
+            changed = True
 
         if changed:
             self._write()
@@ -451,6 +473,110 @@ class AdminStore:
             return None
         return user
 
+    # ------------------------------------------------------------------
+    # LTI users statistics management
+    # ------------------------------------------------------------------
+    def list_lti_user_stats(self) -> list[LtiUserStat]:
+        with self._lock:
+            records = self._data.get("lti_users", [])
+            return [LtiUserStat.model_validate(item) for item in records]
+
+    def get_lti_user_stat(self, issuer: str, subject: str) -> LtiUserStat | None:
+        issuer_normalized = self._normalize_issuer(issuer)
+        for stat in self.list_lti_user_stats():
+            if self._normalize_issuer(stat.issuer) == issuer_normalized and stat.subject == subject:
+                return stat
+        return None
+
+    def record_lti_user_login(
+        self,
+        issuer: str,
+        subject: str,
+        *,
+        name: str | None = None,
+        email: str | None = None,
+        login_at: datetime | str | None = None,
+    ) -> LtiUserStat:
+        issuer_value = issuer.strip()
+        subject_value = subject.strip()
+        if not issuer_value:
+            raise AdminStoreError("issuer ne peut pas être vide pour les statistiques LTI.")
+        if not subject_value:
+            raise AdminStoreError("subject ne peut pas être vide pour les statistiques LTI.")
+
+        login_iso = self._normalize_timestamp(login_at)
+        issuer_normalized = self._normalize_issuer(issuer_value)
+
+        with self._lock:
+            records = self._data.setdefault("lti_users", [])
+            for index, raw_item in enumerate(records):
+                raw_issuer = str(raw_item.get("issuer") or "")
+                if self._normalize_issuer(raw_issuer) != issuer_normalized:
+                    continue
+                if raw_item.get("subject") != subject_value:
+                    continue
+                current = LtiUserStat.model_validate(raw_item)
+                login_count = current.login_count + 1
+                updated = current.model_copy(update={
+                    "issuer": issuer_normalized,
+                    "name": name or current.name,
+                    "email": email or current.email,
+                    "login_count": login_count,
+                    "last_login_at": login_iso,
+                    "updated_at": login_iso,
+                })
+                if not current.first_login_at:
+                    updated = updated.model_copy(update={"first_login_at": login_iso})
+                records[index] = updated.model_dump(by_alias=True, mode="json")
+                self._write()
+                return updated
+
+            created = LtiUserStat(
+                issuer=issuer_normalized,
+                subject=subject_value,
+                name=name,
+                email=email,
+                login_count=1,
+                first_login_at=login_iso,
+                last_login_at=login_iso,
+                created_at=login_iso,
+                updated_at=login_iso,
+            )
+            records.append(created.model_dump(by_alias=True, mode="json"))
+            self._write()
+            return created
+
+    def delete_lti_user_stat(self, issuer: str, subject: str) -> bool:
+        with self._lock:
+            records = self._data.get("lti_users", [])
+            new_records: list[dict[str, Any]] = []
+            removed = False
+            for item in records:
+                if item.get("issuer") == issuer and item.get("subject") == subject:
+                    removed = True
+                    continue
+                new_records.append(item)
+            if removed:
+                self._data["lti_users"] = new_records
+                self._write()
+            return removed
+
+    @staticmethod
+    def _normalize_timestamp(value: datetime | str | None) -> str:
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            else:
+                value = value.astimezone(timezone.utc)
+            return value.isoformat().replace("+00:00", "Z")
+        if isinstance(value, str) and value:
+            return value
+        return _now_iso()
+
+    @staticmethod
+    def _normalize_issuer(value: str) -> str:
+        return value.rstrip("/") if value else value
+
 
 _store_instance: AdminStore | None = None
 _store_error: Exception | None = None
@@ -472,6 +598,7 @@ __all__ = [
     "AdminStore",
     "AdminStoreError",
     "AdminUser",
+    "LtiUserStat",
     "LtiKeyset",
     "LtiPlatform",
     "create_admin_token",

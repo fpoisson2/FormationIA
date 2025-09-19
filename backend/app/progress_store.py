@@ -78,6 +78,11 @@ class ProgressStore:
             # return a deep copy that callers can modify safely
             return json.loads(json.dumps(bucket))
 
+    def list_identities(self) -> list[str]:
+        with self._lock:
+            identities = self._data.get("identities", {})
+            return list(identities.keys())
+
     def update_activity(self, identity: str, activity_id: str, completed: bool) -> ActivityRecord:
         with self._lock:
             bucket = self._identity_bucket(identity)
