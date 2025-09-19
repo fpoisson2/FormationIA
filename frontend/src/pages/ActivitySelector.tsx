@@ -10,8 +10,11 @@ import {
   type ProgressResponse,
 } from "../api";
 import {
-  ACTIVITY_DEFINITIONS,
-  mergeActivityDefinition,
+  ACTIVITY_CATALOG,
+  getDefaultActivityDefinitions,
+  resolveActivityDefinition,
+  serializeActivityDefinition,
+  type ActivityConfigEntry,
   type ActivityDefinition,
 } from "../config/activities";
 import { useLTI } from "../hooks/useLTI";
@@ -60,19 +63,20 @@ const canAccessAdmin = (roles: string[]): boolean =>
   roles.some((role) => ADMIN_ROLES.includes(role));
 
 function ActivitySelector(): JSX.Element {
-  const definitionMap = useMemo(
-    () =>
-      new Map(
-        ACTIVITY_DEFINITIONS.map((activity) => [activity.id, activity])
-      ),
+  const defaultActivities = useMemo(
+    () => getDefaultActivityDefinitions(),
     []
+  );
+  const definitionMap = useMemo(
+    () => new Map(defaultActivities.map((activity) => [activity.id, activity])),
+    [defaultActivities]
   );
 
   const buildEditableActivities = useCallback(
-    (storedActivities?: Partial<ActivityDefinition>[] | null) => {
+    (storedActivities?: ActivityConfigEntry[] | null) => {
       if (!storedActivities || storedActivities.length === 0) {
-        return ACTIVITY_DEFINITIONS.map((activity) =>
-          mergeActivityDefinition(activity)
+        return defaultActivities.map((activity) =>
+          resolveActivityDefinition({ id: activity.id })
         );
       }
 
@@ -80,31 +84,28 @@ function ActivitySelector(): JSX.Element {
       const merged: ActivityDefinition[] = [];
 
       for (const item of storedActivities) {
-        if (!item || typeof item !== "object" || !item.id) {
+        if (!item || typeof item !== "object" || !("id" in item) || !item.id) {
           continue;
         }
 
-        const baseDefinition = definitionMap.get(item.id);
-        if (baseDefinition) {
-          merged.push(mergeActivityDefinition(baseDefinition, item));
-        } else {
-          merged.push({
-            ...(item as ActivityDefinition),
-            enabled: item.enabled !== false,
-          });
+        try {
+          const resolved = resolveActivityDefinition(item as ActivityConfigEntry);
+          merged.push(resolved);
+          seen.add(resolved.id);
+        } catch (error) {
+          console.warn("Entrée d'activité invalide ignorée", error);
         }
-        seen.add(item.id);
       }
 
-      for (const activity of ACTIVITY_DEFINITIONS) {
+      for (const activity of defaultActivities) {
         if (!seen.has(activity.id)) {
-          merged.push(mergeActivityDefinition(activity));
+          merged.push(resolveActivityDefinition({ id: activity.id }));
         }
       }
 
       return merged;
     },
-    [definitionMap]
+    [defaultActivities]
   );
 
   const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
@@ -118,6 +119,7 @@ function ActivitySelector(): JSX.Element {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [headerOverrides, setHeaderOverrides] = useState<ActivitySelectorHeaderConfig>({});
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { context, isLTISession, loading: ltiLoading } = useLTI();
@@ -136,6 +138,23 @@ function ActivitySelector(): JSX.Element {
   const userRoles = normaliseRoles(adminUser?.roles);
   const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
 
+  const availableCatalogOptions = useMemo(() => {
+    const usedIds = new Set(editableActivities.map((activity) => activity.id));
+    return Object.entries(ACTIVITY_CATALOG)
+      .filter(([id]) => !usedIds.has(id))
+      .map(([id, entry]) => {
+        const baseDefinition =
+          definitionMap.get(id) ?? resolveActivityDefinition({ id });
+        return {
+          id,
+          componentKey: entry.componentKey,
+          title: baseDefinition.card.title,
+          description: baseDefinition.card.description,
+        };
+      });
+  }, [definitionMap, editableActivities]);
+  const canAddActivity = availableCatalogOptions.length > 0;
+
   useEffect(() => {
     if (!completedId && !disabledId) {
       return;
@@ -145,7 +164,7 @@ function ActivitySelector(): JSX.Element {
       if (!id) return undefined;
       return (
         editableActivities.find((activity) => activity.id === id) ||
-        ACTIVITY_DEFINITIONS.find((activity) => activity.id === id)
+        definitionMap.get(id)
       );
     };
 
@@ -199,6 +218,12 @@ function ActivitySelector(): JSX.Element {
       window.clearTimeout(timeout);
     };
   }, [disabledActivity]);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setIsAddModalOpen(false);
+    }
+  }, [isEditMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -357,20 +382,35 @@ function ActivitySelector(): JSX.Element {
     setDragOverIndex(null);
   };
 
+  const handleAddActivityClick = () => {
+    if (!isEditMode || !canAddActivity) return;
+    setIsAddModalOpen(true);
+  };
+
+  const handleSelectActivityToAdd = (activityId: string) => {
+    if (!isEditMode) return;
+
+    setEditableActivities((prev) => {
+      if (prev.some((activity) => activity.id === activityId)) {
+        return prev;
+      }
+      const baseDefinition = resolveActivityDefinition({ id: activityId });
+      return [
+        ...prev,
+        { ...baseDefinition, enabled: baseDefinition.enabled !== false },
+      ];
+    });
+    setIsAddModalOpen(false);
+  };
+
   const handleSaveChanges = async () => {
     if (isSaving) return;
 
     setIsSaving(true);
     try {
-      const serializedActivities = editableActivities.map(activity => ({
-        id: activity.id,
-        path: activity.path,
-        completionId: activity.completionId,
-        header: activity.header,
-        layout: activity.layout,
-        card: activity.card,
-        enabled: activity.enabled !== false
-      }));
+      const serializedActivities = editableActivities.map((activity) =>
+        serializeActivityDefinition(activity)
+      );
 
       const headerConfig: ActivitySelectorHeaderConfig = {
         ...DEFAULT_ACTIVITY_SELECTOR_HEADER,
@@ -414,7 +454,7 @@ function ActivitySelector(): JSX.Element {
       const response = await activitiesClient.getConfig();
       if (response.activities && response.activities.length > 0) {
         setEditableActivities(
-          buildEditableActivities(response.activities as Partial<ActivityDefinition>[])
+          buildEditableActivities(response.activities as ActivityConfigEntry[])
         );
       } else {
         setEditableActivities(buildEditableActivities());
@@ -423,6 +463,7 @@ function ActivitySelector(): JSX.Element {
       setHeaderOverrides(savedHeader ?? {});
     } catch (error) {
       console.warn('Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut');
+      setEditableActivities(buildEditableActivities());
       setHeaderOverrides({});
     } finally {
       setIsLoading(false);
@@ -439,7 +480,8 @@ function ActivitySelector(): JSX.Element {
   };
 
   return (
-    <ActivityLayout
+    <>
+      <ActivityLayout
       activityId="activity-selector"
       eyebrow={currentHeader.eyebrow}
       title={currentHeader.title}
@@ -457,6 +499,14 @@ function ActivitySelector(): JSX.Element {
                   className="inline-flex items-center justify-center rounded-full border border-green-600/20 bg-green-50 px-4 py-2 text-xs font-medium text-green-700 transition hover:border-green-600/40 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSaving ? 'Sauvegarde...' : 'Sauvegarder'}
+                </button>
+                <button
+                  onClick={handleAddActivityClick}
+                  disabled={isSaving || !canAddActivity}
+                  className="inline-flex items-center justify-center rounded-full border border-blue-600/20 bg-blue-50 px-4 py-2 text-xs font-medium text-blue-700 transition hover:border-blue-600/40 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={!canAddActivity ? 'Toutes les activités du catalogue sont déjà présentes.' : undefined}
+                >
+                  Ajouter une activité
                 </button>
                 <button
                   onClick={handleCancelChanges}
@@ -751,7 +801,57 @@ function ActivitySelector(): JSX.Element {
         );
       })}
       </div>
-    </ActivityLayout>
+      </ActivityLayout>
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-lg space-y-4 rounded-3xl bg-white p-6 shadow-xl">
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">
+                Ajouter une activité
+              </h3>
+              <p className="text-sm text-[color:var(--brand-charcoal)]">
+                Choisissez un composant à ajouter depuis le catalogue.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {availableCatalogOptions.length > 0 ? (
+                availableCatalogOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => handleSelectActivityToAdd(option.id)}
+                    className="w-full rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-4 py-3 text-left transition hover:border-[color:var(--brand-red)]/40 hover:bg-[color:var(--brand-red)]/5"
+                  >
+                    <div className="flex items-center justify-between text-sm font-semibold text-[color:var(--brand-black)]">
+                      <span>{option.title}</span>
+                      <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                        {option.componentKey}
+                      </span>
+                    </div>
+                    {option.description && (
+                      <p className="mt-1 text-xs text-[color:var(--brand-charcoal)]/80">
+                        {option.description}
+                      </p>
+                    )}
+                  </button>
+                ))
+              ) : (
+                <p className="rounded-2xl border border-dashed border-[color:var(--brand-charcoal)]/20 bg-gray-50 px-4 py-6 text-center text-sm text-[color:var(--brand-charcoal)]">
+                  Toutes les activités du catalogue sont déjà présentes.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setIsAddModalOpen(false)}
+                className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

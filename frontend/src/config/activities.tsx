@@ -36,7 +36,9 @@ export interface ActivityLayoutOptions {
   contentAs?: keyof JSX.IntrinsicElements;
 }
 
-export interface ActivityLayoutConfig extends ActivityHeaderConfig, ActivityLayoutOptions {}
+export interface ActivityLayoutConfig
+  extends ActivityHeaderConfig,
+    ActivityLayoutOptions {}
 
 export interface ActivityCardDefinition {
   title: string;
@@ -62,10 +64,16 @@ export interface ActivityProps {
   enabled?: boolean;
 }
 
-export interface ActivityDefinition {
-  id: string;
-  path: string;
-  component: ComponentType<ActivityProps>;
+export const COMPONENT_REGISTRY = {
+  "workshop-experience": WorkshopExperience,
+  "prompt-dojo": PromptDojo,
+  "clarity-path": ClarityPath,
+  "clarte-dabord": ClarteDabord,
+} as const satisfies Record<string, ComponentType<ActivityProps>>;
+
+export type ActivityComponentKey = keyof typeof COMPONENT_REGISTRY;
+
+interface ActivityCatalogEntryDefaults {
   completionId?: string;
   header: ActivityHeaderConfig;
   layout?: ActivityLayoutOptions;
@@ -73,49 +81,503 @@ export interface ActivityDefinition {
   enabled?: boolean;
 }
 
-export function mergeActivityDefinition(
-  base: ActivityDefinition,
-  override?: Partial<ActivityDefinition> | null
-): ActivityDefinition {
-  const mergedHeader: ActivityHeaderConfig = override?.header
-    ? { ...base.header, ...override.header }
-    : base.header;
+interface ActivityCatalogEntry {
+  componentKey: ActivityComponentKey;
+  path: string;
+  defaults: ActivityCatalogEntryDefaults;
+}
 
-  const layoutCandidate = {
-    ...(base.layout ?? {}),
-    ...(override?.layout ?? {}),
-  } as ActivityLayoutOptions;
-  const mergedLayout =
-    Object.keys(layoutCandidate).length > 0 ? layoutCandidate : base.layout;
+export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
+  atelier: {
+    componentKey: "workshop-experience",
+    path: "/atelier/*",
+    defaults: {
+      completionId: "atelier",
+      enabled: true,
+      header: {
+        eyebrow: "Atelier comparatif IA",
+        title: "Cadrez, comparez, synthétisez vos essais IA",
+        subtitle:
+          "Suivez une progression claire pour préparer votre contexte, explorer deux profils IA en flux continu puis transformer les sorties en ressources réutilisables.",
+        badge: "Trois étapes guidées",
+      },
+      layout: {
+        activityId: "atelier",
+        headerClassName: "space-y-8",
+        contentClassName: "space-y-12",
+      },
+      card: {
+        title: "Atelier comparatif IA",
+        description:
+          "Objectif : cadrer ta demande, comparer deux configurations IA et capitaliser sur les essais.",
+        highlights: [
+          "Définir le contexte et les attentes",
+          "Tester modèle, verbosité et raisonnement",
+          "Assembler une synthèse réutilisable",
+        ],
+        cta: {
+          label: "Lancer l’atelier",
+          to: "/atelier/etape-1",
+        },
+      },
+    },
+  },
+  "prompt-dojo": {
+    componentKey: "prompt-dojo",
+    path: "/prompt-dojo",
+    defaults: {
+      enabled: true,
+      header: {
+        eyebrow: "Prompt Dojo",
+        title: "Affûte ton prompt mission par mission",
+        subtitle:
+          "Choisis un défi parmi les missions et franchis les étapes pour décrocher ton badge en atteignant le score IA visé.",
+        badge: "Mode entraînement",
+      },
+      layout: {
+        contentAs: "div",
+        contentClassName: "gap-0",
+      },
+      card: {
+        title: "Prompt Dojo — Mission débutant",
+        description:
+          "Objectif : t’entraîner à affiner une consigne en suivant des défis progressifs.",
+        highlights: [
+          "Défis à difficulté graduelle",
+          "Retour immédiat sur la qualité du prompt",
+          "Construction d’une version finale personnalisée",
+        ],
+        cta: {
+          label: "Entrer dans le dojo",
+          to: "/prompt-dojo",
+        },
+      },
+    },
+  },
+  clarity: {
+    componentKey: "clarity-path",
+    path: "/parcours-clarte",
+    defaults: {
+      enabled: true,
+      header: {
+        eyebrow: "Parcours de la clarté",
+        title: "Guide le bonhomme avec une consigne limpide",
+        subtitle:
+          "Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas.",
+        badge: "Mode jeu",
+      },
+      layout: {
+        innerClassName: "relative",
+        contentAs: "div",
+        contentClassName: "gap-10",
+      },
+      card: {
+        title: "Parcours de la clarté",
+        description:
+          "Objectif : expérimenter la précision des consignes sur un parcours 10×10.",
+        highlights: [
+          "Plan d’action IA généré avant l’animation",
+          "Visualisation pas à pas avec obstacles",
+          "Analyse des tentatives et du surcoût",
+        ],
+        cta: {
+          label: "Tester la clarté",
+          to: "/parcours-clarte",
+        },
+      },
+    },
+  },
+  "clarte-dabord": {
+    componentKey: "clarte-dabord",
+    path: "/clarte-dabord",
+    defaults: {
+      enabled: true,
+      header: {
+        eyebrow: "Clarté d'abord !",
+        title: "Identifie ce qu'il fallait dire dès la première consigne",
+        subtitle:
+          "Tu joues l'IA : l'usager précise son besoin manche après manche. Observe ce qui manquait au brief initial et retiens la checklist idéale.",
+        badge: "Trois manches guidées",
+      },
+      layout: {
+        contentAs: "div",
+        contentClassName: "gap-10",
+      },
+      card: {
+        title: "Clarté d’abord !",
+        description:
+          "Objectif : mesurer l’impact d’un brief incomplet et révéler la checklist idéale.",
+        highlights: [
+          "Deux missions thématiques en trois manches",
+          "Champs guidés avec validations pédagogiques",
+          "Révélation finale et export JSON du menu",
+        ],
+        cta: {
+          label: "Lancer Clarté d’abord !",
+          to: "/clarte-dabord",
+        },
+      },
+    },
+  },
+};
 
-  const overrideCard = override?.card ?? {};
-  const mergedCard: ActivityCardDefinition = {
-    ...base.card,
-    ...overrideCard,
-    highlights: Array.isArray(overrideCard.highlights)
-      ? overrideCard.highlights
-      : base.card.highlights,
-    cta: overrideCard.cta
-      ? { ...base.card.cta, ...overrideCard.cta }
-      : base.card.cta,
+export interface ActivityCardOverrides
+  extends Partial<Omit<ActivityCardDefinition, "highlights" | "cta">> {
+  highlights?: string[];
+  cta?: Partial<ActivityCardDefinition["cta"]>;
+}
+
+export interface ActivityConfigOverrides {
+  header?: Partial<ActivityHeaderConfig>;
+  layout?: Partial<ActivityLayoutOptions>;
+  card?: ActivityCardOverrides;
+  completionId?: string;
+}
+
+export interface ActivityConfigEntry {
+  id: string;
+  componentKey?: string;
+  path?: string;
+  completionId?: string;
+  enabled?: boolean;
+  header?: ActivityHeaderConfig;
+  layout?: ActivityLayoutOptions;
+  card?: ActivityCardDefinition;
+  overrides?: ActivityConfigOverrides | null;
+}
+
+export interface ActivityDefinition {
+  id: string;
+  componentKey: ActivityComponentKey | string;
+  path: string;
+  component: ComponentType<ActivityProps> | null;
+  completionId?: string;
+  header: ActivityHeaderConfig;
+  layout?: ActivityLayoutOptions;
+  card: ActivityCardDefinition;
+  enabled?: boolean;
+}
+
+const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
+
+const SERIALIZABLE_LAYOUT_KEYS: Array<keyof ActivityLayoutOptions> = [
+  "activityId",
+  "outerClassName",
+  "innerClassName",
+  "headerClassName",
+  "contentClassName",
+  "contentAs",
+];
+
+function resolveComponent(
+  key: string | undefined
+): ComponentType<ActivityProps> | null {
+  if (!key) {
+    return null;
+  }
+  return (
+    COMPONENT_REGISTRY as Record<string, ComponentType<ActivityProps>>
+  )[key] ?? null;
+}
+
+function cloneHeader(header: ActivityHeaderConfig): ActivityHeaderConfig {
+  return { ...header };
+}
+
+function cloneLayout(
+  layout: ActivityLayoutOptions | undefined
+): ActivityLayoutOptions | undefined {
+  if (!layout) {
+    return undefined;
+  }
+  return { ...layout };
+}
+
+function cloneCard(card: ActivityCardDefinition): ActivityCardDefinition {
+  return {
+    ...card,
+    highlights: [...card.highlights],
+    cta: { ...card.cta },
   };
+}
 
-  const enabledValue =
-    override && "enabled" in override
-      ? override.enabled !== false
+function buildFallbackDefinition(
+  id: string,
+  entry: ActivityConfigEntry | null | undefined
+): ActivityDefinition {
+  const fallbackPath = entry?.path ?? `/activites/${id}`;
+  const baseHeader: ActivityHeaderConfig = entry?.header
+    ? cloneHeader(entry.header)
+    : {
+        eyebrow: "Activité",
+        title: `Activité ${id}`,
+      };
+  if (!baseHeader.title) {
+    baseHeader.title = `Activité ${id}`;
+  }
+
+  const rawCard = entry?.card;
+  const baseCard: ActivityCardDefinition = rawCard
+    ? {
+        ...rawCard,
+        highlights: Array.isArray(rawCard.highlights)
+          ? [...rawCard.highlights]
+          : [],
+        cta: rawCard.cta
+          ? { ...rawCard.cta }
+          : { label: "Découvrir", to: fallbackPath },
+      }
+    : {
+        title: baseHeader.title,
+        description: "",
+        highlights: [],
+        cta: { label: "Découvrir", to: fallbackPath },
+      };
+
+  if (!baseCard.cta) {
+    baseCard.cta = { label: "Découvrir", to: fallbackPath };
+  }
+
+  const componentKey = entry?.componentKey ?? "unknown";
+
+  return {
+    id,
+    componentKey,
+    path: fallbackPath,
+    component: resolveComponent(componentKey),
+    completionId: entry?.completionId ?? id,
+    header: baseHeader,
+    layout: entry?.layout ? cloneLayout(entry.layout) : undefined,
+    card: baseCard,
+    enabled: entry?.enabled !== false,
+  };
+}
+
+function buildDefinitionFromCatalog(
+  id: string,
+  entry: ActivityConfigEntry | null | undefined
+): ActivityDefinition {
+  const catalogEntry = ACTIVITY_CATALOG[id];
+  if (!catalogEntry) {
+    return buildFallbackDefinition(id, entry);
+  }
+
+  const { componentKey, path, defaults } = catalogEntry;
+  return {
+    id,
+    componentKey,
+    path,
+    component: resolveComponent(componentKey),
+    completionId: defaults.completionId ?? id,
+    header: cloneHeader(defaults.header),
+    layout: cloneLayout(defaults.layout),
+    card: cloneCard(defaults.card),
+    enabled: defaults.enabled !== false,
+  };
+}
+
+function extractHeaderOverrides(
+  overrides: Partial<ActivityLayoutConfig>
+): Partial<ActivityHeaderConfig> {
+  const header: Partial<ActivityHeaderConfig> = {};
+  ("eyebrow,title,subtitle,badge,titleAlign"
+    .split(",") as Array<keyof ActivityHeaderConfig>)
+    .forEach((key) => {
+      const value = overrides[key];
+      if (value !== undefined) {
+        header[key] = value as ActivityHeaderConfig[typeof key];
+      }
+    });
+  return header;
+}
+
+function extractLayoutOverrides(
+  overrides: Partial<ActivityLayoutConfig>
+): Partial<ActivityLayoutOptions> {
+  const layout: Partial<ActivityLayoutOptions> = {};
+  SERIALIZABLE_LAYOUT_KEYS.forEach((key) => {
+    const value = overrides[key];
+    if (value !== undefined) {
+      layout[key] = value as ActivityLayoutOptions[typeof key];
+    }
+  });
+  return layout;
+}
+
+function arraysEqual<T>(a: T[] | undefined, b: T[] | undefined): boolean {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+}
+
+function diffHeader(
+  base: ActivityHeaderConfig,
+  current: ActivityHeaderConfig
+): Partial<ActivityHeaderConfig> | undefined {
+  const diff: Partial<ActivityHeaderConfig> = {};
+  ("eyebrow,title,subtitle,badge,titleAlign"
+    .split(",") as Array<keyof ActivityHeaderConfig>)
+    .forEach((key) => {
+      if (base[key] !== current[key]) {
+        diff[key] = current[key];
+      }
+    });
+  return Object.keys(diff).length > 0 ? diff : undefined;
+}
+
+function diffLayout(
+  base: ActivityLayoutOptions | undefined,
+  current: ActivityLayoutOptions | undefined
+): Partial<ActivityLayoutOptions> | undefined {
+  const diff: Partial<ActivityLayoutOptions> = {};
+  SERIALIZABLE_LAYOUT_KEYS.forEach((key) => {
+    const baseValue = base?.[key];
+    const currentValue = current?.[key];
+    if (baseValue !== currentValue) {
+      diff[key] = currentValue as ActivityLayoutOptions[typeof key];
+    }
+  });
+  return Object.keys(diff).length > 0 ? diff : undefined;
+}
+
+function diffCard(
+  base: ActivityCardDefinition,
+  current: ActivityCardDefinition
+): ActivityCardOverrides | undefined {
+  const diff: ActivityCardOverrides = {};
+  if (base.title !== current.title) {
+    diff.title = current.title;
+  }
+  if (base.description !== current.description) {
+    diff.description = current.description;
+  }
+  if (!arraysEqual(base.highlights, current.highlights)) {
+    diff.highlights = [...current.highlights];
+  }
+  const ctaDiff: Partial<ActivityCardDefinition["cta"]> = {};
+  if (base.cta.label !== current.cta.label) {
+    ctaDiff.label = current.cta.label;
+  }
+  if (base.cta.to !== current.cta.to) {
+    ctaDiff.to = current.cta.to;
+  }
+  if (Object.keys(ctaDiff).length > 0) {
+    diff.cta = ctaDiff;
+  }
+  return Object.keys(diff).length > 0 ? diff : undefined;
+}
+
+export function resolveActivityDefinition(
+  entry: ActivityConfigEntry | null | undefined
+): ActivityDefinition {
+  if (!entry || !entry.id) {
+    throw new Error("Une configuration d'activité doit contenir un identifiant.");
+  }
+
+  const base = buildDefinitionFromCatalog(entry.id, entry);
+  const overrides = entry.overrides ?? undefined;
+
+  const componentKey = entry.componentKey ?? base.componentKey;
+  const component = resolveComponent(componentKey) ?? base.component;
+
+  const headerOverride = overrides?.header ?? entry.header;
+  const layoutOverride = overrides?.layout ?? entry.layout;
+  const cardOverride = overrides?.card ?? entry.card;
+  const completionOverride = overrides?.completionId ?? entry.completionId;
+
+  const header = headerOverride
+    ? { ...base.header, ...headerOverride }
+    : base.header;
+  const layout = layoutOverride
+    ? { ...(base.layout ?? {}), ...layoutOverride }
+    : base.layout;
+  const card = cardOverride
+    ? {
+        ...base.card,
+        ...cardOverride,
+        highlights: Array.isArray(cardOverride.highlights)
+          ? [...cardOverride.highlights]
+          : base.card.highlights,
+        cta: cardOverride.cta
+          ? { ...base.card.cta, ...cardOverride.cta }
+          : base.card.cta,
+      }
+    : base.card;
+
+  const enabled =
+    entry.enabled !== undefined
+      ? entry.enabled !== false
       : base.enabled !== false;
+
+  const path = entry.path ?? base.path;
+  const completionId = completionOverride ?? base.completionId ?? entry.id;
 
   return {
     ...base,
-    ...override,
-    path: override?.path ?? base.path,
-    completionId: override?.completionId ?? base.completionId,
-    header: mergedHeader,
-    layout: mergedLayout,
-    card: mergedCard,
-    enabled: enabledValue,
-    component: base.component,
+    componentKey,
+    component,
+    path,
+    completionId,
+    header,
+    layout,
+    card,
+    enabled,
   };
+}
+
+export function serializeActivityDefinition(
+  definition: ActivityDefinition
+): ActivityConfigEntry {
+  const base = resolveActivityDefinition({ id: definition.id });
+  const overrides: ActivityConfigOverrides = {};
+
+  const headerDiff = diffHeader(base.header, definition.header);
+  if (headerDiff) {
+    overrides.header = headerDiff;
+  }
+
+  const layoutDiff = diffLayout(base.layout, definition.layout);
+  if (layoutDiff) {
+    overrides.layout = layoutDiff;
+  }
+
+  const cardDiff = diffCard(base.card, definition.card);
+  if (cardDiff) {
+    overrides.card = cardDiff;
+  }
+
+  if (
+    definition.completionId &&
+    definition.completionId !== base.completionId
+  ) {
+    overrides.completionId = definition.completionId;
+  }
+
+  const payload: ActivityConfigEntry = {
+    id: definition.id,
+    componentKey: definition.componentKey,
+    path: definition.path,
+    enabled: definition.enabled !== false,
+  };
+
+  if (Object.keys(overrides).length > 0) {
+    payload.overrides = overrides;
+  }
+
+  return payload;
+}
+
+export function getDefaultActivityDefinitions(): ActivityDefinition[] {
+  return Object.keys(ACTIVITY_CATALOG).map((id) =>
+    resolveActivityDefinition({ id })
+  );
 }
 
 function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
@@ -138,35 +600,52 @@ function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
   return base;
 }
 
-export function buildActivityElement(definition: ActivityDefinition): JSX.Element {
-  const completionId = definition.completionId ?? definition.id;
-  const Component = definition.component;
-
+export function buildActivityElement(
+  configEntry: ActivityConfigEntry
+): JSX.Element {
   const ActivityElement = () => {
     const navigate = useNavigate();
-    const { token, isEditMode, setEditMode, status: adminStatus, user: adminUser } = useAdminAuth();
+    const {
+      token,
+      isEditMode,
+      setEditMode,
+      status: adminStatus,
+      user: adminUser,
+    } = useAdminAuth();
+
     const baseDefinition = useMemo(
-      () => mergeActivityDefinition(definition),
-      [definition]
+      () => resolveActivityDefinition({ id: configEntry.id }),
+      [configEntry.id]
     );
     const baseLayout = useMemo(
       () => buildBaseLayout(baseDefinition),
       [baseDefinition]
     );
-    const [overrides, setOverrides] = useState<Partial<ActivityLayoutConfig>>({});
-    const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(baseDefinition);
 
-    const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
-    const normaliseRoles = (roles: string[] | undefined | null): string[] =>
-      (roles ?? []).map((role) => role.toLowerCase().trim());
-    const canAccessAdmin = (roles: string[]): boolean =>
-      roles.some((role) => ADMIN_ROLES.includes(role));
+    const [overrides, setOverrides] =
+      useState<Partial<ActivityLayoutConfig>>({});
+    const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(
+      () => resolveActivityDefinition(configEntry)
+    );
 
     const isAdminAuthenticated = adminStatus === "authenticated";
-    const userRoles = normaliseRoles(adminUser?.roles);
-    const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
+    const userRoles = (adminUser?.roles ?? []).map((role) =>
+      role.toLowerCase().trim()
+    );
+    const canShowAdminButton =
+      isAdminAuthenticated &&
+      userRoles.some((role) => ADMIN_ROLES.includes(role));
 
-    // Charger la configuration sauvegardée au montage
+    const configSignature = useMemo(
+      () => JSON.stringify(configEntry),
+      [configEntry]
+    );
+
+    useEffect(() => {
+      setCurrentDefinition(resolveActivityDefinition(configEntry));
+      setOverrides({});
+    }, [configSignature]);
+
     useEffect(() => {
       let cancelled = false;
 
@@ -176,21 +655,24 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
           if (cancelled) {
             return;
           }
-          if (response.activities && response.activities.length > 0) {
+          if (Array.isArray(response.activities)) {
             const savedActivity = response.activities.find(
-              (activity: any) => activity.id === definition.id
+              (activity: any) => activity?.id === configEntry.id
             );
             if (savedActivity) {
               setCurrentDefinition(
-                mergeActivityDefinition(baseDefinition, savedActivity as Partial<ActivityDefinition>)
+                resolveActivityDefinition(savedActivity as ActivityConfigEntry)
               );
               return;
             }
           }
-          setCurrentDefinition(baseDefinition);
+          setCurrentDefinition(resolveActivityDefinition(configEntry));
         } catch (error) {
           if (!cancelled) {
-            console.warn('Aucune configuration sauvegardée trouvée pour cette activité');
+            console.warn(
+              "Aucune configuration sauvegardée trouvée pour cette activité"
+            );
+            setCurrentDefinition(resolveActivityDefinition(configEntry));
           }
         }
       };
@@ -200,7 +682,7 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
       return () => {
         cancelled = true;
       };
-    }, [baseDefinition, definition.id]);
+    }, [configEntry.id]);
 
     useEffect(() => {
       if (!isEditMode && currentDefinition.enabled === false) {
@@ -218,85 +700,125 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
     const mergedLayout: ActivityLayoutConfig = {
       ...currentBaseLayout,
       ...overrides,
-      actions: canShowAdminButton ? (
-        <div className="flex items-center gap-2">
-          {isEditMode ? (
-            <>
-              <button
-                onClick={() => setEditMode(false)}
-                className="inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100"
-              >
-                Quitter l'édition
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setEditMode(true)}
-              className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100"
-            >
-              Mode édition
-            </button>
-          )}
-        </div>
-      ) : baseLayout.actions,
+      actions: canShowAdminButton
+        ? (
+            <div className="flex items-center gap-2">
+              {isEditMode ? (
+                <>
+                  <button
+                    onClick={() => setEditMode(false)}
+                    className="inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100"
+                  >
+                    Quitter l'édition
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setEditMode(true)}
+                  className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100"
+                >
+                  Mode édition
+                </button>
+              )}
+            </div>
+          )
+        : baseLayout.actions,
     };
     const mergedBeforeHeader = mergedLayout.beforeHeader;
 
     const handleNavigateToActivities = useCallback(() => {
+      const completionId =
+        currentDefinition.completionId ?? currentDefinition.id;
       navigate("/activites", { state: { completed: completionId } });
-    }, [navigate]);
+    }, [currentDefinition.completionId, currentDefinition.id, navigate]);
 
-    const handleSetOverrides = useCallback((next: Partial<ActivityLayoutConfig>) => {
-      setOverrides(next);
-    }, []);
+    const handleSetOverrides = useCallback(
+      (next: Partial<ActivityLayoutConfig>) => {
+        setOverrides(next);
+      },
+      []
+    );
 
     const handleResetOverrides = useCallback(() => {
       setOverrides({});
     }, []);
 
-    const handleHeaderEdit = useCallback((field: 'eyebrow' | 'title' | 'subtitle' | 'badge', value: string) => {
-      setOverrides(prev => ({
-        ...prev,
-        [field]: value
-      }));
-    }, []);
+    const handleHeaderEdit = useCallback(
+      (field: "eyebrow" | "title" | "subtitle" | "badge", value: string) => {
+        setOverrides((prev) => ({
+          ...prev,
+          [field]: value,
+        }));
+      },
+      []
+    );
 
     const handleSaveActivity = useCallback(async () => {
-      // Créer la configuration mise à jour basée sur la définition actuelle
-      const updatedDefinition = {
+      const headerOverrides = extractHeaderOverrides(overrides);
+      const layoutOverrides = extractLayoutOverrides(overrides);
+
+      const updatedDefinition: ActivityDefinition = {
         ...currentDefinition,
         header: {
           ...currentDefinition.header,
-          ...overrides
-        }
+          ...headerOverrides,
+        },
+        layout: layoutOverrides
+          ? {
+              ...(currentDefinition.layout ?? {}),
+              ...layoutOverrides,
+            }
+          : currentDefinition.layout,
       };
 
-      // Charger toutes les activités actuelles
       try {
         const response = await activitiesClient.getConfig();
-        const allActivities =
-          response.activities && response.activities.length > 0
-            ? response.activities
-            : ACTIVITY_DEFINITIONS;
+        const existingActivities = Array.isArray(response.activities)
+          ? (response.activities as ActivityConfigEntry[])
+          : [];
 
-        // Mettre à jour l'activité courante
-        const updatedActivities = allActivities.map((activity: any) =>
-          activity.id === currentDefinition.id ? updatedDefinition : activity
+        const serialized = serializeActivityDefinition(updatedDefinition);
+
+        const baseActivities =
+          existingActivities.length > 0
+            ? existingActivities
+            : Object.keys(ACTIVITY_CATALOG).map(
+                (id) => ({ id } as ActivityConfigEntry)
+              );
+
+        let found = false;
+        const updatedActivities = baseActivities
+          .filter((activity) => activity && activity.id)
+          .map((activity) => {
+            if (activity.id === serialized.id) {
+              found = true;
+              return serialized;
+            }
+            return activity;
+          });
+        if (!found) {
+          updatedActivities.push(serialized);
+        }
+
+        await admin.activities.save(
+          {
+            activities: updatedActivities,
+            activitySelectorHeader: response.activitySelectorHeader,
+          },
+          token
         );
 
-        // Sauvegarder
-        await admin.activities.save({ activities: updatedActivities }, token);
-
-        // Mettre à jour l'état local avec la nouvelle définition
-        setCurrentDefinition(updatedDefinition);
+        setCurrentDefinition(resolveActivityDefinition(serialized));
         setOverrides({});
 
-        alert('Activité sauvegardée avec succès !');
+        alert("Activité sauvegardée avec succès !");
       } catch (error) {
-        console.error('Erreur lors de la sauvegarde:', error);
+        console.error("Erreur lors de la sauvegarde:", error);
         throw error;
       }
     }, [currentDefinition, overrides, token]);
+
+    const Component = currentDefinition.component;
 
     return (
       <ActivityLayout
@@ -315,154 +837,38 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
         activityConfig={currentDefinition}
         onSaveActivity={handleSaveActivity}
       >
-        <Component
-          activityId={currentDefinition.id}
-          completionId={completionId}
-          header={currentDefinition.header}
-          card={currentDefinition.card}
-          layout={mergedLayout}
-          layoutOverrides={overrides}
-          setLayoutOverrides={handleSetOverrides}
-          resetLayoutOverrides={handleResetOverrides}
-          navigateToActivities={handleNavigateToActivities}
-          isEditMode={isEditMode}
-          enabled={currentDefinition.enabled !== false}
-        />
+        {Component ? (
+          <Component
+            activityId={currentDefinition.id}
+            completionId={
+              currentDefinition.completionId ?? currentDefinition.id
+            }
+            header={{
+              ...currentDefinition.header,
+              ...extractHeaderOverrides(overrides),
+            }}
+            card={currentDefinition.card}
+            layout={mergedLayout}
+            layoutOverrides={overrides}
+            setLayoutOverrides={handleSetOverrides}
+            resetLayoutOverrides={handleResetOverrides}
+            navigateToActivities={handleNavigateToActivities}
+            isEditMode={isEditMode}
+            enabled={currentDefinition.enabled !== false}
+          />
+        ) : (
+          <div className="space-y-4 rounded-3xl border border-red-200 bg-red-50 p-6 text-red-800">
+            <h2 className="text-lg font-semibold">Activité indisponible</h2>
+            <p>
+              Le composant « {currentDefinition.componentKey} » est introuvable. Vérifiez la configuration de l'activité.
+            </p>
+          </div>
+        )}
       </ActivityLayout>
     );
   };
 
-  ActivityElement.displayName = `Activity(${definition.id})`;
+  ActivityElement.displayName = `Activity(${configEntry.id})`;
 
   return <ActivityElement />;
 }
-
-export const ACTIVITY_DEFINITIONS: ActivityDefinition[] = [
-  {
-    id: "atelier",
-    path: "/atelier/*",
-    component: WorkshopExperience,
-    completionId: "atelier",
-    enabled: true,
-    header: {
-      eyebrow: "Atelier comparatif IA",
-      title: "Cadrez, comparez, synthétisez vos essais IA",
-      subtitle:
-        "Suivez une progression claire pour préparer votre contexte, explorer deux profils IA en flux continu puis transformer les sorties en ressources réutilisables.",
-      badge: "Trois étapes guidées",
-    },
-    layout: {
-      activityId: "atelier",
-      headerClassName: "space-y-8",
-      contentClassName: "space-y-12",
-    },
-    card: {
-      title: "Atelier comparatif IA",
-      description:
-        "Objectif : cadrer ta demande, comparer deux configurations IA et capitaliser sur les essais.",
-      highlights: [
-        "Définir le contexte et les attentes",
-        "Tester modèle, verbosité et raisonnement",
-        "Assembler une synthèse réutilisable",
-      ],
-      cta: {
-        label: "Lancer l’atelier",
-        to: "/atelier/etape-1",
-      },
-    },
-  },
-  {
-    id: "prompt-dojo",
-    path: "/prompt-dojo",
-    component: PromptDojo,
-    enabled: true,
-    header: {
-      eyebrow: "Prompt Dojo",
-      title: "Affûte ton prompt mission par mission",
-      subtitle:
-        "Choisis un défi parmi les missions et franchis les étapes pour décrocher ton badge en atteignant le score IA visé.",
-      badge: "Mode entraînement",
-    },
-    layout: {
-      contentAs: "div",
-      contentClassName: "gap-0",
-    },
-    card: {
-      title: "Prompt Dojo — Mission débutant",
-      description:
-        "Objectif : t’entraîner à affiner une consigne en suivant des défis progressifs.",
-      highlights: [
-        "Défis à difficulté graduelle",
-        "Retour immédiat sur la qualité du prompt",
-        "Construction d’une version finale personnalisée",
-      ],
-      cta: {
-        label: "Entrer dans le dojo",
-        to: "/prompt-dojo",
-      },
-    },
-  },
-  {
-    id: "clarity",
-    path: "/parcours-clarte",
-    component: ClarityPath,
-    enabled: true,
-    header: {
-      eyebrow: "Parcours de la clarté",
-      title: "Guide le bonhomme avec une consigne limpide",
-      subtitle:
-        "Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas.",
-      badge: "Mode jeu",
-    },
-    layout: {
-      innerClassName: "relative",
-      contentAs: "div",
-      contentClassName: "gap-10",
-    },
-    card: {
-      title: "Parcours de la clarté",
-      description:
-        "Objectif : expérimenter la précision des consignes sur un parcours 10×10.",
-      highlights: [
-        "Plan d’action IA généré avant l’animation",
-        "Visualisation pas à pas avec obstacles",
-        "Analyse des tentatives et du surcoût",
-      ],
-      cta: {
-        label: "Tester la clarté",
-        to: "/parcours-clarte",
-      },
-    },
-  },
-  {
-    id: "clarte-dabord",
-    path: "/clarte-dabord",
-    component: ClarteDabord,
-    enabled: true,
-    header: {
-      eyebrow: "Clarté d'abord !",
-      title: "Identifie ce qu'il fallait dire dès la première consigne",
-      subtitle:
-        "Tu joues l'IA : l'usager précise son besoin manche après manche. Observe ce qui manquait au brief initial et retiens la checklist idéale.",
-      badge: "Trois manches guidées",
-    },
-    layout: {
-      contentAs: "div",
-      contentClassName: "gap-10",
-    },
-    card: {
-      title: "Clarté d’abord !",
-      description:
-        "Objectif : mesurer l’impact d’un brief incomplet et révéler la checklist idéale.",
-      highlights: [
-        "Deux missions thématiques en trois manches",
-        "Champs guidés avec validations pédagogiques",
-        "Révélation finale et export JSON du menu",
-      ],
-      cta: {
-        label: "Lancer Clarté d’abord !",
-        to: "/clarte-dabord",
-      },
-    },
-  },
-];
