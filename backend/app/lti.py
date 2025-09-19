@@ -973,22 +973,26 @@ class LTIService:
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/vnd.ims.lis.v1.score+json",
         }
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc)
+        elif timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
+
         score_payload = {
             "userId": session.subject,
             "scoreGiven": score_given,
             "scoreMaximum": score_maximum,
             "activityProgress": activity_progress,
             "gradingProgress": grading_progress,
-            "timestamp": (timestamp or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
+            "timestamp": timestamp.isoformat(timespec="seconds").replace("+00:00", "Z"),
         }
 
         lineitem_url = lineitem.strip()
         parsed_lineitem = urlsplit(lineitem_url)
-        if parsed_lineitem.scheme and parsed_lineitem.netloc:
-            score_path = parsed_lineitem.path.rstrip("/") + "/scores"
-            score_url = urlunsplit(parsed_lineitem._replace(path=score_path))
-        else:
-            score_url = lineitem_url.rstrip("/") + "/scores"
+        score_path = parsed_lineitem.path.rstrip("/") + "/scores"
+        score_url = urlunsplit(parsed_lineitem._replace(path=score_path))
 
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             response = await client.post(score_url, json=score_payload, headers=headers)
