@@ -280,14 +280,6 @@ function PromptDojo({ completionId, navigateToActivities }: ActivityProps): JSX.
       <section className="rounded-3xl border border-white/70 bg-white p-8 shadow-sm">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <div className="space-y-5">
-            <div className="space-y-2">
-              <span className="text-xs uppercase tracking-[0.35em] text-[color:var(--brand-charcoal)]/70">Briefing du dojo</span>
-              <h2 className="text-3xl font-semibold text-[color:var(--brand-black)]">Choisis ta mission</h2>
-              <p className="max-w-2xl text-sm text-[color:var(--brand-charcoal)]/85">
-                Chaque mission te plonge dans une situation vécue au cégep. Sélectionne ton défi, puis franchis les étapes pour
-                décrocher le badge.
-              </p>
-            </div>
 
             <div className="space-y-3">
               <p className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
