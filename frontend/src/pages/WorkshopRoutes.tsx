@@ -2,7 +2,7 @@ import { Dispatch, SetStateAction, useMemo } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import Layout from "../components/Layout";
-import type { Flashcard } from "../App";
+import type { Flashcard } from "../types/flashcards";
 import type { ModelConfig } from "../config";
 import StepOne from "./StepOne";
 import StepThree from "./StepThree";
