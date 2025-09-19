@@ -134,6 +134,8 @@ def base64url_uint(value: int) -> str:
 
 @dataclass(slots=True)
 class LTIKeySet:
+    private_key: RSAPrivateKey
+    public_key: RSAPublicKey
     private_key_pem: str
     public_key_pem: str
     key_id: str
@@ -465,7 +467,13 @@ def _load_keys() -> LTIKeySet:
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("utf-8")
     key_id = _compute_key_id(public_key)
-    return LTIKeySet(private_key_pem=private_pem, public_key_pem=public_pem, key_id=key_id)
+    return LTIKeySet(
+        private_key=private_key,
+        public_key=public_key,
+        private_key_pem=private_pem,
+        public_key_pem=public_pem,
+        key_id=key_id,
+    )
 
 
 class LTIService:
@@ -491,7 +499,7 @@ class LTIService:
         self._platforms = _load_platform_configurations()
 
     def jwks_document(self) -> dict[str, Any]:
-        public_key = serialization.load_pem_public_key(self._key_set.public_key_pem.encode("utf-8"))
+        public_key = self._key_set.public_key
         if not isinstance(public_key, RSAPublicKey):  # pragma: no cover - defensive branch
             raise LTIConfigurationError("La clé publique LTI doit être de type RSA.")
         numbers = public_key.public_numbers()
@@ -783,10 +791,7 @@ class LTIService:
         context: DeepLinkContext,
         content_items: list[dict[str, Any]],
     ) -> str:
-        private_key = serialization.load_pem_private_key(
-            self._key_set.private_key_pem.encode("utf-8"),
-            password=None,
-        )
+        private_key = self._key_set.private_key
         now = int(time.time())
         payload: dict[str, Any] = {
             "iss": context.client_id,
@@ -807,10 +812,7 @@ class LTIService:
 
     async def obtain_access_token(self, platform: LTIPlatformConfig, scopes: Iterable[str]) -> dict[str, Any]:
         # Load the private key as a cryptography object for PyJWT
-        private_key = serialization.load_pem_private_key(
-            self._key_set.private_key_pem.encode("utf-8"),
-            password=None
-        )
+        private_key = self._key_set.private_key
         now = int(time.time())
         payload = {
             "iss": platform.client_id,
