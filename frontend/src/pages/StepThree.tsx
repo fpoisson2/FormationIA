@@ -1,9 +1,8 @@
-import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Dispatch, SetStateAction, useMemo, useState } from "react";
 
 import { API_BASE_URL, API_AUTH_KEY, MODEL_OPTIONS, type ModelConfig } from "../config";
 import type { Flashcard } from "../App";
-import { updateActivityProgress } from "../api";
+import { useActivityCompletion } from "../hooks/useActivityCompletion";
 
 interface StepThreeProps {
   sourceText: string;
@@ -15,6 +14,8 @@ interface StepThreeProps {
   setFlashcardsB: Dispatch<SetStateAction<Flashcard[]>>;
   configA: ModelConfig;
   configB: ModelConfig;
+  completionId: string;
+  navigateToActivities: () => void;
 }
 
 function StepThree({
@@ -27,16 +28,25 @@ function StepThree({
   setFlashcardsB,
   configA,
   configB,
+  completionId,
+  navigateToActivities,
 }: StepThreeProps): JSX.Element {
-  const navigate = useNavigate();
   const [loadingSide, setLoadingSide] = useState<"A" | "B" | null>(null);
   const [errorSide, setErrorSide] = useState<string | null>(null);
   const [finalSummary, setFinalSummary] = useState("");
   const [finalSummaryLoading, setFinalSummaryLoading] = useState(false);
   const [finalSummaryError, setFinalSummaryError] = useState<string | null>(null);
-  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
-
   const canGenerate = useMemo(() => Boolean(sourceText.trim()), [sourceText]);
+  const summaryReady = useMemo(() => Boolean(finalSummary.trim()), [finalSummary]);
+
+  useActivityCompletion({
+    activityId: completionId,
+    onCompleted: () => navigateToActivities(),
+    autoComplete: {
+      condition: summaryReady,
+      triggerCompletionCallback: true,
+    },
+  });
 
   const handleCardsBoth = async () => {
     if (!canGenerate) {
@@ -150,22 +160,6 @@ function StepThree({
     }
   };
 
-  useEffect(() => {
-    if (!finalSummary.trim() || activityProgressMarked) {
-      return;
-    }
-    const markProgressAndNavigate = async () => {
-      try {
-        await updateActivityProgress({ activityId: "atelier", completed: true });
-      } catch (error) {
-        console.error("Unable to persist atelier progress", error);
-      }
-      setActivityProgressMarked(true);
-      navigate("/activites", { state: { completed: "atelier" } });
-    };
-    void markProgressAndNavigate();
-  }, [finalSummary, activityProgressMarked, navigate]);
-
   return (
     <div className="space-y-12">
       <section className="page-section landing-panel bg-white/95 space-y-6 animate-section">
@@ -179,10 +173,10 @@ function StepThree({
           </div>
           <button
             type="button"
-            onClick={() => navigate("/atelier/etape-2")}
+            onClick={() => window.history.back()}
             className="cta-button cta-button--light"
           >
-            Revenir à l’étape 2
+            Revenir à l'étape 2
           </button>
         </div>
         <div className="section-divider my-6" />

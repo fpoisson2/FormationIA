@@ -8,6 +8,7 @@ const NAV_LINKS = [
   { to: "/admin/platforms", label: "Plateformes LTI" },
   { to: "/admin/lti-users", label: "Utilisateurs LTI" },
   { to: "/admin/local-users", label: "Comptes internes" },
+  { to: "/admin/activity-tracking", label: "Suivi d'activités" },
 ];
 
 export function AdminLayout(): JSX.Element {

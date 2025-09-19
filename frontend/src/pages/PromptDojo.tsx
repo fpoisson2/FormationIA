@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 
 import logoPrincipal from "../assets/logo_principal.svg";
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
-import { updateActivityProgress } from "../api";
+import { useActivityCompletion } from "../hooks/useActivityCompletion";
+import type { ActivityProps } from "../config/activities";
 
 type Stage = "briefing" | "arena-writing" | "arena-results";
 
@@ -110,8 +110,7 @@ const MISSIONS: Mission[] = [
 
 const DEFAULT_MISSION = MISSIONS[0];
 
-function PromptDojo(): JSX.Element {
-  const navigate = useNavigate();
+function PromptDojo({ completionId, navigateToActivities }: ActivityProps): JSX.Element {
   const [missionId, setMissionId] = useState(DEFAULT_MISSION.id);
   const mission = useMemo(() => MISSIONS.find((item) => item.id === missionId) ?? DEFAULT_MISSION, [missionId]);
   const [stage, setStage] = useState<Stage>("briefing");
@@ -120,37 +119,53 @@ function PromptDojo(): JSX.Element {
   const [aiScore, setAiScore] = useState<AiScoreReport | null>(null);
   const [scoreLoading, setScoreLoading] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
-  const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
-  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
 
   const { isLTISession, submitScore, context, error: ltiError } = useLTI();
 
-  const markActivityCompletion = useCallback(async () => {
-    if (!aiScore || aiScore.total < mission.targetScore) {
-      return false;
-    }
+  const completionResetDeps = useMemo(() => [mission.id], [mission.id]);
+  const canCompleteMission = Boolean(aiScore && aiScore.total >= mission.targetScore);
 
-    if (activityProgressMarked) {
-      return true;
-    }
-
-    try {
-      await updateActivityProgress({ activityId: "prompt-dojo", completed: true });
-      setActivityProgressMarked(true);
-      return true;
-    } catch (error) {
-      console.error("Unable to persist Prompt Dojo progress", error);
-      return false;
-    }
-  }, [aiScore, mission, activityProgressMarked]);
+  const { markCompleted, ltiScoreSubmitted } = useActivityCompletion({
+    activityId: completionId,
+    onCompleted: () => navigateToActivities(),
+    autoComplete: {
+      condition: canCompleteMission,
+    },
+    lti: isLTISession
+      ? {
+          isSession: isLTISession,
+          submitScore,
+          canSubmit: canCompleteMission,
+          buildPayload: () => {
+            if (!aiScore) {
+              return null;
+            }
+            return {
+              missionId: mission.id,
+              success: true,
+              scoreGiven: 1.0,
+              scoreMaximum: 1.0,
+              activityProgress: "Completed",
+              gradingProgress: "FullyGraded",
+              metadata: {
+                aiScore: aiScore.total,
+                targetScore: mission.targetScore,
+                missionTitle: mission.title,
+                badge: mission.badge,
+              },
+            };
+          },
+        }
+      : undefined,
+    resetOn: completionResetDeps,
+  });
 
   const handleFinish = async () => {
     if (!aiScore || aiScore.total < mission.targetScore) {
       return;
     }
 
-    await markActivityCompletion();
-    navigate("/activites", { state: { completed: "prompt-dojo" } });
+    await markCompleted({ triggerCompletionCallback: true });
   };
 
   useEffect(() => {
@@ -158,44 +173,7 @@ function PromptDojo(): JSX.Element {
     setAiScore(null);
     setScoreError(null);
     setStage("briefing");
-    setLtiScoreSubmitted(false);
-    setActivityProgressMarked(false);
   }, [mission]);
-
-  // Submit score to LTI when activity is successfully completed
-  useEffect(() => {
-    const synchronizeProgress = async () => {
-      if (
-        isLTISession &&
-        aiScore &&
-        aiScore.total >= mission.targetScore &&
-        !ltiScoreSubmitted
-      ) {
-        const success = await submitScore({
-          missionId: mission.id,
-          success: true,
-          scoreGiven: 1.0,
-          scoreMaximum: 1.0,
-          activityProgress: "Completed",
-          gradingProgress: "FullyGraded",
-          metadata: {
-            aiScore: aiScore.total,
-            targetScore: mission.targetScore,
-            missionTitle: mission.title,
-            badge: mission.badge,
-          },
-        });
-
-        if (success) {
-          setLtiScoreSubmitted(true);
-        }
-      }
-
-      await markActivityCompletion();
-    };
-
-    synchronizeProgress();
-  }, [aiScore, mission, isLTISession, submitScore, ltiScoreSubmitted, markActivityCompletion]);
 
   const missionProgress = aiScore
     ? clamp(Math.round((aiScore.total / mission.targetScore) * 100), 0, 120)

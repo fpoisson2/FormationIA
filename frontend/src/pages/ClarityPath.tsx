@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
-import { updateActivityProgress } from "../api";
-import ActivityLayout from "../components/ActivityLayout";
+import { useActivityCompletion } from "../hooks/useActivityCompletion";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
+import type { ActivityProps } from "../config/activities";
 
 const GRID_SIZE = 10;
 
@@ -380,8 +380,27 @@ function StatsModal({
   );
 }
 
-function ClarityPath(): JSX.Element {
-  const navigate = useNavigate();
+function ClarityPath({
+  activityId,
+  completionId,
+  header,
+  setLayoutOverrides,
+  resetLayoutOverrides,
+  navigateToActivities,
+}: ActivityProps): JSX.Element {
+  const { isEditMode } = useAdminAuth();
+  const [localHeader, setLocalHeader] = useState(header);
+
+  const handleHeaderEdit = useCallback((field: 'eyebrow' | 'title' | 'subtitle' | 'badge', value: string) => {
+    setLocalHeader(prev => ({
+      ...prev,
+      [field]: value
+    }));
+
+    setLayoutOverrides({
+      [field]: value
+    });
+  }, [setLayoutOverrides]);
   const [phase, setPhase] = useState<GamePhase>("intro");
   const [status, setStatus] = useState<RunStatus>("idle");
   const [instruction, setInstruction] = useState("");
@@ -396,16 +415,56 @@ function ClarityPath(): JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
-  const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
-  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
   const [isCompletingActivity, setIsCompletingActivity] = useState(false);
 
   const { isLTISession, submitScore, context, error: ltiError } = useLTI();
-
   const isResultsPhase = phase === "results";
   const isBriefPhase = phase === "brief";
   const isInstructionDisabled = isLoading || !isBriefPhase;
   const areObstacleActionsDisabled = isLoading || !isBriefPhase;
+
+  const canCompleteActivity = isResultsPhase && Boolean(stats?.success);
+  const canSubmitLtiScore = isResultsPhase && status === "success" && Boolean(stats?.success);
+
+  const { markCompleted } = useActivityCompletion({
+    activityId: completionId,
+    onCompleted: () => navigateToActivities(),
+    autoComplete: {
+      condition: canCompleteActivity,
+    },
+    lti: isLTISession
+      ? {
+          isSession: isLTISession,
+          submitScore,
+          canSubmit: canSubmitLtiScore,
+          buildPayload: () => {
+            if (!stats) {
+              return null;
+            }
+            const efficiency = stats.optimalPathLength
+              ? Math.max(0, 1 - (stats.surcout || 0) / stats.optimalPathLength)
+              : 1;
+            return {
+              missionId: "clarity-path",
+              success: true,
+              scoreGiven: 1.0,
+              scoreMaximum: 1.0,
+              activityProgress: "Completed",
+              gradingProgress: "FullyGraded",
+              metadata: {
+                attempts: stats.attempts,
+                stepsExecuted: stats.stepsExecuted,
+                optimalPathLength: stats.optimalPathLength,
+                surcout: stats.surcout,
+                efficiency,
+                durationMs: stats.durationMs,
+                runId: stats.runId,
+              },
+            };
+          },
+        }
+      : undefined,
+  });
 
   const runIdRef = useRef<string>(createRunId());
   const controllerRef = useRef<AbortController | null>(null);
@@ -416,6 +475,36 @@ function ClarityPath(): JSX.Element {
   const stepTimerRef = useRef<number | null>(null);
   const openModalTimeoutRef = useRef<number | null>(null);
   const showModalWhenReadyRef = useRef(false);
+
+  useEffect(() => {
+    if (phase === "intro") {
+      setLayoutOverrides({
+        activityId: `${activityId}-intro`,
+        title: "Donner une bonne consigne, c’est gagner du temps.",
+        subtitle:
+          "Avant de jouer, découvre comment la précision de tes instructions influence directement le trajet de notre bonhomme. Formule une consigne claire pour atteindre la cible rapidement.",
+        badge: undefined,
+        titleAlign: "center",
+        contentClassName: "gap-0",
+        beforeHeader: undefined,
+        innerClassName: undefined,
+      });
+    } else {
+      resetLayoutOverrides();
+    }
+
+    return () => {
+      resetLayoutOverrides();
+    };
+  }, [phase, activityId, setLayoutOverrides, resetLayoutOverrides]);
+
+  useEffect(() => {
+    if (phase !== "intro") {
+      setLayoutOverrides({
+        beforeHeader: <FireworksOverlay active={celebrating} />,
+      });
+    }
+  }, [phase, celebrating, setLayoutOverrides]);
 
   useEffect(() => {
     return () => {
@@ -435,56 +524,6 @@ function ClarityPath(): JSX.Element {
     };
   }, []);
 
-  // Submit score to LTI when activity is successfully completed
-  useEffect(() => {
-    const synchronizeProgress = async () => {
-      if (
-        isResultsPhase &&
-        isLTISession &&
-        status === "success" &&
-        stats &&
-        stats.success &&
-        !ltiScoreSubmitted
-      ) {
-        const efficiency = stats.optimalPathLength
-          ? Math.max(0, 1 - (stats.surcout || 0) / stats.optimalPathLength)
-          : 1;
-
-        const success = await submitScore({
-          missionId: "clarity-path",
-          success: true,
-          scoreGiven: 1.0,
-          scoreMaximum: 1.0,
-          activityProgress: "Completed",
-          gradingProgress: "FullyGraded",
-          metadata: {
-            attempts: stats.attempts,
-            stepsExecuted: stats.stepsExecuted,
-            optimalPathLength: stats.optimalPathLength,
-            surcout: stats.surcout,
-            efficiency: efficiency,
-            durationMs: stats.durationMs,
-            runId: stats.runId,
-          },
-        });
-
-        if (success) {
-          setLtiScoreSubmitted(true);
-        }
-      }
-
-      if (isResultsPhase && stats?.success && !activityProgressMarked) {
-        try {
-          await updateActivityProgress({ activityId: "clarity", completed: true });
-          setActivityProgressMarked(true);
-        } catch (error) {
-          console.error("Unable to persist clarity path progress", error);
-        }
-      }
-    };
-
-    synchronizeProgress();
-  }, [status, stats, isLTISession, submitScore, ltiScoreSubmitted, activityProgressMarked, isResultsPhase]);
 
   const triggerCelebration = useCallback(() => {
     setCelebrating(true);
@@ -842,17 +881,16 @@ function ClarityPath(): JSX.Element {
     }
     setIsCompletingActivity(true);
     try {
-      await updateActivityProgress({ activityId: "clarity", completed: true });
-      setActivityProgressMarked(true);
-    } catch (error) {
-      console.error("Unable to persist clarity path progress", error);
+      const success = await markCompleted({ triggerCompletionCallback: true });
+      if (!success) {
+        navigateToActivities();
+      }
     } finally {
       if (mountedRef.current) {
         setIsCompletingActivity(false);
       }
-      navigate("/activites", { state: { completed: "clarity" } });
     }
-  }, [isCompletingActivity, navigate]);
+  }, [isCompletingActivity, markCompleted, navigateToActivities]);
 
   const statsSummary = useMemo(() => {
     if (!stats) {
@@ -873,52 +911,32 @@ function ClarityPath(): JSX.Element {
 
   if (phase === "intro") {
     return (
-      <ActivityLayout
-        activityId="clarity-intro"
-        eyebrow="Parcours de la clarté"
-        title="Donner une bonne consigne, c’est gagner du temps."
-        subtitle="Avant de jouer, découvre comment la précision de tes instructions influence directement le trajet de notre bonhomme. Formule une consigne claire pour atteindre la cible rapidement."
-        titleAlign="center"
-        contentAs="div"
-        contentClassName="gap-0"
-      >
-        <div className="mx-auto flex max-w-4xl flex-col gap-10 text-center">
-          <div className="grid gap-4 text-left text-sm text-[color:var(--brand-charcoal)] md:grid-cols-3">
-            <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
-              Une consigne vague = essais, détours, blocages.
-            </div>
-            <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
-              Une consigne précise = trajectoire directe et résultat fiable.
-            </div>
-            <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
-              Ici, ta formulation influe sur le chemin du bonhomme.
-            </div>
+      <div className="mx-auto flex max-w-4xl flex-col gap-10 text-center">
+        <div className="grid gap-4 text-left text-sm text-[color:var(--brand-charcoal)] md:grid-cols-3">
+          <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
+            Une consigne vague = essais, détours, blocages.
           </div>
-          <button
-            type="button"
-            onClick={handleStart}
-            className="cta-button cta-button--primary mx-auto inline-flex items-center gap-2"
-          >
-            Jouer
-            <span className="text-lg">→</span>
-          </button>
+          <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
+            Une consigne précise = trajectoire directe et résultat fiable.
+          </div>
+          <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
+            Ici, ta formulation influe sur le chemin du bonhomme.
+          </div>
         </div>
-      </ActivityLayout>
+        <button
+          type="button"
+          onClick={handleStart}
+          className="cta-button cta-button--primary mx-auto inline-flex items-center gap-2"
+        >
+          Jouer
+          <span className="text-lg">→</span>
+        </button>
+      </div>
     );
   }
 
   return (
-    <ActivityLayout
-      activityId="clarity"
-      eyebrow="Parcours de la clarté"
-      title="Guide le bonhomme avec une consigne limpide"
-      subtitle="Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas."
-      badge="Mode jeu"
-      beforeHeader={<FireworksOverlay active={celebrating} />}
-      innerClassName="relative"
-      contentAs="div"
-      contentClassName="gap-10"
-    >
+    <>
       <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <section className="rounded-3xl border border-white/60 bg-white/85 p-8 shadow-sm backdrop-blur">
           <div className="flex flex-col gap-8">
@@ -1024,7 +1042,7 @@ function ClarityPath(): JSX.Element {
           }}
         />
       )}
-    </ActivityLayout>
+    </>
   );
 
 }

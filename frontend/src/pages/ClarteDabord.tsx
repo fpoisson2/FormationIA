@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import type { Mission, StageAnswer, StageRecord } from "../api";
-import { getMissions, submitStage, updateActivityProgress } from "../api";
-import ActivityLayout from "../components/ActivityLayout";
+import { getMissions, submitStage } from "../api";
+import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import FinalReveal from "../components/FinalReveal";
 import MissionSelector from "../components/MissionSelector";
 import PromptStage from "../components/PromptStage";
+import type { ActivityProps } from "../config/activities";
 
 function generateRunId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -14,8 +14,7 @@ function generateRunId(): string {
   return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function ClarteDabord(): JSX.Element {
-  const navigate = useNavigate();
+function ClarteDabord({ completionId, navigateToActivities }: ActivityProps): JSX.Element {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +25,11 @@ function ClarteDabord(): JSX.Element {
   const [runId, setRunId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [activityProgressMarked, setActivityProgressMarked] = useState(false);
+
+  const { markCompleted } = useActivityCompletion({
+    activityId: completionId,
+    onCompleted: () => navigateToActivities(),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +71,6 @@ function ClarteDabord(): JSX.Element {
       setRecords([]);
       setRunId(generateRunId());
       setServerError(null);
-      setActivityProgressMarked(false);
     },
     []
   );
@@ -79,7 +81,6 @@ function ClarteDabord(): JSX.Element {
     setRecords([]);
     setRunId(null);
     setServerError(null);
-    setActivityProgressMarked(false);
   }, []);
 
   const handleReplay = useCallback(() => {
@@ -90,7 +91,6 @@ function ClarteDabord(): JSX.Element {
     setRecords([]);
     setRunId(generateRunId());
     setServerError(null);
-    setActivityProgressMarked(false);
   }, [selectedMission]);
 
   const handleSubmitStage = useCallback(
@@ -145,16 +145,11 @@ function ClarteDabord(): JSX.Element {
   }, [missions, resetToSelector, selectedMission, startMission]);
 
   const handleFinish = useCallback(async () => {
-    if (!activityProgressMarked) {
-      try {
-        await updateActivityProgress({ activityId: "clarte-dabord", completed: true });
-        setActivityProgressMarked(true);
-      } catch (error) {
-        console.error("Unable to persist Clarté d'abord progress", error);
-      }
+    const success = await markCompleted({ triggerCompletionCallback: true });
+    if (!success) {
+      navigateToActivities();
     }
-    navigate("/activites", { state: { completed: "clarte-dabord" } });
-  }, [activityProgressMarked, navigate, updateActivityProgress]);
+  }, [markCompleted, navigateToActivities]);
 
   const missionContent = () => {
     if (!selectedMission) {
@@ -191,41 +186,37 @@ function ClarteDabord(): JSX.Element {
     );
   };
 
-  return (
-    <ActivityLayout
-      activityId="clarte-dabord"
-      eyebrow="Clarté d’abord !"
-      title="Identifie ce qu’il fallait dire dès la première consigne"
-      subtitle="Tu joues l’IA : l’usager précise son besoin manche après manche. Observe ce qui manquait au brief initial et retiens la checklist idéale."
-      badge="Trois manches guidées"
-      contentAs="div"
-      contentClassName="gap-10"
-    >
-      {loading ? (
-        <div className="rounded-3xl border border-white/60 bg-white/90 p-6 text-center text-sm text-[color:var(--brand-charcoal)]">
-          Chargement des missions…
-        </div>
-      ) : error ? (
-        <div className="space-y-4 rounded-3xl border border-white/60 bg-white/90 p-6 text-center shadow-sm">
-          <p className="text-sm font-semibold text-red-600">{error}</p>
-          <button
-            type="button"
-            className="cta-button cta-button--light"
-            onClick={() => {
-              setSelectedMissionId(null);
-              setReloadCount((count) => count + 1);
-            }}
-          >
-            Réessayer
-          </button>
-        </div>
-      ) : !selectedMission ? (
-        <MissionSelector missions={missions} onSelect={startMission} />
-      ) : (
-        missionContent()
-      )}
-    </ActivityLayout>
-  );
+  if (loading) {
+    return (
+      <div className="rounded-3xl border border-white/60 bg-white/90 p-6 text-center text-sm text-[color:var(--brand-charcoal)]">
+        Chargement des missions…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-4 rounded-3xl border border-white/60 bg-white/90 p-6 text-center shadow-sm">
+        <p className="text-sm font-semibold text-red-600">{error}</p>
+        <button
+          type="button"
+          className="cta-button cta-button--light"
+          onClick={() => {
+            setSelectedMissionId(null);
+            setReloadCount((count) => count + 1);
+          }}
+        >
+          Réessayer
+        </button>
+      </div>
+    );
+  }
+
+  if (!selectedMission) {
+    return <MissionSelector missions={missions} onSelect={startMission} />;
+  }
+
+  return missionContent();
 }
 
 export default ClarteDabord;

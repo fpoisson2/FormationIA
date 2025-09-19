@@ -13,29 +13,28 @@ import { useAdminAuth } from "../../providers/AdminAuthProvider";
 interface LocalUserFormState {
   username: string;
   password: string;
-  roles: string;
+  roles: string[];
   isActive: boolean;
 }
+
+const AVAILABLE_ROLES = [
+  { value: "admin", label: "Administrateur", description: "Accès complet aux pages d'administration" },
+  { value: "usager", label: "Usager", description: "Accès aux activités de formation" },
+] as const;
+
+// Note: Les guards acceptent aussi ces variantes pour compatibilité :
+// Admin: "superadmin", "administrator"
+// Usager: "user", "participant", "learner", "etudiant", "étudiant"
 
 function createFormState(user?: AdminLocalUser | null): LocalUserFormState {
   return {
     username: user?.username ?? "",
     password: "",
-    roles: (user?.roles ?? ["admin"]).join(", "),
+    roles: user?.roles ?? ["admin"],
     isActive: user?.isActive ?? true,
   };
 }
 
-function parseRoles(value: string): string[] | undefined {
-  const parts = value
-    .split(/[,\s]+/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-  if (parts.length === 0) {
-    return undefined;
-  }
-  return Array.from(new Set(parts));
-}
 
 export function AdminLocalUsersPage(): JSX.Element {
   const { token, user: currentUser, refresh } = useAdminAuth();
@@ -129,7 +128,7 @@ export function AdminLocalUsersPage(): JSX.Element {
         setSaving(false);
         return;
       }
-      const payloadRoles = parseRoles(formState.roles);
+      const payloadRoles = formState.roles.length > 0 ? formState.roles : undefined;
       if (mode === "create") {
         const password = formState.password.trim();
         if (password.length < 8) {
@@ -362,16 +361,33 @@ export function AdminLocalUsersPage(): JSX.Element {
               />
             </label>
           ) : null}
-          <label className="flex flex-col gap-2 text-xs font-medium uppercase tracking-wide text-[color:var(--brand-charcoal)]">
-            Rôles (séparés par une virgule)
-            <input
-              type="text"
-              value={formState.roles}
-              onChange={(event) => setFormState((prev) => ({ ...prev, roles: event.target.value }))}
-              className="rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
-              placeholder="admin, facilitator"
-            />
-          </label>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-medium uppercase tracking-wide text-[color:var(--brand-charcoal)]">
+              Rôles d'accès
+            </label>
+            <div className="space-y-2">
+              {AVAILABLE_ROLES.map((role) => (
+                <label key={role.value} className="flex items-start gap-3 rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white p-3 transition hover:border-[color:var(--brand-red)]/40">
+                  <input
+                    type="checkbox"
+                    checked={formState.roles.includes(role.value)}
+                    onChange={(event) => {
+                      if (event.target.checked) {
+                        setFormState((prev) => ({ ...prev, roles: [...prev.roles, role.value] }));
+                      } else {
+                        setFormState((prev) => ({ ...prev, roles: prev.roles.filter(r => r !== role.value) }));
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-[color:var(--brand-charcoal)]/30 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                  />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-[color:var(--brand-black)]">{role.label}</div>
+                    <div className="text-xs text-[color:var(--brand-charcoal)]/70">{role.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
           <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-[color:var(--brand-charcoal)]">
             <input
               type="checkbox"

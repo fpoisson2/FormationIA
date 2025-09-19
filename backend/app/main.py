@@ -51,6 +51,7 @@ MAX_PLAN_ACTIONS = 30
 MAX_STEPS_PER_ACTION = 20
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
+ACTIVITIES_CONFIG_PATH = Path(__file__).resolve().parent.parent / "activities_config.json"
 
 ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
 _ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
@@ -273,6 +274,33 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
         if isinstance(mission, dict) and mission.get("id") == mission_id:
             return mission
     raise HTTPException(status_code=404, detail="Mission introuvable.")
+
+
+def _load_activities_config() -> list[dict[str, Any]]:
+    """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
+    if not ACTIVITIES_CONFIG_PATH.exists():
+        # Retourner la configuration par défaut si le fichier n'existe pas
+        return []
+
+    try:
+        with ACTIVITIES_CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="activities_config.json contient un JSON invalide.") from exc
+
+    if not isinstance(data, list):
+        raise HTTPException(status_code=500, detail="activities_config.json doit contenir un tableau d'activités.")
+
+    return data
+
+
+def _save_activities_config(activities: list[dict[str, Any]]) -> None:
+    """Sauvegarde la configuration des activités dans le fichier."""
+    try:
+        with ACTIVITIES_CONFIG_PATH.open("w", encoding="utf-8") as handle:
+            json.dump(activities, handle, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
 
 
 def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, str]]:
@@ -574,6 +602,11 @@ class ActivityProgressRequest(BaseModel):
     activity_id: str = Field(..., alias="activityId", min_length=1, max_length=64)
     completed: bool = Field(default=True)
 
+
+class ActivityConfigRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    activities: list[dict[str, Any]] = Field(..., min_items=1)
 
 class LTIScoreRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
@@ -1137,11 +1170,22 @@ def _serialize_platform(config: LTIPlatformConfig, store: AdminStore | None) -> 
 
 def _serialize_keyset(store: AdminStore) -> dict[str, Any]:
     keyset = store.get_keyset()
+    public_key_value: str | None = None
+    public_path = keyset.public_key_path
+    if public_path:
+        try:
+            path = Path(public_path).expanduser()
+            if path.exists():
+                content = path.read_text(encoding="utf-8")
+                public_key_value = content.strip() or None
+        except OSError:
+            public_key_value = None
     return {
         "privateKeyPath": keyset.private_key_path,
         "publicKeyPath": keyset.public_key_path,
         "updatedAt": keyset.updated_at,
         "readOnly": keyset.read_only,
+        "publicKey": public_key_value,
     }
 
 
@@ -1659,6 +1703,25 @@ def admin_list_lti_users(
         "totalPages": total_pages,
         "items": paginated,
     }
+
+
+@admin_router.get("/activities")
+def admin_get_activities_config(
+    _: LocalUser = Depends(_require_admin_user),
+) -> dict[str, Any]:
+    """Récupère la configuration des activités."""
+    activities = _load_activities_config()
+    return {"activities": activities}
+
+
+@admin_router.post("/activities")
+def admin_save_activities_config(
+    payload: ActivityConfigRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> dict[str, Any]:
+    """Sauvegarde la configuration des activités."""
+    _save_activities_config(payload.activities)
+    return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
 app.include_router(admin_auth_router)

@@ -249,6 +249,23 @@ export interface AdminPlatformResponse {
 
 export type AdminPlatformSaveMode = "create" | "replace" | "patch";
 
+export interface AdminLtiKeyset {
+  privateKeyPath: string | null;
+  publicKeyPath: string | null;
+  updatedAt?: string | null;
+  readOnly?: boolean;
+  publicKey?: string | null;
+}
+
+export interface AdminLtiKeysetResponse {
+  keyset: AdminLtiKeyset;
+}
+
+export interface AdminLtiKeyUploadPayload {
+  privateKey?: string;
+  publicKey?: string;
+}
+
 export interface AdminLtiUser {
   issuer: string;
   subject: string;
@@ -314,7 +331,44 @@ export interface AdminLocalUserResponse {
   user: AdminLocalUser;
 }
 
+export interface ActivityConfig {
+  activities: any[];
+}
+
+export interface ActivityConfigResponse {
+  activities: any[];
+}
+
+export interface SaveActivityConfigResponse {
+  ok: boolean;
+  message: string;
+}
+
 export const admin = {
+  activities: {
+    get: async (token?: string | null): Promise<ActivityConfigResponse> =>
+      fetchJson<ActivityConfigResponse>(
+        `${API_BASE_URL}/admin/activities`,
+        withAdminCredentials({}, token)
+      ),
+    save: async (
+      payload: ActivityConfig,
+      token?: string | null
+    ): Promise<SaveActivityConfigResponse> =>
+      fetchJson<SaveActivityConfigResponse>(
+        `${API_BASE_URL}/admin/activities`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+          token
+        )
+      ),
+  },
   auth: {
     login: async (payload: AdminLoginPayload): Promise<AdminAuthResponse> =>
       fetchJson<AdminAuthResponse>(`${API_BASE_URL}/admin/auth/login`,
@@ -383,6 +437,30 @@ export const admin = {
         )
       );
     },
+  },
+  ltiKeys: {
+    get: async (token?: string | null): Promise<AdminLtiKeysetResponse> =>
+      fetchJson<AdminLtiKeysetResponse>(
+        `${API_BASE_URL}/admin/lti-keys`,
+        withAdminCredentials({}, token)
+      ),
+    upload: async (
+      payload: AdminLtiKeyUploadPayload,
+      token?: string | null
+    ): Promise<AdminLtiKeysetResponse> =>
+      fetchJson<AdminLtiKeysetResponse>(
+        `${API_BASE_URL}/admin/lti-keys`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+          token
+        )
+      ),
   },
   ltiUsers: {
     list: async (

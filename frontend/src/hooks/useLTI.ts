@@ -15,7 +15,7 @@ interface LTIContext {
   expiresAt: string;
 }
 
-interface LTIScorePayload {
+export interface LTIScorePayload {
   missionId?: string;
   stageIndex?: number;
   runId?: string;

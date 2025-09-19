@@ -1,7 +1,9 @@
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
+import { admin } from "../api";
 
 const combineClasses = (...values: Array<string | false | null | undefined>) =>
   values.filter(Boolean).join(" ");
@@ -24,6 +26,9 @@ interface ActivityLayoutProps {
   contentClassName?: string;
   contentAs?: ContentElement;
   titleAlign?: "left" | "center";
+  onHeaderEdit?: (field: 'eyebrow' | 'title' | 'subtitle' | 'badge', value: string) => void;
+  activityConfig?: any;
+  onSaveActivity?: (config: any) => void;
 }
 
 function ActivityLayout({
@@ -42,7 +47,27 @@ function ActivityLayout({
   contentClassName,
   contentAs = "main",
   titleAlign = "left",
+  onHeaderEdit,
+  activityConfig,
+  onSaveActivity,
 }: ActivityLayoutProps): JSX.Element {
+  const { isEditMode, token } = useAdminAuth();
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!onSaveActivity || !activityConfig || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      await onSaveActivity(activityConfig);
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde de l\'activité:', error);
+      alert('Erreur lors de la sauvegarde. Veuillez réessayer.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const ContentTag = contentAs as ContentElement;
   const titleContainerClass =
     titleAlign === "center" ? "text-center" : "text-center md:text-left";
@@ -65,34 +90,96 @@ function ActivityLayout({
         <header
           className={combineClasses(
             "space-y-6 rounded-3xl border border-white/70 bg-white/90 p-8 shadow-sm backdrop-blur",
-            headerClassName
+            headerClassName,
+            isEditMode && onHeaderEdit ? "border-orange-200 ring-2 ring-orange-100" : ""
           )}
         >
+          {isEditMode && onHeaderEdit && (
+            <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-orange-700 uppercase tracking-wider">
+                  Mode édition activé - Modifier les textes de l'en-tête
+                </p>
+                {onSaveActivity && (
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="text-xs px-3 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSaving ? 'Sauvegarde...' : 'Sauvegarder'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
             <Link to="/" className="flex items-center gap-3">
               <img src={logoPrincipal} alt="Cégep Limoilou" className="h-12 w-auto md:h-16" />
-              <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70">
-                {eyebrow}
-              </span>
+              {isEditMode && onHeaderEdit ? (
+                <input
+                  type="text"
+                  value={eyebrow}
+                  onChange={(e) => onHeaderEdit('eyebrow', e.target.value)}
+                  className="text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70 bg-transparent border-b border-orange-300 focus:border-orange-500 focus:outline-none min-w-[120px]"
+                  placeholder="Eyebrow"
+                />
+              ) : (
+                <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70">
+                  {eyebrow}
+                </span>
+              )}
             </Link>
             {(badge || actions) && (
               <div className="flex flex-col items-center gap-2 md:flex-row md:items-center">
                 {badge ? (
-                  <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
-                    {badge}
-                  </span>
+                  isEditMode && onHeaderEdit ? (
+                    <input
+                      type="text"
+                      value={badge}
+                      onChange={(e) => onHeaderEdit('badge', e.target.value)}
+                      className="brand-chip bg-orange-50 border border-orange-300 focus:border-orange-500 focus:outline-none text-orange-700 min-w-[100px]"
+                      placeholder="Badge"
+                    />
+                  ) : (
+                    <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+                      {badge}
+                    </span>
+                  )
                 ) : null}
                 {actions}
               </div>
             )}
           </div>
           <div className={combineClasses("space-y-3", titleContainerClass)}>
-            <h1 className="text-3xl font-semibold leading-tight md:text-4xl">{title}</h1>
-            {subtitle ? (
-              <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90 md:text-base">
-                {subtitle}
-              </p>
-            ) : null}
+            {isEditMode && onHeaderEdit ? (
+              <>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => onHeaderEdit('title', e.target.value)}
+                  className="w-full text-3xl font-semibold leading-tight md:text-4xl bg-transparent border-b-2 border-orange-300 focus:border-orange-500 focus:outline-none"
+                  placeholder="Titre de l'activité"
+                />
+                {subtitle !== undefined && (
+                  <textarea
+                    value={subtitle}
+                    onChange={(e) => onHeaderEdit('subtitle', e.target.value)}
+                    rows={2}
+                    className="w-full text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90 md:text-base bg-transparent border border-orange-300 rounded p-2 focus:border-orange-500 focus:outline-none resize-none"
+                    placeholder="Sous-titre (optionnel)"
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                <h1 className="text-3xl font-semibold leading-tight md:text-4xl">{title}</h1>
+                {subtitle ? (
+                  <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90 md:text-base">
+                    {subtitle}
+                  </p>
+                ) : null}
+              </>
+            )}
           </div>
           {headerChildren}
         </header>

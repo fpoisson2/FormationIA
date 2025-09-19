@@ -1,9 +1,10 @@
-import { Dispatch, SetStateAction, useMemo } from "react";
+import { Dispatch, SetStateAction, useEffect, useMemo } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import Layout from "../components/Layout";
 import type { Flashcard } from "../types/flashcards";
 import type { ModelConfig } from "../config";
+import type { ActivityLayoutConfig } from "../config/activities";
 import StepOne from "./StepOne";
 import StepThree from "./StepThree";
 import StepTwo from "./StepTwo";
@@ -23,6 +24,10 @@ interface WorkshopRoutesProps {
   flashcardsB: Flashcard[];
   setFlashcardsA: Dispatch<SetStateAction<Flashcard[]>>;
   setFlashcardsB: Dispatch<SetStateAction<Flashcard[]>>;
+  completionId: string;
+  navigateToActivities: () => void;
+  setLayoutOverrides: (overrides: Partial<ActivityLayoutConfig>) => void;
+  resetLayoutOverrides: () => void;
 }
 
 function WorkshopRoutes({
@@ -40,6 +45,10 @@ function WorkshopRoutes({
   flashcardsB,
   setFlashcardsA,
   setFlashcardsB,
+  completionId,
+  navigateToActivities,
+  setLayoutOverrides,
+  resetLayoutOverrides,
 }: WorkshopRoutesProps): JSX.Element {
   const location = useLocation();
 
@@ -53,64 +62,64 @@ function WorkshopRoutes({
   const isSourceEmpty = !sourceText.trim();
   const summariesMissing = !summaryA.trim() || !summaryB.trim();
 
+  useEffect(() => {
+    setLayoutOverrides({
+      headerChildren: <Layout currentStep={stepIndex} />,
+    });
+
+    return () => {
+      resetLayoutOverrides();
+    };
+  }, [stepIndex, setLayoutOverrides, resetLayoutOverrides]);
+
   return (
-    <Layout currentStep={stepIndex}>
-      <Routes>
-        <Route index element={<Navigate to="etape-1" replace />} />
-        <Route
-          path="etape-1"
-          element={
-            <StepOne
-              sourceText={sourceText}
-              onSourceTextChange={setSourceText}
-            />
-          }
-        />
-        <Route
-          path="etape-2"
-          element={
-            isSourceEmpty ? (
-              <Navigate to="etape-1" replace />
-            ) : (
-              <StepTwo
-                sourceText={sourceText}
-                configA={configA}
-                configB={configB}
-                setConfigA={setConfigA}
-                setConfigB={setConfigB}
-                summaryA={summaryA}
-                summaryB={summaryB}
-                setSummaryA={setSummaryA}
-                setSummaryB={setSummaryB}
-              />
-            )
-          }
-        />
-        <Route
-          path="etape-3"
-          element={
-            isSourceEmpty ? (
-              <Navigate to="etape-1" replace />
-            ) : summariesMissing ? (
-              <Navigate to="etape-2" replace />
-            ) : (
-              <StepThree
-                sourceText={sourceText}
-                summaryA={summaryA}
-                summaryB={summaryB}
-                flashcardsA={flashcardsA}
-                flashcardsB={flashcardsB}
-                setFlashcardsA={setFlashcardsA}
-                setFlashcardsB={setFlashcardsB}
-                configA={configA}
-                configB={configB}
-              />
-            )
-          }
-        />
-        <Route path="*" element={<Navigate to="etape-1" replace />} />
-      </Routes>
-    </Layout>
+    <Routes>
+      <Route index element={<Navigate to="etape-1" replace />} />
+      <Route
+        path="etape-1"
+        element={
+          <StepOne
+            sourceText={sourceText}
+            onSourceTextChange={setSourceText}
+          />
+        }
+      />
+      <Route
+        path="etape-2"
+        element={
+          <StepTwo
+            sourceText={sourceText}
+            configA={configA}
+            configB={configB}
+            setConfigA={setConfigA}
+            setConfigB={setConfigB}
+            summaryA={summaryA}
+            summaryB={summaryB}
+            setSummaryA={setSummaryA}
+            setSummaryB={setSummaryB}
+          />
+        }
+      />
+      <Route
+        path="etape-3"
+        element={
+          <StepThree
+            sourceText={sourceText}
+            summaryA={summaryA}
+            summaryB={summaryB}
+            flashcardsA={flashcardsA}
+            flashcardsB={flashcardsB}
+            setFlashcardsA={setFlashcardsA}
+            setFlashcardsB={setFlashcardsB}
+            configA={configA}
+            configB={configB}
+            completionId={completionId}
+            navigateToActivities={navigateToActivities}
+          />
+        }
+      />
+      <Route path="*" element={<Navigate to="etape-1" replace />} />
+    </Routes>
   );
 }
 

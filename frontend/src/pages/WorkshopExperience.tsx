@@ -3,6 +3,7 @@ import { useState } from "react";
 import { MODEL_OPTIONS, type ModelConfig } from "../config";
 import type { Flashcard } from "../types/flashcards";
 import WorkshopRoutes from "./WorkshopRoutes";
+import type { ActivityProps } from "../config/activities";
 
 const DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
 
@@ -18,7 +19,12 @@ const DEFAULT_CONFIG_B: ModelConfig = {
   thinking: "high",
 };
 
-function WorkshopExperience(): JSX.Element {
+function WorkshopExperience({
+  completionId,
+  navigateToActivities,
+  setLayoutOverrides,
+  resetLayoutOverrides,
+}: ActivityProps): JSX.Element {
   const [sourceText, setSourceText] = useState(DEFAULT_TEXT);
   const [configA, setConfigA] = useState<ModelConfig>(DEFAULT_CONFIG_A);
   const [configB, setConfigB] = useState<ModelConfig>(DEFAULT_CONFIG_B);
@@ -43,6 +49,10 @@ function WorkshopExperience(): JSX.Element {
       flashcardsB={flashcardsB}
       setFlashcardsA={setFlashcardsA}
       setFlashcardsB={setFlashcardsB}
+      completionId={completionId}
+      navigateToActivities={navigateToActivities}
+      setLayoutOverrides={setLayoutOverrides}
+      resetLayoutOverrides={resetLayoutOverrides}
     />
   );
 }

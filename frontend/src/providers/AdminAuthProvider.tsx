@@ -32,10 +32,14 @@ interface AdminAuthContextValue {
   expiresAt: string | null;
   error: string | null;
   isProcessing: boolean;
-  login: (payload: AdminLoginPayload) => Promise<{ ok: true } | { ok: false; error: string }>;
+  isEditMode: boolean;
+  login: (
+    payload: AdminLoginPayload
+  ) => Promise<{ ok: true; user: AdminUser } | { ok: false; error: string }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   applySession: (session: AdminSession) => void;
+  setEditMode: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "formationia.admin.session";
@@ -92,6 +96,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
   const [expiresAt, setExpiresAt] = useState<string | null>(stored?.expiresAt ?? null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   const tokenRef = useRef<string | null>(token);
   useEffect(() => {
@@ -161,7 +166,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
           user: response.user,
         };
         applySession(session);
-        return { ok: true } as const;
+        return { ok: true, user: response.user } as const;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Impossible de se connecter.";
         setUser(null);
@@ -218,6 +223,10 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     }
   }, [applySession]);
 
+  const setEditMode = useCallback((enabled: boolean) => {
+    setIsEditMode(enabled);
+  }, []);
+
   const value = useMemo<AdminAuthContextValue>(
     () => ({
       status,
@@ -226,12 +235,14 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       expiresAt,
       error,
       isProcessing,
+      isEditMode,
       login,
       logout,
       refresh,
       applySession,
+      setEditMode,
     }),
-    [status, user, token, expiresAt, error, isProcessing, login, logout, refresh, applySession]
+    [status, user, token, expiresAt, error, isProcessing, isEditMode, login, logout, refresh, applySession, setEditMode]
   );
 
   return <AdminAuthContext.Provider value={value}>{children}</AdminAuthContext.Provider>;

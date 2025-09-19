@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import {
   admin,
+  type AdminLtiKeyset,
   type AdminPlatform,
   type AdminPlatformPayload,
   type AdminPlatformSaveMode,
@@ -71,6 +72,17 @@ export function AdminPlatformsPage(): JSX.Element {
   const [formState, setFormState] = useState<PlatformFormState>(() => createFormState());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [keyset, setKeyset] = useState<AdminLtiKeyset | null>(null);
+  const [keyLoading, setKeyLoading] = useState(true);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
+  const [keyFormError, setKeyFormError] = useState<string | null>(null);
+  const [keySuccess, setKeySuccess] = useState<string | null>(null);
+  const [keyForm, setKeyForm] = useState<{ privateKey: string; publicKey: string }>(() => ({
+    privateKey: "",
+    publicKey: "",
+  }));
 
   const fetchPlatforms = useCallback(async () => {
     setLoading(true);
@@ -86,9 +98,27 @@ export function AdminPlatformsPage(): JSX.Element {
     }
   }, [token]);
 
+  const fetchKeyset = useCallback(async () => {
+    setKeyLoading(true);
+    setKeyError(null);
+    try {
+      const response = await admin.ltiKeys.get(token);
+      setKeyset(response.keyset);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Impossible de récupérer les clés LTI.";
+      setKeyError(message);
+    } finally {
+      setKeyLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     void fetchPlatforms();
   }, [fetchPlatforms]);
+
+  useEffect(() => {
+    void fetchKeyset();
+  }, [fetchKeyset]);
 
   const closeModal = () => {
     setModalOpen(false);
@@ -170,11 +200,66 @@ export function AdminPlatformsPage(): JSX.Element {
     }
   };
 
+  const openKeyModal = () => {
+    setKeyModalOpen(true);
+    setKeyForm({
+      privateKey: "",
+      publicKey: keyset?.publicKey ?? "",
+    });
+    setKeyFormError(null);
+  };
+
+  const closeKeyModal = () => {
+    setKeyModalOpen(false);
+    setKeyForm({ privateKey: "", publicKey: "" });
+    setKeyFormError(null);
+  };
+
   const modalTitle = editingPlatform ? "Modifier la plateforme LTI" : "Ajouter une plateforme LTI";
   const modalDescription = editingPlatform
     ? "Les modifications seront appliquées immédiatement."
     : "Enregistre les informations fournies par ton fournisseur LTI.";
   const isReadOnly = editingPlatform?.readOnly ?? false;
+
+  const keysetReadonly = keyset?.readOnly ?? false;
+  const keyModalTitle = keysetReadonly ? "Clés LTI (lecture seule)" : "Mettre à jour les clés LTI";
+  const keyModalDescription = keysetReadonly
+    ? "Ces clés proviennent de la configuration du serveur et ne peuvent pas être modifiées depuis l’interface."
+    : "Colle la nouvelle clé privée et/ou la clé publique au format PEM.";
+
+  const handleKeySubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (keysetReadonly) {
+      setKeyFormError("Cette installation est configurée en lecture seule pour les clés LTI.");
+      return;
+    }
+    const nextPrivate = keyForm.privateKey.trim();
+    const nextPublic = keyForm.publicKey.trim();
+    if (!nextPrivate && !nextPublic) {
+      setKeyFormError("Renseigne au moins une clé privée ou publique.");
+      return;
+    }
+    setKeySaving(true);
+    setKeyFormError(null);
+    try {
+      const payload: { privateKey?: string; publicKey?: string } = {};
+      if (nextPrivate) {
+        payload.privateKey = nextPrivate;
+      }
+      if (nextPublic) {
+        payload.publicKey = nextPublic;
+      }
+      const response = await admin.ltiKeys.upload(payload, token);
+      setKeyset(response.keyset);
+      setKeySuccess("Clés LTI enregistrées.");
+      closeKeyModal();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Impossible d'enregistrer les clés LTI.";
+      setKeyFormError(message);
+    } finally {
+      setKeySaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -204,6 +289,86 @@ export function AdminPlatformsPage(): JSX.Element {
           </button>
         </div>
       </header>
+
+      <section className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Clés LTI de l’outil</h3>
+            <p className="text-sm text-[color:var(--brand-charcoal)]">
+              Ces clés signent les assertions OAuth envoyées aux plateformes. Fournis des clés PEM valides.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                setKeySuccess(null);
+                void fetchKeyset();
+              }}
+              className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+              disabled={keyLoading}
+            >
+              {keyLoading ? "Chargement…" : "Rafraîchir"}
+            </button>
+            <button
+              type="button"
+              onClick={openKeyModal}
+              className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${
+                keysetReadonly
+                  ? "bg-[color:var(--brand-charcoal)]/60 hover:bg-[color:var(--brand-charcoal)]/80"
+                  : "bg-[color:var(--brand-red)] hover:bg-red-600"
+              }`}
+            >
+              {keysetReadonly ? "Voir la clé" : "Mettre à jour"}
+            </button>
+          </div>
+        </div>
+        {keyError ? (
+          <p className="mt-4 rounded-3xl bg-red-50 p-3 text-xs text-red-600">{keyError}</p>
+        ) : null}
+        {keySuccess ? (
+          <p className="mt-4 rounded-3xl bg-green-50 p-3 text-xs text-green-700">{keySuccess}</p>
+        ) : null}
+        <div className="mt-4 space-y-2 text-sm text-[color:var(--brand-charcoal)]">
+          {keyLoading ? (
+            <AdminSkeleton lines={2} />
+          ) : keyset ? (
+            <>
+              <p>
+                <span className="font-semibold">Clé privée :</span> {keyset.privateKeyPath ?? "(non configurée)"}
+              </p>
+              <p>
+                <span className="font-semibold">Clé publique :</span> {keyset.publicKeyPath ?? "(non configurée)"}
+              </p>
+              {keyset.updatedAt ? (
+                <p>
+                  <span className="font-semibold">Dernière mise à jour :</span> {new Date(keyset.updatedAt).toLocaleString()}
+                </p>
+              ) : null}
+              {keyset.publicKey ? (
+                <div className="mt-3">
+                  <label className="flex flex-col gap-2 text-xs font-medium uppercase tracking-wide text-[color:var(--brand-charcoal)]">
+                    Clé publique actuelle
+                    <textarea
+                      value={keyset.publicKey}
+                      readOnly
+                      rows={6}
+                      className="rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white/80 px-3 py-2 text-xs text-[color:var(--brand-black)] focus:outline-none"
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p>Aucune information de clé disponible.</p>
+          )}
+        </div>
+        {keysetReadonly ? (
+          <p className="mt-4 rounded-2xl bg-[color:var(--brand-sand)]/70 p-3 text-xs text-[color:var(--brand-charcoal)]">
+            Ces clés sont gérées en lecture seule depuis la configuration du serveur.
+          </p>
+        ) : null}
+      </section>
 
       {error ? (
         <div className="rounded-3xl border border-red-200 bg-red-50/80 p-4 text-sm text-red-700">
@@ -411,6 +576,76 @@ export function AdminPlatformsPage(): JSX.Element {
             Cette plateforme est gérée automatiquement et ne peut pas être modifiée depuis l’interface.
           </p>
         ) : null}
+      </AdminModal>
+
+      <AdminModal
+        open={keyModalOpen}
+        onClose={closeKeyModal}
+        title={keyModalTitle}
+        description={keyModalDescription}
+        size="lg"
+        footer={
+          keysetReadonly ? (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={closeKeyModal}
+                className="rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+              >
+                Fermer
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeKeyModal}
+                className="rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                form="admin-lti-keys-form"
+                disabled={keySaving}
+                className="rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-400"
+              >
+                {keySaving ? "Enregistrement…" : "Enregistrer"}
+              </button>
+            </div>
+          )
+        }
+      >
+        {keyFormError ? (
+          <p className="rounded-3xl bg-red-50 p-3 text-xs text-red-600">{keyFormError}</p>
+        ) : null}
+        <form id="admin-lti-keys-form" className="grid gap-4" onSubmit={handleKeySubmit}>
+          <label className="flex flex-col gap-2 text-xs font-medium uppercase tracking-wide text-[color:var(--brand-charcoal)]">
+            Clé privée PEM
+            <textarea
+              value={keyForm.privateKey}
+              onChange={(event) => setKeyForm((prev) => ({ ...prev, privateKey: event.target.value }))}
+              rows={6}
+              className="rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+              placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+              disabled={keysetReadonly}
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-xs font-medium uppercase tracking-wide text-[color:var(--brand-charcoal)]">
+            Clé publique PEM
+            <textarea
+              value={keyForm.publicKey}
+              onChange={(event) => setKeyForm((prev) => ({ ...prev, publicKey: event.target.value }))}
+              rows={6}
+              className="rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+              placeholder="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
+              disabled={keysetReadonly}
+            />
+          </label>
+        </form>
+        <p className="mt-4 rounded-2xl bg-[color:var(--brand-sand)]/70 p-3 text-xs text-[color:var(--brand-charcoal)]">
+          Les chemins actuels sont {keyset?.privateKeyPath ?? "(privée non définie)"} et {keyset?.publicKeyPath ?? "(publique non définie)"}.
+        </p>
       </AdminModal>
     </div>
   );
