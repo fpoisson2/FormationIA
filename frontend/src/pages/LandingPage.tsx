@@ -1,6 +1,8 @@
-import { Link } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
+import { useLTI } from "../hooks/useLTI";
 
 const heroHighlights = [
   {
@@ -70,6 +72,15 @@ const onboardingSteps = [
 ];
 
 function LandingPage(): JSX.Element {
+  const navigate = useNavigate();
+  const { isLTISession, loading: ltiLoading } = useLTI();
+
+  useEffect(() => {
+    if (!ltiLoading && isLTISession) {
+      navigate("/activites", { replace: true });
+    }
+  }, [isLTISession, ltiLoading, navigate]);
+
   return (
     <div className="landing-gradient min-h-screen px-6 pb-24 pt-10 text-[color:var(--brand-black)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-16">
