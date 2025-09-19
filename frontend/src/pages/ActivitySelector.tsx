@@ -8,6 +8,7 @@ import {
   type ActivityDefinition,
 } from "../config/activities";
 import { useLTI } from "../hooks/useLTI";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
 
 function ActivitySelector(): JSX.Element {
   const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
@@ -15,6 +16,7 @@ function ActivitySelector(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const { context, isLTISession, loading: ltiLoading } = useLTI();
+  const { status: adminStatus } = useAdminAuth();
   const displayName =
     context?.user?.name?.trim() ||
     context?.user?.email?.trim() ||
@@ -22,6 +24,7 @@ function ActivitySelector(): JSX.Element {
     "";
   const shouldShowWelcome = isLTISession && !ltiLoading && displayName.length > 0;
   const completedId = (location.state as { completed?: string } | null)?.completed;
+  const isAdminAuthenticated = adminStatus === "authenticated";
 
   useEffect(() => {
     if (!completedId) {
@@ -137,9 +140,19 @@ function ActivitySelector(): JSX.Element {
                 Choisis ton activité
               </span>
             </Link>
-            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
-              Objectifs pédagogiques
-            </span>
+            <div className="flex flex-col items-center gap-2 md:flex-row md:items-center">
+              <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+                Objectifs pédagogiques
+              </span>
+              {isAdminAuthenticated ? (
+                <Link
+                  to="/admin"
+                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+                >
+                  Administration
+                </Link>
+              ) : null}
+            </div>
           </div>
           <div className="space-y-3 text-center md:text-left">
             <h1 className="text-3xl font-semibold md:text-4xl">
