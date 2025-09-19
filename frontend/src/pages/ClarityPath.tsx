@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
 import { updateActivityProgress } from "../api";
+import ActivityLayout from "../components/ActivityLayout";
 
 const GRID_SIZE = 10;
 
@@ -869,21 +870,19 @@ function ClarityPath(): JSX.Element {
     return `Échec : le plan s’est arrêté après ${stats.stepsExecuted} pas (${optimalPart}).\nAjoute des directions explicites et indique le nombre de cases pour guider le modèle.`;
   }, [stats]);
 
-  return (
-    <div className="landing-gradient min-h-screen px-6 py-16 text-[color:var(--brand-black)]">
-      {phase === "intro" ? (
+
+  if (phase === "intro") {
+    return (
+      <ActivityLayout
+        activityId="clarity-intro"
+        eyebrow="Parcours de la clarté"
+        title="Donner une bonne consigne, c’est gagner du temps."
+        subtitle="Avant de jouer, découvre comment la précision de tes instructions influence directement le trajet de notre bonhomme. Formule une consigne claire pour atteindre la cible rapidement."
+        titleAlign="center"
+        contentAs="div"
+        contentClassName="gap-0"
+      >
         <div className="mx-auto flex max-w-4xl flex-col gap-10 text-center">
-          <span className="inline-flex items-center justify-center gap-2 rounded-full bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]">
-            Parcours de la clarté
-          </span>
-          <div className="space-y-4">
-            <h1 className="text-3xl font-semibold md:text-4xl">
-              Donner une bonne consigne, c’est gagner du temps.
-            </h1>
-            <p className="mx-auto max-w-3xl text-sm text-[color:var(--brand-charcoal)] md:text-base">
-              Avant de jouer, découvre comment la précision de tes instructions influence directement le trajet de notre bonhomme. Formule une consigne claire pour atteindre la cible rapidement.
-            </p>
-          </div>
           <div className="grid gap-4 text-left text-sm text-[color:var(--brand-charcoal)] md:grid-cols-3">
             <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
               Une consigne vague = essais, détours, blocages.
@@ -904,130 +903,130 @@ function ClarityPath(): JSX.Element {
             <span className="text-lg">→</span>
           </button>
         </div>
-      ) : (
-        <div className="relative mx-auto flex max-w-6xl flex-col gap-10">
-          <FireworksOverlay active={celebrating} />
-          <header className="space-y-4">
-            <span className="inline-flex items-center justify-center gap-2 rounded-full bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]">
-              Parcours de la clarté
-            </span>
-            <h2 className="text-3xl font-semibold md:text-4xl">
-              Guide le bonhomme avec une consigne limpide
-            </h2>
-            <p className="max-w-3xl text-sm text-[color:var(--brand-charcoal)] md:text-base">
-              Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas.
-            </p>
-          </header>
+      </ActivityLayout>
+    );
+  }
 
-          <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-            <section className="rounded-3xl border border-white/60 bg-white/85 p-8 shadow-sm backdrop-blur">
-              <div className="flex flex-col gap-8">
-                <div className="space-y-4 text-sm text-[color:var(--brand-charcoal)]">
-                  <p>
-                    Objectif actuel : <strong>🎯 ({target.x}, {target.y})</strong>. Bonhomme au départ : <strong>(0,0)</strong>.
-                  </p>
-                  <p>
-                    Mouvements autorisés : left, right, up, down. Le backend génère d’abord un plan complet, le valide puis diffuse l’animation.
-                  </p>
-                </div>
+  return (
+    <ActivityLayout
+      activityId="clarity"
+      eyebrow="Parcours de la clarté"
+      title="Guide le bonhomme avec une consigne limpide"
+      subtitle="Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas."
+      badge="Mode jeu"
+      beforeHeader={<FireworksOverlay active={celebrating} />}
+      innerClassName="relative"
+      contentAs="div"
+      contentClassName="gap-10"
+    >
+      <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+        <section className="rounded-3xl border border-white/60 bg-white/85 p-8 shadow-sm backdrop-blur">
+          <div className="flex flex-col gap-8">
+            <div className="space-y-4 text-sm text-[color:var(--brand-charcoal)]">
+              <p>
+                Objectif actuel : <strong>🎯 ({target.x}, {target.y})</strong>. Bonhomme au départ : <strong>(0,0)</strong>.
+              </p>
+              <p>
+                Mouvements autorisés : left, right, up, down. Le backend génère d’abord un plan complet, le valide puis diffuse l’animation.
+              </p>
+            </div>
 
-                <ClarityGrid player={player} target={target} blocked={blocked} visited={visitedCells} />
+            <ClarityGrid player={player} target={target} blocked={blocked} visited={visitedCells} />
 
-                {message && (
-                  <div
-                    className={`rounded-2xl p-4 text-sm ${
-                      status === "success"
-                        ? "bg-[color:var(--brand-green,#66CDAA)]/20 text-[color:var(--brand-black)]"
-                        : status === "blocked"
-                        ? "bg-[color:var(--brand-red)]/15 text-[color:var(--brand-charcoal)]"
-                        : "bg-white/70 text-[color:var(--brand-charcoal)]"
-                    }`}
-                  >
-                    {message}
-                  </div>
-                )}
+            {message && (
+              <div
+                className={`rounded-2xl p-4 text-sm ${
+                  status === "success"
+                    ? "bg-[color:var(--brand-green,#66CDAA)]/20 text-[color:var(--brand-black)]"
+                    : status === "blocked"
+                    ? "bg-[color:var(--brand-red)]/15 text-[color:var(--brand-charcoal)]"
+                    : "bg-white/70 text-[color:var(--brand-charcoal)]"
+                }`}
+              >
+                {message}
               </div>
-            </section>
-
-            <aside className="flex flex-col gap-6">
-              <section className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Ta consigne</h3>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--brand-charcoal)] hover:text-[color:var(--brand-black)]"
-                      onClick={() => setInstruction("Descends 9 cases puis va à droite 9 cases jusqu’à l’objet en bas à droite.")}
-                      disabled={isInstructionDisabled}
-                    >
-                      Exemple clair
-                    </button>
-                  </div>
-                  <textarea
-                    value={instruction}
-                    onChange={(event) => setInstruction(event.target.value)}
-                    placeholder="Exemple : Descends 9 cases puis va à droite 9 cases jusqu'à l’objet en bas à droite."
-                    rows={4}
-                    className="w-full rounded-2xl border border-white/60 bg-white/95 p-4 text-sm text-[color:var(--brand-charcoal)] shadow-sm outline-none transition focus:border-[color:var(--brand-red)]/40 focus:ring-2 focus:ring-[color:var(--brand-red)]/30"
-                    disabled={isInstructionDisabled}
-                  />
-                  <div className="flex flex-wrap gap-2 text-xs text-[color:var(--brand-charcoal)]/90">
-                    {MICRO_TIPS.map((tip) => (
-                      <span key={tip} className="rounded-full bg-[color:var(--brand-yellow)]/40 px-3 py-1">
-                        {tip}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="submit"
-                      className="cta-button cta-button--primary inline-flex items-center gap-2"
-                      disabled={isInstructionDisabled}
-                    >
-                      {isLoading ? "Calcul en cours…" : "Envoyer"}
-                      <span className="text-lg">→</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="cta-button inline-flex items-center gap-2 border border-[color:var(--brand-red)]/25 bg-white/80 text-[color:var(--brand-red)] hover:bg-white"
-                      onClick={handleShuffleObstacles}
-                      disabled={areObstacleActionsDisabled}
-                    >
-                      Changer les obstacles
-                    </button>
-                  </div>
-                </form>
-              </section>
-
-              <PlanPreview plan={plan} notes={notes} />
-              <ClarityTipsPanel />
-            </aside>
+            )}
           </div>
+        </section>
 
-          {stats && isStatsModalOpen && (
-            <StatsModal
-              stats={stats}
-              summary={statsSummary}
-              onComplete={handleCompleteActivity}
-              isCompleting={isCompletingActivity}
-              onReplay={() => {
-                setIsStatsModalOpen(false);
-                handleReplay();
-              }}
-              onShuffle={() => {
-                setIsStatsModalOpen(false);
-                handleShuffleObstacles();
-              }}
-              onExit={() => {
-                setIsStatsModalOpen(false);
-                handleBackToIntro();
-              }}
-            />
-          )}
-        </div>
+        <aside className="flex flex-col gap-6">
+          <section className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Ta consigne</h3>
+                <button
+                  type="button"
+                  className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--brand-charcoal)] hover:text-[color:var(--brand-black)]"
+                  onClick={() => setInstruction("Descends 9 cases puis va à droite 9 cases jusqu’à l’objet en bas à droite.")}
+                  disabled={isInstructionDisabled}
+                >
+                  Exemple clair
+                </button>
+              </div>
+              <textarea
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder="Exemple : Descends 9 cases puis va à droite 9 cases jusqu'à l’objet en bas à droite."
+                rows={4}
+                className="w-full rounded-2xl border border-white/60 bg-white/95 p-4 text-sm text-[color:var(--brand-charcoal)] shadow-sm outline-none transition focus:border-[color:var(--brand-red)]/40 focus:ring-2 focus:ring-[color:var(--brand-red)]/30"
+                disabled={isInstructionDisabled}
+              />
+              <div className="flex flex-wrap gap-2 text-xs text-[color:var(--brand-charcoal)]/90">
+                {MICRO_TIPS.map((tip) => (
+                  <span key={tip} className="rounded-full bg-[color:var(--brand-yellow)]/40 px-3 py-1">
+                    {tip}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  className="cta-button cta-button--primary inline-flex items-center gap-2"
+                  disabled={isInstructionDisabled}
+                >
+                  {isLoading ? "Calcul en cours…" : "Envoyer"}
+                  <span className="text-lg">→</span>
+                </button>
+                <button
+                  type="button"
+                  className="cta-button inline-flex items-center gap-2 border border-[color:var(--brand-red)]/25 bg-white/80 text-[color:var(--brand-red)] hover:bg-white"
+                  onClick={handleShuffleObstacles}
+                  disabled={areObstacleActionsDisabled}
+                >
+                  Changer les obstacles
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <PlanPreview plan={plan} notes={notes} />
+          <ClarityTipsPanel />
+        </aside>
+      </div>
+
+      {stats && isStatsModalOpen && (
+        <StatsModal
+          stats={stats}
+          summary={statsSummary}
+          onComplete={handleCompleteActivity}
+          isCompleting={isCompletingActivity}
+          onReplay={() => {
+            setIsStatsModalOpen(false);
+            handleReplay();
+          }}
+          onShuffle={() => {
+            setIsStatsModalOpen(false);
+            handleShuffleObstacles();
+          }}
+          onExit={() => {
+            setIsStatsModalOpen(false);
+            handleBackToIntro();
+          }}
+        />
       )}
-    </div>
+    </ActivityLayout>
   );
+
 }
 
 export default ClarityPath;
