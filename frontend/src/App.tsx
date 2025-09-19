@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import ActivitySelector from "./pages/ActivitySelector";
+import LandingPage from "./pages/LandingPage";
 import {
   ACTIVITY_CATALOG,
   buildActivityElement,
@@ -85,7 +86,7 @@ function App(): JSX.Element {
 
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/activites" replace />} />
+      <Route path="/" element={<LandingPage />} />
       <Route
         path="/activites"
         element={
