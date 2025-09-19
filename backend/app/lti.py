@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import jwt
@@ -981,8 +982,16 @@ class LTIService:
             "timestamp": (timestamp or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
         }
 
+        lineitem_url = lineitem.strip()
+        parsed_lineitem = urlsplit(lineitem_url)
+        if parsed_lineitem.scheme and parsed_lineitem.netloc:
+            score_path = parsed_lineitem.path.rstrip("/") + "/scores"
+            score_url = urlunsplit(parsed_lineitem._replace(path=score_path))
+        else:
+            score_url = lineitem_url.rstrip("/") + "/scores"
+
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            response = await client.post(lineitem.rstrip("/") + "/scores", json=score_payload, headers=headers)
+            response = await client.post(score_url, json=score_payload, headers=headers)
             if response.status_code >= 400:
                 raise LTIScoreError(
                     f"Publication du score refusée ({response.status_code}): {response.text.strip()}"
