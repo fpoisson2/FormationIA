@@ -6,6 +6,7 @@ import {
   getProgress,
   admin,
   activities as activitiesClient,
+  type ActivitySelectorHeaderConfig,
   type ProgressResponse,
 } from "../api";
 import {
@@ -16,6 +17,40 @@ import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
+
+const DEFAULT_ACTIVITY_SELECTOR_HEADER: ActivitySelectorHeaderConfig = {
+  eyebrow: "Choisis ton activité",
+  title: "Quelle compétence veux-tu travailler avec l'IA ?",
+  subtitle:
+    "Chaque activité se concentre sur une intention distincte : cadrer une demande, affiner un prompt, tester une consigne ou vérifier l'exhaustivité d'un brief.",
+  badge: "Objectifs pédagogiques",
+};
+
+const sanitizeHeaderConfig = (
+  value: unknown
+): ActivitySelectorHeaderConfig | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const headerValue = value as Record<string, unknown>;
+  const sanitized: ActivitySelectorHeaderConfig = {};
+
+  if (typeof headerValue.eyebrow === "string") {
+    sanitized.eyebrow = headerValue.eyebrow;
+  }
+  if (typeof headerValue.title === "string") {
+    sanitized.title = headerValue.title;
+  }
+  if (typeof headerValue.subtitle === "string") {
+    sanitized.subtitle = headerValue.subtitle;
+  }
+  if (typeof headerValue.badge === "string") {
+    sanitized.badge = headerValue.badge;
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+};
 
 const normaliseRoles = (roles: string[] | undefined | null): string[] =>
   (roles ?? []).map((role) => role.toLowerCase().trim());
@@ -31,12 +66,7 @@ function ActivitySelector(): JSX.Element {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [headerOverrides, setHeaderOverrides] = useState<{
-    eyebrow?: string;
-    title?: string;
-    subtitle?: string;
-    badge?: string;
-  }>({});
+  const [headerOverrides, setHeaderOverrides] = useState<ActivitySelectorHeaderConfig>({});
   const location = useLocation();
   const navigate = useNavigate();
   const { context, isLTISession, loading: ltiLoading } = useLTI();
@@ -244,7 +274,18 @@ function ActivitySelector(): JSX.Element {
         card: activity.card
       }));
 
-      await admin.activities.save({ activities: serializedActivities }, token);
+      const headerConfig: ActivitySelectorHeaderConfig = {
+        ...DEFAULT_ACTIVITY_SELECTOR_HEADER,
+        ...headerOverrides,
+      };
+
+      await admin.activities.save(
+        {
+          activities: serializedActivities,
+          activitySelectorHeader: headerConfig,
+        },
+        token
+      );
       setEditMode(false);
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
@@ -276,8 +317,11 @@ function ActivitySelector(): JSX.Element {
       if (response.activities && response.activities.length > 0) {
         setEditableActivities(response.activities as ActivityDefinition[]);
       }
+      const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
+      setHeaderOverrides(savedHeader ?? {});
     } catch (error) {
       console.warn('Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut');
+      setHeaderOverrides({});
     } finally {
       setIsLoading(false);
     }
@@ -285,16 +329,8 @@ function ActivitySelector(): JSX.Element {
 
   const activitiesToDisplay = editableActivities;
 
-
-  const defaultHeader = {
-    eyebrow: "Choisis ton activité",
-    title: "Quelle compétence veux-tu travailler avec l'IA ?",
-    subtitle: "Chaque activité se concentre sur une intention distincte : cadrer une demande, affiner un prompt, tester une consigne ou vérifier l'exhaustivité d'un brief.",
-    badge: "Objectifs pédagogiques"
-  };
-
   const currentHeader = {
-    ...defaultHeader,
+    ...DEFAULT_ACTIVITY_SELECTOR_HEADER,
     ...headerOverrides
   };
 
