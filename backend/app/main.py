@@ -1757,6 +1757,7 @@ def admin_list_lti_users(
     }
 
 
+@app.get("/api/activities-config")
 @app.get("/activities-config")
 def get_activities_config() -> dict[str, Any]:
     """Endpoint public renvoyant la configuration des activités."""
