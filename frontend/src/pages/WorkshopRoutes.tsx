@@ -50,6 +50,9 @@ function WorkshopRoutes({
     return 1;
   }, [location.pathname]);
 
+  const isSourceEmpty = !sourceText.trim();
+  const summariesMissing = !summaryA.trim() || !summaryB.trim();
+
   return (
     <Layout currentStep={stepIndex}>
       <Routes>
@@ -66,33 +69,43 @@ function WorkshopRoutes({
         <Route
           path="etape-2"
           element={
-            <StepTwo
-              sourceText={sourceText}
-              configA={configA}
-              configB={configB}
-              setConfigA={setConfigA}
-              setConfigB={setConfigB}
-              summaryA={summaryA}
-              summaryB={summaryB}
-              setSummaryA={setSummaryA}
-              setSummaryB={setSummaryB}
-            />
+            isSourceEmpty ? (
+              <Navigate to="etape-1" replace />
+            ) : (
+              <StepTwo
+                sourceText={sourceText}
+                configA={configA}
+                configB={configB}
+                setConfigA={setConfigA}
+                setConfigB={setConfigB}
+                summaryA={summaryA}
+                summaryB={summaryB}
+                setSummaryA={setSummaryA}
+                setSummaryB={setSummaryB}
+              />
+            )
           }
         />
         <Route
           path="etape-3"
           element={
-            <StepThree
-              sourceText={sourceText}
-              summaryA={summaryA}
-              summaryB={summaryB}
-              flashcardsA={flashcardsA}
-              flashcardsB={flashcardsB}
-              setFlashcardsA={setFlashcardsA}
-              setFlashcardsB={setFlashcardsB}
-              configA={configA}
-              configB={configB}
-            />
+            isSourceEmpty ? (
+              <Navigate to="etape-1" replace />
+            ) : summariesMissing ? (
+              <Navigate to="etape-2" replace />
+            ) : (
+              <StepThree
+                sourceText={sourceText}
+                summaryA={summaryA}
+                summaryB={summaryB}
+                flashcardsA={flashcardsA}
+                flashcardsB={flashcardsB}
+                setFlashcardsA={setFlashcardsA}
+                setFlashcardsB={setFlashcardsB}
+                configA={configA}
+                configB={configB}
+              />
+            )
           }
         />
         <Route path="*" element={<Navigate to="etape-1" replace />} />

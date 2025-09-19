@@ -1,4 +1,4 @@
-import { ChangeEvent, Dispatch, SetStateAction, useMemo, useState } from "react";
+import { ChangeEvent, Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import InfoCard from "../components/InfoCard";
@@ -34,6 +34,14 @@ function StepTwo({
   const [errorB, setErrorB] = useState<string | null>(null);
 
   const disabled = useMemo(() => !sourceText.trim(), [sourceText]);
+
+  useEffect(() => {
+    if (!sourceText.trim()) {
+      navigate("/atelier/etape-1", { replace: true });
+    }
+  }, [navigate, sourceText]);
+
+  const canProceedToStepThree = Boolean(summaryA.trim() && summaryB.trim());
 
   const handleConfigChange = (
     side: "A" | "B",
@@ -261,7 +269,7 @@ function StepTwo({
           type="button"
           onClick={() => navigate("/atelier/etape-3")}
           className="cta-button cta-button--light disabled:cursor-not-allowed disabled:bg-slate-300"
-          disabled={!summaryA.trim() || !summaryB.trim()}
+          disabled={!canProceedToStepThree}
         >
           Passer à l’étape 3
         </button>

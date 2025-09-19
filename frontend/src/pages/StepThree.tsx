@@ -154,16 +154,17 @@ function StepThree({
     if (!finalSummary.trim() || activityProgressMarked) {
       return;
     }
-    const markProgress = async () => {
+    const markProgressAndNavigate = async () => {
       try {
         await updateActivityProgress({ activityId: "atelier", completed: true });
-        setActivityProgressMarked(true);
       } catch (error) {
         console.error("Unable to persist atelier progress", error);
       }
+      setActivityProgressMarked(true);
+      navigate("/activites", { state: { completed: "atelier" } });
     };
-    void markProgress();
-  }, [finalSummary, activityProgressMarked]);
+    void markProgressAndNavigate();
+  }, [finalSummary, activityProgressMarked, navigate]);
 
   return (
     <div className="space-y-12">

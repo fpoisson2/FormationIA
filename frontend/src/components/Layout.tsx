@@ -59,9 +59,13 @@ function Layout({ currentStep, children }: LayoutProps): JSX.Element {
                 ? "bg-white text-[color:var(--brand-black)]"
                 : "bg-white/70 text-[color:var(--brand-charcoal)]/80 hover:bg-white";
               return (
-                <Link key={step.number} to={step.path} className={`${baseClasses} ${stateClasses}`}>
+                <div
+                  key={step.number}
+                  className={`${baseClasses} ${stateClasses}`}
+                  aria-current={isActive ? "step" : undefined}
+                >
                   Étape {step.number} · {step.label}
-                </Link>
+                </div>
               );
             })}
           </nav>

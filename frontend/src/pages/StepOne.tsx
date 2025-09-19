@@ -1,4 +1,4 @@
-import { ChangeEvent } from "react";
+import { ChangeEvent, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import InfoCard from "../components/InfoCard";
@@ -8,12 +8,24 @@ interface StepOneProps {
   onSourceTextChange: (value: string) => void;
 }
 
+const WORD_THRESHOLD = 120;
+
 function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element {
   const navigate = useNavigate();
 
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     onSourceTextChange(event.target.value);
   };
+
+  const wordCount = useMemo(() => {
+    const trimmed = sourceText.trim();
+    if (!trimmed) {
+      return 0;
+    }
+    return trimmed.split(/\s+/).length;
+  }, [sourceText]);
+
+  const canProceed = wordCount >= WORD_THRESHOLD;
 
   return (
     <div className="space-y-12">
@@ -39,13 +51,21 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
             className="min-h-[220px] w-full rounded-3xl border border-white/70 bg-white/80 p-5 text-sm leading-relaxed shadow-inner focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
           />
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <p className="text-xs text-[color:var(--brand-charcoal)]">
-              Astuce : notez vos objectifs d’apprentissage dans le texte. Les modèles s’y référeront pour cadrer leurs réponses.
-            </p>
+            <div className="space-y-1 text-xs text-[color:var(--brand-charcoal)]">
+              <p>
+                Astuce : notez vos objectifs d’apprentissage dans le texte. Les modèles s’y référeront pour cadrer leurs réponses.
+              </p>
+              <p className={!canProceed ? "text-[color:var(--brand-red)]" : "text-[color:var(--brand-charcoal)]/80"}>
+                {canProceed
+                  ? "Seuil atteint : vous pouvez lancer la comparaison."
+                  : `Ajoutez encore ${Math.max(WORD_THRESHOLD - wordCount, 0)} mot(s) pour atteindre le minimum requis (${wordCount}/${WORD_THRESHOLD}).`}
+              </p>
+            </div>
             <button
               type="button"
-            onClick={() => navigate("/atelier/etape-2")}
-              className="cta-button cta-button--primary"
+              onClick={() => navigate("/atelier/etape-2")}
+              className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300"
+              disabled={!canProceed}
             >
               Passer à l’étape 2
             </button>
