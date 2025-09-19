@@ -6,7 +6,8 @@ import {
   type ReactNode,
 } from "react";
 
-import blockPackAtlas from "../assets/kenney_block-pack/Spritesheet/blockPack_spritesheet.png";
+import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
+import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet_described.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
 
@@ -171,6 +172,62 @@ const SPR_TILE_SAND = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16
   <rect x='11' y='9' width='2' height='2' fill='#fff3d6'/>
 </svg>`);
 
+type AtlasEntry = {
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  description?: string;
+};
+
+function parseAtlasDescription(xml: string): Map<string, AtlasEntry> {
+  const entries = new Map<string, AtlasEntry>();
+  const textureRegex = /<SubTexture\s+([^>]+?)\s*\/>/g;
+  let match: RegExpExecArray | null;
+  while ((match = textureRegex.exec(xml)) !== null) {
+    const rawAttributes = match[1];
+    const attributeRegex = /(\w+)="([^"]*)"/g;
+    const attributes: Record<string, string> = {};
+    let attributeMatch: RegExpExecArray | null;
+    while ((attributeMatch = attributeRegex.exec(rawAttributes)) !== null) {
+      attributes[attributeMatch[1]] = attributeMatch[2];
+    }
+    const name = attributes.name;
+    if (!name) {
+      continue;
+    }
+    const entry: AtlasEntry = {
+      name,
+      x: Number(attributes.x ?? 0),
+      y: Number(attributes.y ?? 0),
+      width: Number(attributes.width ?? 0),
+      height: Number(attributes.height ?? 0),
+      description: attributes.description,
+    };
+    entries.set(name, entry);
+  }
+  return entries;
+}
+
+const DEFAULT_TILE_SIZE = 64;
+
+const MAP_PACK_ATLAS = parseAtlasDescription(mapPackAtlasDescription);
+
+function atlas(name: string): TileCoord {
+  const entry = MAP_PACK_ATLAS.get(name);
+  if (!entry) {
+    console.warn(`[ExplorateurIA] Tuile manquante dans l'atlas: ${name}`);
+    return [0, 0, DEFAULT_TILE_SIZE, DEFAULT_TILE_SIZE];
+  }
+  return [
+    entry.x,
+    entry.y,
+    entry.width || DEFAULT_TILE_SIZE,
+    entry.height || DEFAULT_TILE_SIZE,
+  ];
+}
+
 const TILE_KIND = {
   GRASS: 0,
   PATH: 1,
@@ -190,20 +247,12 @@ type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
 
 const TILE_DEFINITIONS: Record<
   TileKind,
-  { sprite: string; atlasKey?: keyof Tileset["map"]; highlight?: boolean }
+  { sprite: string; highlight?: boolean }
 > = {
-  [TILE_KIND.GRASS]: { sprite: SPR_TILE_GRASS, atlasKey: "grass" },
-  [TILE_KIND.PATH]: {
-    sprite: SPR_TILE_PATH,
-    atlasKey: "path",
-    highlight: true,
-  },
-  [TILE_KIND.WATER]: { sprite: SPR_TILE_WATER, atlasKey: "water" },
-  [TILE_KIND.PLAZA]: {
-    sprite: SPR_TILE_PLAZA,
-    atlasKey: "path",
-    highlight: true,
-  },
+  [TILE_KIND.GRASS]: { sprite: SPR_TILE_GRASS },
+  [TILE_KIND.PATH]: { sprite: SPR_TILE_PATH, highlight: true },
+  [TILE_KIND.WATER]: { sprite: SPR_TILE_WATER },
+  [TILE_KIND.PLAZA]: { sprite: SPR_TILE_PLAZA, highlight: true },
   [TILE_KIND.ROOF_LEFT]: { sprite: SPR_TILE_ROOF_LEFT },
   [TILE_KIND.ROOF_RIGHT]: { sprite: SPR_TILE_ROOF_RIGHT },
   [TILE_KIND.WALL_LEFT]: { sprite: SPR_TILE_WALL_LEFT },
@@ -241,32 +290,78 @@ type Tileset = {
   map: {
     grass: TileCoord;
     path: TileCoord;
-    water: TileCoord;
-    house_green: TileCoord;
-    house_blue: TileCoord;
-    house_red: TileCoord;
-    house_purp: TileCoord;
-    town_hall: TileCoord;
+    plaza: TileCoord;
+    farmland: TileCoord;
+    sand: {
+      center: TileCoord;
+      north: TileCoord;
+      south: TileCoord;
+      east: TileCoord;
+      west: TileCoord;
+      northeast: TileCoord;
+      northwest: TileCoord;
+      southeast: TileCoord;
+      southwest: TileCoord;
+    };
+    water: {
+      deep: TileCoord;
+      shore: TileCoord;
+    };
+    details: {
+      tree: TileCoord;
+      flower: TileCoord;
+    };
+    houses: {
+      clarte: TileCoord;
+      creation: TileCoord;
+      decision: TileCoord;
+      ethique: TileCoord;
+      townHall: TileCoord;
+    };
     player: TileCoord[];
   };
 };
 
 const DEFAULT_ATLAS: Tileset = {
   mode: "atlas",
-  url: blockPackAtlas,
-  size: 64,
+  url: mapPackAtlas,
+  size: DEFAULT_TILE_SIZE,
   map: {
-    grass: [256, 220, 64, 74],
-    path: [64, 366, 64, 74],
-    water: [0, 415, 64, 74],
-    house_green: [384, 518, 64, 74],
-    house_blue: [448, 330, 64, 74],
-    house_red: [448, 128, 64, 74],
-    house_purp: [384, 370, 64, 74],
-    town_hall: [384, 296, 64, 74],
+    grass: atlas("mapTile_010.png"),
+    path: atlas("mapTile_185.png"),
+    plaza: atlas("mapTile_187.png"),
+    farmland: atlas("mapTile_101.png"),
+    sand: {
+      center: atlas("mapTile_061.png"),
+      north: atlas("mapTile_053.png"),
+      south: atlas("mapTile_054.png"),
+      east: atlas("mapTile_056.png"),
+      west: atlas("mapTile_055.png"),
+      northeast: atlas("mapTile_057.png"),
+      northwest: atlas("mapTile_059.png"),
+      southeast: atlas("mapTile_058.png"),
+      southwest: atlas("mapTile_060.png"),
+    },
+    water: {
+      deep: atlas("mapTile_004.png"),
+      shore: atlas("mapTile_003.png"),
+    },
+    details: {
+      tree: atlas("mapTile_118.png"),
+      flower: atlas("mapTile_137.png"),
+    },
+    houses: {
+      clarte: atlas("mapTile_141.png"),
+      creation: atlas("mapTile_147.png"),
+      decision: atlas("mapTile_145.png"),
+      ethique: atlas("mapTile_134.png"),
+      townHall: atlas("mapTile_146.png"),
+    },
     player: [
-      [564, 164, 16, 25],
-      [570, 519, 16, 26],
+      atlas("mapTile_177.png"),
+      atlas("mapTile_178.png"),
+      atlas("mapTile_179.png"),
+      atlas("mapTile_180.png"),
     ],
   },
 };
@@ -277,13 +372,168 @@ function cloneTileset(source: Tileset): Tileset {
     map: {
       grass: [...source.map.grass] as TileCoord,
       path: [...source.map.path] as TileCoord,
-      water: [...source.map.water] as TileCoord,
-      house_green: [...source.map.house_green] as TileCoord,
-      house_blue: [...source.map.house_blue] as TileCoord,
-      house_red: [...source.map.house_red] as TileCoord,
-      house_purp: [...source.map.house_purp] as TileCoord,
-      town_hall: [...source.map.town_hall] as TileCoord,
+      plaza: [...source.map.plaza] as TileCoord,
+      farmland: [...source.map.farmland] as TileCoord,
+      sand: {
+        center: [...source.map.sand.center] as TileCoord,
+        north: [...source.map.sand.north] as TileCoord,
+        south: [...source.map.sand.south] as TileCoord,
+        east: [...source.map.sand.east] as TileCoord,
+        west: [...source.map.sand.west] as TileCoord,
+        northeast: [...source.map.sand.northeast] as TileCoord,
+        northwest: [...source.map.sand.northwest] as TileCoord,
+        southeast: [...source.map.sand.southeast] as TileCoord,
+        southwest: [...source.map.sand.southwest] as TileCoord,
+      },
+      water: {
+        deep: [...source.map.water.deep] as TileCoord,
+        shore: [...source.map.water.shore] as TileCoord,
+      },
+      details: {
+        tree: [...source.map.details.tree] as TileCoord,
+        flower: [...source.map.details.flower] as TileCoord,
+      },
+      houses: {
+        clarte: [...source.map.houses.clarte] as TileCoord,
+        creation: [...source.map.houses.creation] as TileCoord,
+        decision: [...source.map.houses.decision] as TileCoord,
+        ethique: [...source.map.houses.ethique] as TileCoord,
+        townHall: [...source.map.houses.townHall] as TileCoord,
+      },
       player: source.map.player.map((frame) => [...frame] as TileCoord),
+    },
+  };
+}
+
+function normalizeCoord(
+  coord: TileCoord | undefined,
+  fallback: TileCoord
+): TileCoord {
+  const source = Array.isArray(coord) ? coord : fallback;
+  const x = typeof source[0] === "number" ? source[0] : fallback[0];
+  const y = typeof source[1] === "number" ? source[1] : fallback[1];
+  const width =
+    typeof source[2] === "number"
+      ? source[2]
+      : typeof fallback[2] === "number"
+      ? fallback[2]
+      : DEFAULT_TILE_SIZE;
+  const height =
+    typeof source[3] === "number"
+      ? source[3]
+      : typeof fallback[3] === "number"
+      ? fallback[3]
+      : DEFAULT_TILE_SIZE;
+  return [x, y, width, height] as TileCoord;
+}
+
+function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
+  const base = cloneTileset(DEFAULT_ATLAS);
+  if (!partial || typeof partial !== "object") {
+    return base;
+  }
+  const map = (partial.map ?? {}) as Partial<Tileset["map"]>;
+  return {
+    mode: partial.mode ?? base.mode,
+    url: partial.url ?? base.url,
+    size: partial.size ?? base.size,
+    map: {
+      grass: normalizeCoord(map.grass as TileCoord | undefined, base.map.grass),
+      path: normalizeCoord(map.path as TileCoord | undefined, base.map.path),
+      plaza: normalizeCoord(map.plaza as TileCoord | undefined, base.map.plaza),
+      farmland: normalizeCoord(
+        map.farmland as TileCoord | undefined,
+        base.map.farmland
+      ),
+      sand: {
+        center: normalizeCoord(
+          map.sand?.center as TileCoord | undefined,
+          base.map.sand.center
+        ),
+        north: normalizeCoord(
+          map.sand?.north as TileCoord | undefined,
+          base.map.sand.north
+        ),
+        south: normalizeCoord(
+          map.sand?.south as TileCoord | undefined,
+          base.map.sand.south
+        ),
+        east: normalizeCoord(
+          map.sand?.east as TileCoord | undefined,
+          base.map.sand.east
+        ),
+        west: normalizeCoord(
+          map.sand?.west as TileCoord | undefined,
+          base.map.sand.west
+        ),
+        northeast: normalizeCoord(
+          map.sand?.northeast as TileCoord | undefined,
+          base.map.sand.northeast
+        ),
+        northwest: normalizeCoord(
+          map.sand?.northwest as TileCoord | undefined,
+          base.map.sand.northwest
+        ),
+        southeast: normalizeCoord(
+          map.sand?.southeast as TileCoord | undefined,
+          base.map.sand.southeast
+        ),
+        southwest: normalizeCoord(
+          map.sand?.southwest as TileCoord | undefined,
+          base.map.sand.southwest
+        ),
+      },
+      water: {
+        deep: normalizeCoord(
+          map.water?.deep as TileCoord | undefined,
+          base.map.water.deep
+        ),
+        shore: normalizeCoord(
+          map.water?.shore as TileCoord | undefined,
+          base.map.water.shore
+        ),
+      },
+      details: {
+        tree: normalizeCoord(
+          map.details?.tree as TileCoord | undefined,
+          base.map.details.tree
+        ),
+        flower: normalizeCoord(
+          map.details?.flower as TileCoord | undefined,
+          base.map.details.flower
+        ),
+      },
+      houses: {
+        clarte: normalizeCoord(
+          map.houses?.clarte as TileCoord | undefined,
+          base.map.houses.clarte
+        ),
+        creation: normalizeCoord(
+          map.houses?.creation as TileCoord | undefined,
+          base.map.houses.creation
+        ),
+        decision: normalizeCoord(
+          map.houses?.decision as TileCoord | undefined,
+          base.map.houses.decision
+        ),
+        ethique: normalizeCoord(
+          map.houses?.ethique as TileCoord | undefined,
+          base.map.houses.ethique
+        ),
+        townHall: normalizeCoord(
+          map.houses?.townHall as TileCoord | undefined,
+          base.map.houses.townHall
+        ),
+      },
+      player:
+        Array.isArray(map.player) && map.player.length > 0
+          ? map.player.map((frame, index) =>
+              normalizeCoord(
+                frame as TileCoord | undefined,
+                base.map.player[index % base.map.player.length]
+              )
+            )
+          : base.map.player.map((frame) => [...frame] as TileCoord),
     },
   };
 }
@@ -294,10 +544,8 @@ function useTileset(): [Tileset, (t: Tileset) => void] {
       const raw = window.localStorage.getItem("explorateur.tileset");
       if (raw) {
         try {
-          const parsed = JSON.parse(raw) as Tileset;
-          if (parsed && typeof parsed === "object") {
-            return parsed;
-          }
+          const parsed = JSON.parse(raw) as Partial<Tileset>;
+          return mergeWithDefault(parsed);
         } catch {
           // ignore invalid cache
         }
@@ -372,14 +620,14 @@ function TilesetControls({
   ts: Tileset;
   setTs: (t: Tileset) => void;
 }) {
-  const [url, setUrl] = useState(ts.url ?? blockPackAtlas);
-  const [size, setSize] = useState(ts.size ?? 16);
+  const [url, setUrl] = useState(ts.url ?? mapPackAtlas);
+  const [size, setSize] = useState(ts.size ?? DEFAULT_TILE_SIZE);
 
   const apply = (mode: TilesetMode) => {
     if (mode === "builtin") {
       setTs({ mode: "builtin", size, map: ts.map });
     } else {
-      setTs({ mode: "atlas", url: url || blockPackAtlas, size, map: ts.map });
+      setTs({ mode: "atlas", url: url || mapPackAtlas, size, map: ts.map });
     }
   };
 
@@ -432,8 +680,8 @@ function TilesetControls({
           />
         </label>
         <p className="text-slate-500">
-          Dépose un atlas PNG (16x16) dans public/assets et renseigne l'URL. Packs
-          recommandés: Kenney (CC0) Block Pack ou Topdown/RPG.
+          Dépose un atlas PNG (64×64) dans public/assets et renseigne l'URL. Pack
+          recommandé: Kenney (CC0) Map Pack.
         </p>
       </div>
     </div>
@@ -698,14 +946,14 @@ function BuildingSprite({
   if (ts.mode === "atlas" && ts.url) {
     const coord =
       id === "mairie"
-        ? ts.map.town_hall
+        ? ts.map.houses.townHall
         : id === "clarte"
-        ? ts.map.house_green
+        ? ts.map.houses.clarte
         : id === "creation"
-        ? ts.map.house_blue
+        ? ts.map.houses.creation
         : id === "decision"
-        ? ts.map.house_red
-        : ts.map.house_purp;
+        ? ts.map.houses.decision
+        : ts.map.houses.ethique;
     return <SpriteFromAtlas ts={ts} coord={coord} />;
   }
 
@@ -790,14 +1038,104 @@ function BuiltinTile({ sprite }: { sprite: string }) {
   );
 }
 
-function TileWithTs({ kind, ts }: { kind: number; ts: Tileset }) {
+function tileAt(x: number, y: number): TileKind | null {
+  if (y < 0 || y >= world.length) {
+    return null;
+  }
+  const row = world[y];
+  if (!row || x < 0 || x >= row.length) {
+    return null;
+  }
+  return row[x] as TileKind;
+}
+
+function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
+  const northWater = tileAt(x, y - 1) === TILE_KIND.WATER;
+  const southWater = tileAt(x, y + 1) === TILE_KIND.WATER;
+  const westWater = tileAt(x - 1, y) === TILE_KIND.WATER;
+  const eastWater = tileAt(x + 1, y) === TILE_KIND.WATER;
+
+  if (northWater && eastWater) return ts.map.sand.northeast;
+  if (southWater && eastWater) return ts.map.sand.southeast;
+  if (northWater && westWater) return ts.map.sand.northwest;
+  if (southWater && westWater) return ts.map.sand.southwest;
+  if (northWater) return ts.map.sand.north;
+  if (southWater) return ts.map.sand.south;
+  if (eastWater) return ts.map.sand.east;
+  if (westWater) return ts.map.sand.west;
+  return ts.map.sand.center;
+}
+
+function getWaterTileCoord(x: number, y: number, ts: Tileset): TileCoord {
+  const neighborKinds = [
+    tileAt(x, y - 1),
+    tileAt(x, y + 1),
+    tileAt(x - 1, y),
+    tileAt(x + 1, y),
+    tileAt(x - 1, y - 1),
+    tileAt(x + 1, y - 1),
+    tileAt(x - 1, y + 1),
+    tileAt(x + 1, y + 1),
+  ];
+  const touchesLand = neighborKinds.some(
+    (neighbor) => neighbor !== null && neighbor !== TILE_KIND.WATER
+  );
+  return touchesLand ? ts.map.water.shore : ts.map.water.deep;
+}
+
+function getAtlasTile(
+  tileKind: TileKind,
+  ts: Tileset,
+  x: number,
+  y: number
+): TileCoord | null {
+  switch (tileKind) {
+    case TILE_KIND.GRASS:
+      return ts.map.grass;
+    case TILE_KIND.PATH:
+      return ts.map.path;
+    case TILE_KIND.PLAZA:
+      return ts.map.plaza;
+    case TILE_KIND.WATER:
+      return getWaterTileCoord(x, y, ts);
+    case TILE_KIND.SAND:
+      return getSandTileCoord(x, y, ts);
+    case TILE_KIND.FIELD:
+      return ts.map.farmland;
+    case TILE_KIND.TREE:
+      return ts.map.details.tree;
+    case TILE_KIND.FLOWER:
+      return ts.map.details.flower;
+    case TILE_KIND.ROOF_LEFT:
+    case TILE_KIND.WALL_LEFT:
+      return ts.map.details.tree;
+    case TILE_KIND.ROOF_RIGHT:
+    case TILE_KIND.WALL_RIGHT:
+      return ts.map.details.flower;
+    default:
+      return ts.map.grass;
+  }
+}
+
+function TileWithTs({
+  kind,
+  ts,
+  x,
+  y,
+}: {
+  kind: number;
+  ts: Tileset;
+  x: number;
+  y: number;
+}) {
   const tileKind = (kind as TileKind) ?? TILE_KIND.GRASS;
   const definition =
     TILE_DEFINITIONS[tileKind] ?? TILE_DEFINITIONS[TILE_KIND.GRASS];
-  const atlasKey = definition.atlasKey;
-  if (ts.mode === "atlas" && ts.url && atlasKey) {
-    const coord = ts.map[atlasKey];
-    return <SpriteFromAtlas ts={ts} coord={coord as TileCoord} scale={TILE} />;
+  if (ts.mode === "atlas" && ts.url) {
+    const coord = getAtlasTile(tileKind, ts, x, y);
+    if (coord) {
+      return <SpriteFromAtlas ts={ts} coord={coord} scale={TILE} />;
+    }
   }
   return <BuiltinTile sprite={definition.sprite} />;
 }
@@ -1704,7 +2042,7 @@ export default function ExplorateurIA({
                     const highlight = HIGHLIGHT_TILES.has(tileKind as TileKind);
                     return (
                       <div key={`${x}-${y}`} className="relative">
-                        <TileWithTs kind={tileKind} ts={tileset} />
+                        <TileWithTs kind={tileKind} ts={tileset} x={x} y={y} />
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
