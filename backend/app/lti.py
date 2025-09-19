@@ -857,13 +857,20 @@ class LTIService:
     ) -> dict[str, Any]:
         ags = session.ags or {}
         lineitem = ags.get("lineitem")
-        scopes = ags.get("scope") or []
-        if isinstance(scopes, str):
-            scopes = [scopes]
+        scopes_raw = ags.get("scope") or []
+        if isinstance(scopes_raw, str):
+            scopes_iterable: Iterable[str] = scopes_raw.split()
+        else:
+            scopes_iterable = list(scopes_raw)
+        normalized_scopes: list[str] = []
+        for scope in scopes_iterable:
+            if not scope or scope in normalized_scopes:
+                continue
+            normalized_scopes.append(scope)
         if not lineitem:
             raise LTIScoreError("Aucun lineitem AGS n'a été fourni dans le launch LTI.")
         score_scope = "https://purl.imsglobal.org/spec/lti-ags/scope/score"
-        if score_scope not in scopes:
+        if score_scope not in normalized_scopes:
             raise LTIScoreError("La plateforme n'a pas accordé le scope score pour cette ressource.")
 
         platform = self.get_platform(
@@ -871,7 +878,7 @@ class LTIService:
             session.client_id,
             allow_autodiscovery=True,
         )
-        token_response = await self.obtain_access_token(platform, scopes)
+        token_response = await self.obtain_access_token(platform, normalized_scopes)
         access_token = token_response.get("access_token")
         if not access_token:
             raise LTIAuthorizationError("La plateforme n'a pas renvoyé d'access_token AGS.")
