@@ -88,7 +88,7 @@ function PromptStage({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [displayedPrompt, setDisplayedPrompt] = useState(stage.prompt);
   const [isStreamingPrompt, setIsStreamingPrompt] = useState(false);
-  const shouldSkipValidation = true; // autoriser les réponses vides pour favoriser l'expérimentation
+  const allowEmpty = stage.allowEmpty ?? false;
 
   useEffect(() => {
     setValues(initialValues ?? createInitialValues(stage.fields));
@@ -182,9 +182,6 @@ function PromptStage({
   const validate = useCallback(
     (fields: FieldSpec[], current: StageAnswer): Record<string, string> => {
       const fieldErrors: Record<string, string> = {};
-      if (shouldSkipValidation) {
-        return fieldErrors;
-      }
       fields.forEach((field) => {
         const value = current[field.id];
         switch (field.type) {
@@ -295,18 +292,35 @@ function PromptStage({
     []
   );
 
+  useEffect(() => {
+    if (allowEmpty) {
+      setErrors((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+      return;
+    }
+    const sanitized = sanitizeValues(stage.fields, values);
+    const fieldErrors = validate(stage.fields, sanitized);
+    setErrors((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(fieldErrors);
+      if (prevKeys.length === nextKeys.length && nextKeys.every((key) => prev[key] === fieldErrors[key])) {
+        return prev;
+      }
+      return fieldErrors;
+    });
+  }, [allowEmpty, sanitizeValues, stage.fields, validate, values]);
+
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       const sanitized = sanitizeValues(stage.fields, values);
-      const fieldErrors = validate(stage.fields, sanitized);
+      const fieldErrors = allowEmpty ? {} : validate(stage.fields, sanitized);
       setErrors(fieldErrors);
       if (Object.keys(fieldErrors).length > 0) {
         return;
       }
       await onSubmit(sanitized);
     },
-    [onSubmit, sanitizeValues, stage.fields, validate, values]
+    [allowEmpty, onSubmit, sanitizeValues, stage.fields, validate, values]
   );
 
   const historyEntries = useMemo(
@@ -402,6 +416,8 @@ function PromptStage({
       ? ""
       : stage.prompt;
 
+  const hasBlockingErrors = !allowEmpty && Object.keys(errors).length > 0;
+
   return (
     <div className="space-y-8">
       <header className="space-y-3">
@@ -415,7 +431,12 @@ function PromptStage({
               Tu incarnes l’IA Clarté. L’usager affine son brief manche après manche : applique ses nouvelles consignes et observe comment le besoin évolue.
             </p>
           </div>
-          <button type="button" className="cta-button cta-button--light" onClick={onBack}>
+          <button
+            type="button"
+            className="cta-button cta-button--light disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onBack}
+            disabled={isSubmitting || !allowEmpty}
+          >
             Changer de mission
           </button>
         </div>
@@ -467,8 +488,8 @@ function PromptStage({
             {isSubmitting && <span className="text-sm text-[color:var(--brand-charcoal)]/80">Envoi…</span>}
             <button
               type="submit"
-              className="cta-button cta-button--primary"
-              disabled={isSubmitting}
+              className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isSubmitting || hasBlockingErrors}
             >
               {stageIndex === mission.stages.length - 1 ? "Voir la révélation" : "Continuer"}
             </button>

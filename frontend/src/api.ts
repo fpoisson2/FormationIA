@@ -60,6 +60,7 @@ export type FieldSpec =
 export interface MissionStage {
   prompt: string;
   fields: FieldSpec[];
+  allowEmpty?: boolean;
 }
 
 export interface Mission {
