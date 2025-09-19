@@ -7,9 +7,17 @@ import {
   ACTIVITY_DEFINITIONS,
   type ActivityDefinition,
 } from "../config/activities";
+import { useLTI } from "../hooks/useLTI";
 
 function ActivitySelector(): JSX.Element {
   const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
+  const { context, isLTISession, loading: ltiLoading } = useLTI();
+  const displayName =
+    context?.user?.name?.trim() ||
+    context?.user?.email?.trim() ||
+    context?.user?.subject?.trim() ||
+    "";
+  const shouldShowWelcome = isLTISession && !ltiLoading && displayName.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +48,13 @@ function ActivitySelector(): JSX.Element {
   return (
     <div className="landing-gradient min-h-screen px-6 py-16 text-[color:var(--brand-black)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-12">
+        {shouldShowWelcome ? (
+          <div className="animate-section rounded-3xl border border-white/70 bg-white/90 p-6 text-center shadow-sm backdrop-blur">
+            <p className="text-lg font-medium text-[color:var(--brand-charcoal)] md:text-xl">
+              Bienvenue <span className="font-semibold text-[color:var(--brand-black)]">{displayName}</span>
+            </p>
+          </div>
+        ) : null}
         <header className="space-y-6 rounded-3xl border border-white/70 bg-white/90 p-8 shadow-sm backdrop-blur animate-section">
           <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
             <Link to="/" className="flex items-center gap-3">
