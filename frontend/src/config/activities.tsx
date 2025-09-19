@@ -2,7 +2,7 @@ import React, { useCallback, useState, useEffect, type ComponentType, type React
 import { useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
-import { admin } from "../api";
+import { admin, activities as activitiesClient } from "../api";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
@@ -107,23 +107,35 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
 
     // Charger la configuration sauvegardée au montage
     useEffect(() => {
-      if (canShowAdminButton && token) {
-        const loadCurrentConfig = async () => {
-          try {
-            const response = await admin.activities.get(token);
-            if (response.activities && response.activities.length > 0) {
-              const savedActivity = response.activities.find((activity: any) => activity.id === definition.id);
-              if (savedActivity) {
-                setCurrentDefinition(savedActivity as ActivityDefinition);
-              }
+      let cancelled = false;
+
+      const loadCurrentConfig = async () => {
+        try {
+          const response = await activitiesClient.getConfig();
+          if (cancelled) {
+            return;
+          }
+          if (response.activities && response.activities.length > 0) {
+            const savedActivity = response.activities.find(
+              (activity: any) => activity.id === definition.id
+            );
+            if (savedActivity) {
+              setCurrentDefinition(savedActivity as ActivityDefinition);
             }
-          } catch (error) {
+          }
+        } catch (error) {
+          if (!cancelled) {
             console.warn('Aucune configuration sauvegardée trouvée pour cette activité');
           }
-        };
-        loadCurrentConfig();
-      }
-    }, [canShowAdminButton, token, definition.id]);
+        }
+      };
+
+      void loadCurrentConfig();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [definition.id]);
 
     const currentBaseLayout = buildBaseLayout(currentDefinition);
     const mergedLayout: ActivityLayoutConfig = {
@@ -183,8 +195,11 @@ export function buildActivityElement(definition: ActivityDefinition): JSX.Elemen
 
       // Charger toutes les activités actuelles
       try {
-        const response = await admin.activities.get(token);
-        const allActivities = response.activities.length > 0 ? response.activities : ACTIVITY_DEFINITIONS;
+        const response = await activitiesClient.getConfig();
+        const allActivities =
+          response.activities && response.activities.length > 0
+            ? response.activities
+            : ACTIVITY_DEFINITIONS;
 
         // Mettre à jour l'activité courante
         const updatedActivities = allActivities.map((activity: any) =>

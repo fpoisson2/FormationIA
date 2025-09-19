@@ -1705,6 +1705,13 @@ def admin_list_lti_users(
     }
 
 
+@app.get("/activities-config")
+def get_activities_config() -> dict[str, Any]:
+    """Endpoint public renvoyant la configuration des activités."""
+    activities = _load_activities_config()
+    return {"activities": activities}
+
+
 @admin_router.get("/activities")
 def admin_get_activities_config(
     _: LocalUser = Depends(_require_admin_user),
