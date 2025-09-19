@@ -276,91 +276,89 @@ function PromptDojo({ completionId, navigateToActivities }: ActivityProps): JSX.
   };
 
   const renderBriefing = () => (
-    <div className="min-h-screen bg-[color:var(--brand-sand)] px-4 py-10 sm:px-8">
-      <div className="mx-auto flex max-w-5xl flex-col gap-10">
-        <header className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <img src={logoPrincipal} alt="Cégep Limoilou" className="h-12 w-auto" />
-            <span className="text-xs uppercase tracking-[0.35em] text-[color:var(--brand-charcoal)]/70">
-              Briefing du dojo
-            </span>
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-3xl font-semibold text-[color:var(--brand-black)]">Choisis ta mission</h1>
-            <p className="max-w-2xl text-sm text-[color:var(--brand-charcoal)]/85">
-              Chaque mission te plonge dans une situation vécue au cégep. Sélectionne ton défi, puis franchis les étapes pour
-              décrocher le badge.
-            </p>
-          </div>
-        </header>
-
-        <section className="rounded-3xl border border-white/60 bg-white/95 p-6 shadow-sm backdrop-blur">
-          <div className="flex flex-col gap-4 md:flex-row md:justify-between">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+      <section className="rounded-3xl border border-white/70 bg-white p-8 shadow-sm">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div className="space-y-5">
             <div className="space-y-2">
+              <span className="text-xs uppercase tracking-[0.35em] text-[color:var(--brand-charcoal)]/70">Briefing du dojo</span>
+              <h2 className="text-3xl font-semibold text-[color:var(--brand-black)]">Choisis ta mission</h2>
+              <p className="max-w-2xl text-sm text-[color:var(--brand-charcoal)]/85">
+                Chaque mission te plonge dans une situation vécue au cégep. Sélectionne ton défi, puis franchis les étapes pour
+                décrocher le badge.
+              </p>
+            </div>
+
+            <div className="space-y-3">
               <p className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
                 {mission.badge}
               </p>
-              <h2 className="text-2xl font-semibold text-[color:var(--brand-black)]">{mission.title}</h2>
-              <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90">{mission.description}</p>
-              <ul className="mt-3 space-y-2 text-sm text-[color:var(--brand-charcoal)]">
-                <li className="flex items-start gap-2">
-                  <TargetIcon className="mt-0.5 h-4 w-4" />
-                  <span>{mission.defaults.objective}</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <LightbulbIcon className="mt-0.5 h-4 w-4" />
-                  <span>{mission.defaults.context}</span>
-                </li>
-              </ul>
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => setStage("arena-writing")}
-                  className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
-                >
-                  <StarsIcon className="h-4 w-4" /> Commencer la mission
-                </button>
+              <div className="space-y-1">
+                <h3 className="text-xl font-semibold text-[color:var(--brand-black)]">{mission.title}</h3>
+                <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90">{mission.description}</p>
               </div>
             </div>
-            <div className="flex flex-col justify-between rounded-3xl bg-[color:var(--brand-black)]/90 p-5 text-white/90">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/60">Objectif</p>
-                <p className="text-3xl font-semibold">{mission.targetScore}/100</p>
-                <p className="mt-1 text-sm text-white/70">Atteins ce score IA pour gagner le badge.</p>
-              </div>
-              <div className="mt-6 space-y-1 text-sm text-white/80">
-                {mission.defaults.checkpoints.map((tip) => (
-                  <p key={tip}>• {tip}</p>
-                ))}
-              </div>
+
+            <ul className="space-y-2 text-sm text-[color:var(--brand-charcoal)]">
+              <li className="flex items-start gap-2">
+                <TargetIcon className="mt-0.5 h-4 w-4" />
+                <span>{mission.defaults.objective}</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <LightbulbIcon className="mt-0.5 h-4 w-4" />
+                <span>{mission.defaults.context}</span>
+              </li>
+            </ul>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => setStage("arena-writing")}
+                className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
+              >
+                <StarsIcon className="h-4 w-4" /> Commencer la mission
+              </button>
             </div>
           </div>
-        </section>
 
-        {MISSIONS.length > 1 && (
-          <section className="space-y-3">
-            <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Explorer d’autres missions</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {MISSIONS.filter((item) => item.id !== mission.id).map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  onClick={() => setMissionId(item.id)}
-                  className="flex h-full flex-col gap-3 rounded-2xl border border-white/60 bg-white/90 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                >
-                  <span className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
-                    {item.badge}
-                  </span>
-                  <div className="space-y-1">
-                    <p className="text-base font-semibold text-[color:var(--brand-black)]">{item.title}</p>
-                    <p className="text-sm text-[color:var(--brand-charcoal)]/80">{item.description}</p>
-                  </div>
-                </button>
+          <aside className="flex flex-col justify-between gap-6 rounded-3xl bg-[color:var(--brand-black)]/90 p-6 text-white/90">
+            <div className="space-y-1">
+              <p className="text-xs uppercase tracking-wide text-white/60">Objectif</p>
+              <p className="text-3xl font-semibold">{mission.targetScore}/100</p>
+              <p className="text-sm text-white/70">Atteins ce score IA pour gagner le badge.</p>
+            </div>
+            <div className="space-y-1 text-sm text-white/80">
+              {mission.defaults.checkpoints.map((tip) => (
+                <p key={tip}>• {tip}</p>
               ))}
             </div>
-          </section>
-        )}
-      </div>
+          </aside>
+        </div>
+      </section>
+
+      {MISSIONS.length > 1 && (
+        <section className="space-y-3">
+          <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Explorer d’autres missions</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {MISSIONS.filter((item) => item.id !== mission.id).map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => setMissionId(item.id)}
+                className="flex h-full flex-col gap-3 rounded-2xl border border-white/70 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <span className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
+                  {item.badge}
+                </span>
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-[color:var(--brand-black)]">{item.title}</p>
+                  <p className="text-sm text-[color:var(--brand-charcoal)]/80">{item.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 
