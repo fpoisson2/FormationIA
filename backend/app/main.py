@@ -831,6 +831,7 @@ def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
             "<p class=\"dl-hint\">Coche jusqu’à la limite souhaitée, puis valide pour créer chaque ressource.</p>"
         )
     submit_label = "Ajouter l’activité" if not allow_multiple else "Ajouter les activités"
+    selection_hint_line = f"      {selection_hint}\n" if selection_hint else ""
     limit_script = ""
     if allow_multiple and max_selectable:
         limit_script = (
@@ -891,7 +892,7 @@ def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
         f"    {intro_block}\n"
         f"    <form method=\"post\" action=\"{action}\">\n"
         f"      <input type=\"hidden\" name=\"deep_link_id\" value=\"{context_id}\" />\n"
-        f"{'      ' + selection_hint + '\\n' if selection_hint else ''}"
+        f"{selection_hint_line}"
         f"      {options_html}\n"
         "      <div class=\"dl-actions\">\n"
         f"        <button type=\"submit\" name=\"submit_action\" value=\"submit\" class=\"dl-submit\">{html.escape(submit_label)}</button>\n"
