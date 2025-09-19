@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
+import { AdminModal } from "../components/admin/AdminModal";
 import {
   getProgress,
   admin,
@@ -802,55 +803,49 @@ function ActivitySelector(): JSX.Element {
       })}
       </div>
       </ActivityLayout>
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-          <div className="w-full max-w-lg space-y-4 rounded-3xl bg-white p-6 shadow-xl">
-            <div className="space-y-1">
-              <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">
-                Ajouter une activité
-              </h3>
-              <p className="text-sm text-[color:var(--brand-charcoal)]">
-                Choisissez un composant à ajouter depuis le catalogue.
-              </p>
-            </div>
-            <div className="space-y-2">
-              {availableCatalogOptions.length > 0 ? (
-                availableCatalogOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    onClick={() => handleSelectActivityToAdd(option.id)}
-                    className="w-full rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-4 py-3 text-left transition hover:border-[color:var(--brand-red)]/40 hover:bg-[color:var(--brand-red)]/5"
-                  >
-                    <div className="flex items-center justify-between text-sm font-semibold text-[color:var(--brand-black)]">
-                      <span>{option.title}</span>
-                      <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                        {option.componentKey}
-                      </span>
-                    </div>
-                    {option.description && (
-                      <p className="mt-1 text-xs text-[color:var(--brand-charcoal)]/80">
-                        {option.description}
-                      </p>
-                    )}
-                  </button>
-                ))
-              ) : (
-                <p className="rounded-2xl border border-dashed border-[color:var(--brand-charcoal)]/20 bg-gray-50 px-4 py-6 text-center text-sm text-[color:var(--brand-charcoal)]">
-                  Toutes les activités du catalogue sont déjà présentes.
-                </p>
-              )}
-            </div>
-            <div className="flex justify-end gap-2">
+      <AdminModal
+        open={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="Ajouter une activité"
+        description="Choisissez un composant à ajouter depuis le catalogue."
+        footer={
+          <button
+            onClick={() => setIsAddModalOpen(false)}
+            className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+          >
+            Fermer
+          </button>
+        }
+        size="md"
+      >
+        {availableCatalogOptions.length > 0 ? (
+          <div className="space-y-2">
+            {availableCatalogOptions.map((option) => (
               <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+                key={option.id}
+                onClick={() => handleSelectActivityToAdd(option.id)}
+                className="w-full rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-4 py-3 text-left transition hover:border-[color:var(--brand-red)]/40 hover:bg-[color:var(--brand-red)]/5"
               >
-                Fermer
+                <div className="flex items-center justify-between text-sm font-semibold text-[color:var(--brand-black)]">
+                  <span>{option.title}</span>
+                  <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                    {option.componentKey}
+                  </span>
+                </div>
+                {option.description && (
+                  <p className="mt-1 text-xs text-[color:var(--brand-charcoal)]/80">
+                    {option.description}
+                  </p>
+                )}
               </button>
-            </div>
+            ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="rounded-2xl border border-dashed border-[color:var(--brand-charcoal)]/20 bg-gray-50 px-4 py-6 text-center text-sm text-[color:var(--brand-charcoal)]">
+            Toutes les activités du catalogue sont déjà présentes.
+          </p>
+        )}
+      </AdminModal>
     </>
   );
 }
