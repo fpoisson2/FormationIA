@@ -344,6 +344,11 @@ export interface SaveActivityConfigResponse {
   message: string;
 }
 
+export const activities = {
+  getConfig: async (): Promise<ActivityConfigResponse> =>
+    fetchJson<ActivityConfigResponse>(`${API_BASE_URL}/activities-config`),
+};
+
 export const admin = {
   activities: {
     get: async (token?: string | null): Promise<ActivityConfigResponse> =>

@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
-import { getProgress, admin, type ProgressResponse } from "../api";
+import {
+  getProgress,
+  admin,
+  activities as activitiesClient,
+  type ProgressResponse,
+} from "../api";
 import {
   ACTIVITY_DEFINITIONS,
   type ActivityDefinition,
@@ -110,10 +115,8 @@ function ActivitySelector(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (canShowAdminButton) {
-      loadSavedConfig();
-    }
-  }, [canShowAdminButton]);
+    void loadSavedConfig();
+  }, []);
 
   const handleMoveActivity = (fromIndex: number, toIndex: number) => {
     if (!isEditMode) return;
@@ -269,7 +272,7 @@ function ActivitySelector(): JSX.Element {
 
     setIsLoading(true);
     try {
-      const response = await admin.activities.get(token);
+      const response = await activitiesClient.getConfig();
       if (response.activities && response.activities.length > 0) {
         setEditableActivities(response.activities as ActivityDefinition[]);
       }
