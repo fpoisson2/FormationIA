@@ -67,20 +67,20 @@ Un store persistant (`storage/admin.json` par défaut ou `ADMIN_STORAGE_PATH`) c
 - Les chemins des clés privées/publiques
 - Les comptes administrateurs qui peuvent modifier cette configuration
 
-Les opérations s’exposent via un routeur FastAPI protégé par un jeton signé (`ADMIN_AUTH_SECRET`) :
+Les opérations s’exposent via des routeurs FastAPI protégés par un jeton signé (`ADMIN_AUTH_SECRET`) :
 
-- `POST /api/admin/login` · Authentifie un compte admin et émet un cookie `formationia_admin_session`
-- `GET /api/admin/lti-platforms` · Liste les plateformes connues
-- `POST/PUT/PATCH /api/admin/lti-platforms` · Création/mise à jour des métadonnées (issuer, endpoints, déploiements)
-- `DELETE /api/admin/lti-platforms` · Retire une configuration (si elle n’est pas marquée read-only)
-- `GET /api/admin/lti-keys` · Visualise l’état des chemins de clés
-- `POST /api/admin/lti-keys` · Téléverse ou remplace les fichiers PEM aux emplacements configurés
+- **Authentification locale** (`/api/admin/auth`) : `POST /login` (émet un cookie `formationia_admin_session` signé et retourne le JWT associé), `POST /logout` (nettoie le cookie) et `GET /me` (profil courant + expiration du jeton).
+- **Comptes locaux** (`/api/admin/users`) : `GET` (liste les comptes `LocalUser`), `POST` (création avec mot de passe bcrypt et rôles), `PATCH /{username}` (mise à jour des rôles ou de l’activation) et `POST /{username}/reset-password` (réinitialisation du mot de passe).
+- **Configuration LTI** : `GET /api/admin/lti-platforms`, `POST/PUT/PATCH /api/admin/lti-platforms`, `DELETE /api/admin/lti-platforms`, `GET /api/admin/lti-keys`, `POST /api/admin/lti-keys`.
+
+Les comptes locaux (`LocalUser`) conservent un `password_hash` bcrypt et une liste de rôles (ex. `admin`, `facilitator`). Seuls les comptes portant le rôle `admin` peuvent gérer d’autres utilisateurs et modifier la configuration LTI.
 
 Variables principales :
 
 - `ADMIN_AUTH_SECRET` (obligatoire) · secret HMAC utilisé pour signer les tokens et cookies admin
+- `ADMIN_SESSION_TTL` (secondes, défaut 3600) / `ADMIN_SESSION_REMEMBER_TTL` (durée prolongée lorsque `remember=true`) · durée de vie des sessions administrateur
+- `ADMIN_SESSION_COOKIE_NAME`, `ADMIN_COOKIE_SECURE`, `ADMIN_COOKIE_SAMESITE`, `ADMIN_COOKIE_DOMAIN` · personnalisation du cookie admin (si `SAMESITE=none`, le flag `secure` est forcé)
 - `ADMIN_STORAGE_PATH` (optionnel) · chemin vers le fichier JSON persistant
-- `ADMIN_SESSION_COOKIE_NAME`, `ADMIN_SESSION_TTL`, `ADMIN_SESSION_REMEMBER_TTL`, `ADMIN_COOKIE_*` · personnalisations du cookie admin
 - `ADMIN_DEFAULT_USERNAME` / `ADMIN_DEFAULT_PASSWORD` · création automatique d’un compte admin au premier démarrage
 
 ### Persistance des progrès

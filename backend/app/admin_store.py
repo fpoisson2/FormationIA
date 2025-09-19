@@ -12,8 +12,9 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Sequence
 
+import bcrypt
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 
@@ -55,6 +56,18 @@ class AdminStoreError(RuntimeError):
 
 class AdminAuthError(RuntimeError):
     """Raised when an admin token cannot be verified."""
+
+
+def _normalize_roles(values: Sequence[str | None]) -> list[str]:
+    roles: list[str] = []
+    for value in values:
+        if value is None:
+            continue
+        candidate = str(value).strip().lower()
+        if not candidate or candidate in roles:
+            continue
+        roles.append(candidate)
+    return roles
 
 
 class LtiPlatform(BaseModel):
@@ -102,18 +115,54 @@ class LtiKeyset(BaseModel):
     read_only: bool = False
 
 
-class AdminUser(BaseModel):
+class LocalUser(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     username: str
     password_hash: str
-    password_salt: str
+    hash_algorithm: str = Field(default="bcrypt")
+    password_salt: str | None = None
+    roles: list[str] = Field(default_factory=lambda: ["admin"])
     is_active: bool = True
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
     from_env: bool = False
 
+    @model_validator(mode="after")
+    def _normalize(self) -> "LocalUser":
+        roles = _normalize_roles(self.roles)
+        if not roles:
+            raise ValueError("Le compte doit avoir au moins un rôle.")
+        object.__setattr__(self, "roles", roles)
+        algorithm = (self.hash_algorithm or "").strip().lower() or "bcrypt"
+        object.__setattr__(self, "hash_algorithm", algorithm)
+        return self
+
     def verify_password(self, password: str) -> bool:
-        expected = _derive_password(password, self.password_salt)
-        return secrets.compare_digest(expected, self.password_hash)
+        algorithm = self.hash_algorithm or "bcrypt"
+        if algorithm == "bcrypt":
+            try:
+                return bcrypt.checkpw(password.encode("utf-8"), self.password_hash.encode("utf-8"))
+            except ValueError:
+                return False
+        if algorithm == "argon2":  # pragma: no cover - future compatibility
+            try:
+                from argon2 import PasswordHasher  # type: ignore[import-not-found]
+            except Exception:  # pragma: no cover - argon2 optional dependency
+                return False
+
+            hasher = PasswordHasher()
+            try:
+                return hasher.verify(self.password_hash, password)
+            except Exception:  # pragma: no cover - argon2 optional dependency
+                return False
+        if algorithm == "pbkdf2" and self.password_salt:
+            expected = _derive_password(password, self.password_salt)
+            return secrets.compare_digest(expected, self.password_hash)
+        return False
+
+    def has_role(self, role: str) -> bool:
+        return role.lower() in self.roles
 
 
 def _derive_password(password: str, salt_b64: str | None = None) -> str:
@@ -125,15 +174,16 @@ def _derive_password(password: str, salt_b64: str | None = None) -> str:
     return base64.urlsafe_b64encode(derived).decode("ascii")
 
 
-def _generate_salt() -> str:
-    return base64.urlsafe_b64encode(secrets.token_bytes(16)).decode("ascii")
-
-
 def _pad_b64(value: str) -> str:
     missing = len(value) % 4
     if missing:
         value += "=" * (4 - missing)
     return value
+
+
+def _hash_password(password: str) -> tuple[str, str]:
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    return hashed.decode("utf-8"), "bcrypt"
 
 
 def create_admin_token(username: str, secret: str, *, expires_in: int = 3600) -> tuple[str, str]:
@@ -224,10 +274,62 @@ class AdminStore:
                 self._data["keyset"] = keyset.model_dump()
                 changed = True
 
+        if self._normalize_users():
+            changed = True
+
         if changed:
             self._write()
 
         self._bootstrap_default_admin()
+
+    def _normalize_users(self) -> bool:
+        users = self._data.get("users")
+        if users is None:
+            self._data["users"] = []
+            return False
+        if not isinstance(users, list):
+            self._data["users"] = []
+            return True
+
+        changed = False
+        normalized: list[dict[str, Any]] = []
+        for raw in users:
+            if not isinstance(raw, dict):
+                changed = True
+                continue
+            item = {**raw}
+            if not item.get("roles"):
+                item["roles"] = ["admin"]
+                changed = True
+            else:
+                normalized_roles = _normalize_roles(item.get("roles", []))
+                if normalized_roles != item.get("roles"):
+                    item["roles"] = normalized_roles
+                    changed = True
+            if not item.get("hash_algorithm"):
+                if item.get("password_salt"):
+                    item["hash_algorithm"] = "pbkdf2"
+                else:
+                    item["hash_algorithm"] = "bcrypt"
+                changed = True
+            if not item.get("created_at"):
+                item["created_at"] = _now_iso()
+                changed = True
+            if not item.get("updated_at"):
+                item["updated_at"] = item["created_at"]
+                changed = True
+            try:
+                LocalUser.model_validate(item)
+            except ValidationError:
+                changed = True
+                continue
+            normalized.append(item)
+
+        if len(normalized) != len(users):
+            changed = True
+
+        self._data["users"] = normalized
+        return changed
 
     def _bootstrap_default_admin(self) -> None:
         username = os.getenv("ADMIN_DEFAULT_USERNAME")
@@ -237,17 +339,10 @@ class AdminStore:
         with self._lock:
             if any(user.get("username") == username for user in self._data.get("users", [])):
                 return
-            salt = _generate_salt()
-            password_hash = _derive_password(password, salt)
-            record = AdminUser(
-                username=username,
-                password_hash=password_hash,
-                password_salt=salt,
-                from_env=True,
-            )
-            users = self._data.setdefault("users", [])
-            users.append(record.model_dump())
-            self._write()
+        try:
+            self.create_user(username, password, roles=["admin"], from_env=True)
+        except AdminStoreError:
+            return
 
     def _load_legacy_platforms(self) -> list[LtiPlatform]:
         config_path_env = os.getenv("LTI_PLATFORM_CONFIG_PATH")
@@ -391,28 +486,44 @@ class AdminStore:
     # ------------------------------------------------------------------
     # admin accounts management
     # ------------------------------------------------------------------
-    def list_users(self) -> list[AdminUser]:
+    def list_users(self) -> list[LocalUser]:
         with self._lock:
             users = self._data.get("users", [])
-            return [AdminUser.model_validate(item) for item in users]
+            return [LocalUser.model_validate(item) for item in users]
 
-    def get_user(self, username: str) -> AdminUser | None:
+    def get_user(self, username: str) -> LocalUser | None:
         for user in self.list_users():
             if user.username == username:
                 return user
         return None
 
-    def create_user(self, username: str, password: str, *, from_env: bool = False) -> AdminUser:
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        *,
+        roles: Sequence[str] | None = None,
+        from_env: bool = False,
+    ) -> LocalUser:
         if not username:
             raise AdminStoreError("Le nom d'utilisateur ne peut pas être vide.")
         if self.get_user(username):
             raise AdminStoreError("Un compte avec ce nom existe déjà.")
-        salt = _generate_salt()
-        password_hash = _derive_password(password, salt)
-        record = AdminUser(
+        candidate_roles = roles if roles is not None else ["facilitator"]
+        if isinstance(candidate_roles, str):
+            raw_roles = [candidate_roles]
+        else:
+            raw_roles = list(candidate_roles)
+        normalized_roles = _normalize_roles(raw_roles)
+        if not normalized_roles:
+            raise AdminStoreError("Le compte doit avoir au moins un rôle.")
+        password_hash, algorithm = _hash_password(password)
+        record = LocalUser(
             username=username,
             password_hash=password_hash,
-            password_salt=salt,
+            hash_algorithm=algorithm,
+            password_salt=None,
+            roles=normalized_roles,
             from_env=from_env,
         )
         with self._lock:
@@ -421,19 +532,19 @@ class AdminStore:
             self._write()
         return record
 
-    def set_password(self, username: str, password: str) -> AdminUser:
+    def set_password(self, username: str, password: str) -> LocalUser:
+        password_hash, algorithm = _hash_password(password)
         with self._lock:
             users = self._data.setdefault("users", [])
             for index, item in enumerate(users):
                 if item.get("username") != username:
                     continue
-                salt = _generate_salt()
-                password_hash = _derive_password(password, salt)
-                updated = AdminUser.model_validate(
+                updated = LocalUser.model_validate(
                     {
                         **item,
                         "password_hash": password_hash,
-                        "password_salt": salt,
+                        "password_salt": None,
+                        "hash_algorithm": algorithm,
                         "updated_at": _now_iso(),
                         "from_env": False,
                     }
@@ -441,9 +552,43 @@ class AdminStore:
                 users[index] = updated.model_dump()
                 self._write()
                 return updated
-        raise AdminStoreError("Compte administrateur introuvable.")
+        raise AdminStoreError("Compte local introuvable.")
 
-    def verify_credentials(self, username: str, password: str) -> AdminUser | None:
+    def update_user(
+        self,
+        username: str,
+        *,
+        roles: Sequence[str] | None = None,
+        is_active: bool | None = None,
+    ) -> LocalUser:
+        if roles is None and is_active is None:
+            raise AdminStoreError("Aucune modification à appliquer.")
+        with self._lock:
+            users = self._data.setdefault("users", [])
+            for index, item in enumerate(users):
+                if item.get("username") != username:
+                    continue
+                payload = {**item}
+                if roles is not None:
+                    if isinstance(roles, str):
+                        raw_roles = [roles]
+                    else:
+                        raw_roles = list(roles)
+                    normalized_roles = _normalize_roles(raw_roles)
+                    if not normalized_roles:
+                        raise AdminStoreError("Le compte doit avoir au moins un rôle.")
+                    payload["roles"] = normalized_roles
+                if is_active is not None:
+                    payload["is_active"] = bool(is_active)
+                payload["updated_at"] = _now_iso()
+                payload["from_env"] = False
+                updated = LocalUser.model_validate(payload)
+                users[index] = updated.model_dump()
+                self._write()
+                return updated
+        raise AdminStoreError("Compte local introuvable.")
+
+    def verify_credentials(self, username: str, password: str) -> LocalUser | None:
         user = self.get_user(username)
         if not user or not user.is_active:
             return None
@@ -471,7 +616,7 @@ __all__ = [
     "AdminAuthError",
     "AdminStore",
     "AdminStoreError",
-    "AdminUser",
+    "LocalUser",
     "LtiKeyset",
     "LtiPlatform",
     "create_admin_token",
