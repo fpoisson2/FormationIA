@@ -15,6 +15,7 @@ import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
 import WorkshopExperience from "../pages/WorkshopExperience";
+import ExplorateurIA from "../pages/ExplorateurIA";
 
 export interface ActivityHeaderConfig {
   eyebrow: string;
@@ -69,6 +70,7 @@ export const COMPONENT_REGISTRY = {
   "prompt-dojo": PromptDojo,
   "clarity-path": ClarityPath,
   "clarte-dabord": ClarteDabord,
+  "explorateur-ia": ExplorateurIA,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
 
 export type ActivityComponentKey = keyof typeof COMPONENT_REGISTRY;
@@ -215,6 +217,38 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         cta: {
           label: "Lancer Clarté d’abord !",
           to: "/clarte-dabord",
+        },
+      },
+    },
+  },
+  "explorateur-ia": {
+    componentKey: "explorateur-ia",
+    path: "/explorateur-ia",
+    defaults: {
+      completionId: "explorateur-ia",
+      enabled: true,
+      header: {
+        eyebrow: "Activité 5",
+        title: "L’Explorateur IA",
+        subtitle:
+          "Parcours une mini-ville façon Game Boy pour valider quatre compétences IA sans jamais taper au clavier.",
+        badge: "Ville interactive",
+      },
+      layout: {
+        contentClassName: "space-y-12",
+      },
+      card: {
+        title: "L’Explorateur IA",
+        description:
+          "Objectif : compléter un parcours ludique mêlant quiz, drag-and-drop, décisions et dilemmes éthiques.",
+        highlights: [
+          "Déplacements façon jeu vidéo et interactions à la souris",
+          "Quatre mini-activités pédagogiques sans saisie de texte",
+          "Export JSON immédiat et impression PDF du bilan",
+        ],
+        cta: {
+          label: "Entrer dans la ville",
+          to: "/explorateur-ia",
         },
       },
     },
