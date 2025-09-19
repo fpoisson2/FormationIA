@@ -19,7 +19,7 @@ from .admin_store import (
     AdminAuthError,
     AdminStore,
     AdminStoreError,
-    AdminUser,
+    LocalUser,
     LtiUserStat,
     create_admin_token,
     decode_admin_token,
@@ -153,6 +153,28 @@ class AdminLoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=128)
     password: str = Field(..., min_length=1, max_length=256)
     remember: bool = False
+
+
+class LocalUserCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=8, max_length=256)
+    roles: list[str] | None = None
+    is_active: bool = Field(default=True, alias="isActive")
+
+
+class LocalUserUpdateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    roles: list[str] | None = None
+    is_active: bool | None = Field(default=None, alias="isActive")
+
+
+class LocalUserPasswordResetRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    password: str = Field(..., min_length=8, max_length=256)
 
 
 class AdminLtiPlatformCreate(BaseModel):
@@ -592,6 +614,8 @@ class LTIContextResponse(BaseModel):
 
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
+admin_auth_router = APIRouter(prefix="/api/admin/auth", tags=["admin-auth"])
+admin_users_router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
 
 frontend_origin = os.getenv(
     "FRONTEND_ORIGIN",
@@ -1074,7 +1098,20 @@ def _clear_admin_cookie(response: Response) -> None:
         key=ADMIN_SESSION_COOKIE_NAME,
         domain=_ADMIN_COOKIE_DOMAIN,
         path="/",
+        samesite=_ADMIN_COOKIE_SAMESITE,
+        secure=_ADMIN_COOKIE_SECURE,
     )
+
+
+def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
+    return {
+        "username": user.username,
+        "roles": list(user.roles),
+        "isActive": user.is_active,
+        "createdAt": user.created_at,
+        "updatedAt": user.updated_at,
+        "fromEnv": user.from_env,
+    }
 
 
 def _serialize_platform(config: LTIPlatformConfig, store: AdminStore | None) -> dict[str, Any]:
@@ -1238,10 +1275,10 @@ def _config_to_payload(config: LTIPlatformConfig) -> dict[str, Any]:
     }
 
 
-def _require_admin_user(
+def _require_authenticated_local_user(
     request: Request,
     store: AdminStore = Depends(_require_admin_store),
-) -> AdminUser:
+) -> LocalUser:
     if not _ADMIN_AUTH_SECRET:
         raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
 
@@ -1263,7 +1300,16 @@ def _require_admin_user(
     if not user or not user.is_active:
         raise HTTPException(status_code=403, detail="Compte administrateur introuvable ou inactif.")
     request.state.admin_user = user
-    request.state.admin_token_exp = expires_at
+    request.state.admin_token_exp = expires_at.isoformat().replace("+00:00", "Z")
+    request.state.admin_token = token
+    return user
+
+
+def _require_admin_user(
+    user: LocalUser = Depends(_require_authenticated_local_user),
+) -> LocalUser:
+    if not user.has_role("admin"):
+        raise HTTPException(status_code=403, detail="Droits administrateur requis.")
     return user
 
 
@@ -1276,7 +1322,7 @@ def _build_summary_prompt(payload: SummaryRequest) -> str:
     )
 
 
-@admin_router.post("/login")
+@admin_auth_router.post("/login")
 def admin_login(
     payload: AdminLoginRequest,
     response: Response,
@@ -1294,20 +1340,105 @@ def admin_login(
     return {
         "token": token,
         "expiresAt": expires_at,
-        "user": {"username": user.username},
+        "user": _serialize_local_user(user),
     }
 
 
-@admin_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+@admin_auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def admin_logout(response: Response) -> Response:
     _clear_admin_cookie(response)
+    response.headers["Cache-Control"] = "no-store"
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
 
+@admin_auth_router.get("/me")
+def admin_me(
+    request: Request,
+    response: Response,
+    user: LocalUser = Depends(_require_authenticated_local_user),
+) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    expires_at: str | None = getattr(request.state, "admin_token_exp", None)
+    payload: dict[str, Any] = {"user": _serialize_local_user(user)}
+    if expires_at:
+        payload["expiresAt"] = expires_at
+    return payload
+
+
+@admin_users_router.get("")
+def admin_list_local_users(
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    users = [_serialize_local_user(user) for user in store.list_users()]
+    users.sort(key=lambda item: item["username"].lower())
+    return {"users": users}
+
+
+@admin_users_router.post("", status_code=status.HTTP_201_CREATED)
+def admin_create_local_user(
+    payload: LocalUserCreateRequest,
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    try:
+        user = store.create_user(
+            payload.username,
+            payload.password,
+            roles=payload.roles,
+            is_active=payload.is_active,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"user": _serialize_local_user(user)}
+
+
+@admin_users_router.post("/{username}/reset-password")
+def admin_reset_local_user_password(
+    username: str,
+    payload: LocalUserPasswordResetRequest,
+    current_user: LocalUser = Depends(_require_authenticated_local_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    target = store.get_user(username)
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    is_self = target.username == current_user.username
+    if not is_self and not current_user.has_role("admin"):
+        raise HTTPException(status_code=403, detail="Droits administrateur requis pour modifier un autre compte.")
+    try:
+        updated = store.set_password(username, payload.password)
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"user": _serialize_local_user(updated)}
+
+
+@admin_users_router.patch("/{username}")
+def admin_update_local_user(
+    username: str,
+    payload: LocalUserUpdateRequest,
+    current_user: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if payload.is_active is False and username == current_user.username:
+        raise HTTPException(status_code=400, detail="Impossible de désactiver son propre compte.")
+    if payload.roles is not None and username == current_user.username and "admin" not in payload.roles:
+        raise HTTPException(status_code=400, detail="Le rôle admin est requis pour son propre compte.")
+    try:
+        updated = store.update_user(
+            username,
+            roles=payload.roles,
+            is_active=payload.is_active,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"user": _serialize_local_user(updated)}
+
+
 @admin_router.get("/lti-platforms")
 def admin_list_lti_platforms(
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     service = _resolve_lti_service()
@@ -1335,7 +1466,7 @@ def _payload_from_create(payload: AdminLtiPlatformCreate) -> dict[str, Any]:
 @admin_router.post("/lti-platforms", status_code=status.HTTP_201_CREATED)
 def admin_create_lti_platform(
     payload: AdminLtiPlatformCreate,
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     issuer = str(payload.issuer)
@@ -1353,7 +1484,7 @@ def admin_create_lti_platform(
 @admin_router.put("/lti-platforms")
 def admin_put_lti_platform(
     payload: AdminLtiPlatformCreate,
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     issuer = str(payload.issuer)
@@ -1369,7 +1500,7 @@ def admin_put_lti_platform(
 @admin_router.patch("/lti-platforms")
 def admin_patch_lti_platform(
     payload: AdminLtiPlatformPatch,
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     issuer = str(payload.issuer)
@@ -1419,7 +1550,7 @@ def admin_patch_lti_platform(
 def admin_delete_lti_platform(
     issuer: str,
     client_id: str,
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> Response:
     metadata = store.get_platform(issuer, client_id)
@@ -1437,7 +1568,7 @@ def admin_delete_lti_platform(
 
 @admin_router.get("/lti-keys")
 def admin_get_lti_keys(
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     return {"keyset": _serialize_keyset(store)}
@@ -1446,7 +1577,7 @@ def admin_get_lti_keys(
 @admin_router.post("/lti-keys")
 def admin_upload_lti_keys(
     payload: AdminLtiKeyUpload,
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     keyset = store.get_keyset()
@@ -1482,7 +1613,7 @@ def admin_upload_lti_keys(
 
 @admin_router.get("/lti-users")
 def admin_list_lti_users(
-    _: AdminUser = Depends(_require_admin_user),
+    _: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
     progress_store: ProgressStore = Depends(get_progress_store),
     page: int = Query(1, ge=1),
@@ -1530,6 +1661,8 @@ def admin_list_lti_users(
     }
 
 
+app.include_router(admin_auth_router)
+app.include_router(admin_users_router)
 app.include_router(admin_router)
 
 

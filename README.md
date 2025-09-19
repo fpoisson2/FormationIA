@@ -65,11 +65,13 @@ Un store persistant (`storage/admin.json` par défaut ou `ADMIN_STORAGE_PATH`) c
 
 - Les plateformes LTI autorisées (issuer, client ID, endpoints, déploiements)
 - Les chemins des clés privées/publiques
-- Les comptes administrateurs qui peuvent modifier cette configuration
+- Les comptes locaux (`LocalUser`) avec rôles (`admin`, `facilitator`, etc.), état d’activation et empreinte de mot de passe `bcrypt`
 
-Les opérations s’exposent via un routeur FastAPI protégé par un jeton signé (`ADMIN_AUTH_SECRET`) :
+Les opérations s’exposent via deux routeurs FastAPI protégés par un jeton signé (`ADMIN_AUTH_SECRET`) et un cookie sécurisé (`ADMIN_SESSION_COOKIE_NAME`) :
 
-- `POST /api/admin/login` · Authentifie un compte admin et émet un cookie `formationia_admin_session`
+- `POST /api/admin/auth/login` / `POST /api/admin/auth/logout` / `GET /api/admin/auth/me` · cycle d’authentification local avec cookie HTTPOnly, TTL configurable (`ADMIN_SESSION_TTL`, `ADMIN_SESSION_REMEMBER_TTL`) et introspection du profil courant
+- `GET/POST/PATCH /api/admin/users` · gestion des comptes locaux (création, mise à jour des rôles, activation/désactivation)
+- `POST /api/admin/users/{username}/reset-password` · réinitialisation du mot de passe (un compte non-admin ne peut modifier que sa propre entrée)
 - `GET /api/admin/lti-platforms` · Liste les plateformes connues
 - `POST/PUT/PATCH /api/admin/lti-platforms` · Création/mise à jour des métadonnées (issuer, endpoints, déploiements)
 - `DELETE /api/admin/lti-platforms` · Retire une configuration (si elle n’est pas marquée read-only)
@@ -80,7 +82,7 @@ Variables principales :
 
 - `ADMIN_AUTH_SECRET` (obligatoire) · secret HMAC utilisé pour signer les tokens et cookies admin
 - `ADMIN_STORAGE_PATH` (optionnel) · chemin vers le fichier JSON persistant
-- `ADMIN_SESSION_COOKIE_NAME`, `ADMIN_SESSION_TTL`, `ADMIN_SESSION_REMEMBER_TTL`, `ADMIN_COOKIE_*` · personnalisations du cookie admin
+- `ADMIN_SESSION_COOKIE_NAME`, `ADMIN_SESSION_TTL`, `ADMIN_SESSION_REMEMBER_TTL`, `ADMIN_COOKIE_*` · personnalisations du cookie admin (domaine, SameSite, Secure)
 - `ADMIN_DEFAULT_USERNAME` / `ADMIN_DEFAULT_PASSWORD` · création automatique d’un compte admin au premier démarrage
 
 ### Persistance des progrès

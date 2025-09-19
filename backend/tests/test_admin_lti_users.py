@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from backend.app.admin_store import AdminStore, AdminStoreError, AdminUser
+from backend.app.admin_store import AdminStore, AdminStoreError, LocalUser
 from backend.app.main import (
     _require_admin_store,
     _require_admin_user,
+    _require_authenticated_local_user,
     app,
     get_progress_store,
 )
@@ -73,21 +74,24 @@ def test_admin_list_lti_users_endpoint(tmp_path) -> None:
     progress_store.update_activity(identity, "mission-1", completed=True)
     progress_store.update_activity(identity, "mission-2", completed=False)
 
-    dummy_admin = AdminUser(
+    dummy_admin = LocalUser(
         username="tester",
-        password_hash="hash",
-        password_salt="salt",
+        password_hash="bcrypt$dummy",
+        roles=["admin"],
     )
 
     app.dependency_overrides[_require_admin_user] = lambda: dummy_admin
     app.dependency_overrides[_require_admin_store] = lambda: admin_store
     app.dependency_overrides[get_progress_store] = lambda: progress_store
 
-    with TestClient(app) as client:
-        response = client.get("/api/admin/lti-users", params={"includeDetails": "true"})
+    response = None
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/admin/lti-users", params={"includeDetails": "true"})
+    finally:
+        app.dependency_overrides.clear()
 
-    app.dependency_overrides.clear()
-
+    assert response is not None
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 1
@@ -107,3 +111,62 @@ def test_admin_list_lti_users_endpoint(tmp_path) -> None:
     assert user.get("profileMissing") is False
     assert user.get("completedActivitiesDetail")
     assert user["completedActivitiesDetail"][0]["activityId"] == "mission-1"
+
+
+def test_local_user_store_operations(tmp_path) -> None:
+    store = AdminStore(path=tmp_path / "admin.json")
+    created = store.create_user("alice", "MotDePasse123!", roles=["facilitator"], is_active=True)
+    assert created.password_hash.startswith("bcrypt$"), "Expected bcrypt hashed password"
+    assert created.roles == ["facilitator"]
+
+    fetched = store.verify_credentials("alice", "MotDePasse123!")
+    assert fetched is not None, "Credentials should validate for active user"
+
+    updated = store.update_user("alice", roles=["admin", "facilitator"], is_active=False)
+    assert set(updated.roles) == {"admin", "facilitator"}
+    assert updated.is_active is False
+
+    store.set_password("alice", "NouveauSecret456!")
+    store.update_user("alice", is_active=True)
+    assert store.verify_credentials("alice", "NouveauSecret456!") is not None
+
+
+def test_admin_create_and_reset_user_endpoints(tmp_path) -> None:
+    admin_store = AdminStore(path=tmp_path / "admin.json")
+    admin_user = LocalUser(username="root", password_hash="bcrypt$dummy", roles=["admin"])
+
+    app.dependency_overrides[_require_admin_store] = lambda: admin_store
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    try:
+        with TestClient(app) as client:
+            create_response = client.post(
+                "/api/admin/users",
+                json={
+                    "username": "coach",
+                    "password": "CoachPwd789!",
+                    "roles": ["facilitator"],
+                },
+            )
+            assert create_response.status_code == 201, create_response.text
+            created_payload = create_response.json()
+            assert created_payload["user"]["username"] == "coach"
+            assert created_payload["user"]["roles"] == ["facilitator"]
+
+        assert admin_store.verify_credentials("coach", "CoachPwd789!") is not None
+
+        facilitator = admin_store.get_user("coach")
+        assert facilitator is not None
+
+        app.dependency_overrides[_require_authenticated_local_user] = lambda: facilitator
+
+        with TestClient(app) as client:
+            reset_response = client.post(
+                "/api/admin/users/coach/reset-password",
+                json={"password": "CoachPwdUpdated!"},
+            )
+            assert reset_response.status_code == 200, reset_response.text
+
+        assert admin_store.verify_credentials("coach", "CoachPwdUpdated!") is not None
+    finally:
+        app.dependency_overrides.clear()
