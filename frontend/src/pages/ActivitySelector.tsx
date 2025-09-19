@@ -3,61 +3,10 @@ import { Link } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
 import { getProgress, type ProgressResponse } from "../api";
-
-const ACTIVITIES = [
-  {
-    id: "atelier",
-    title: "Atelier comparatif IA",
-    description:
-      "Objectif : cadrer ta demande, comparer deux configurations IA et capitaliser sur les essais.",
-    highlights: [
-      "Définir le contexte et les attentes",
-      "Tester modèle, verbosité et raisonnement",
-      "Assembler une synthèse réutilisable",
-    ],
-    cta: "Lancer l’atelier",
-    to: "/atelier/etape-1",
-  },
-  {
-    id: "prompt-dojo",
-    title: "Prompt Dojo — Mission débutant",
-    description:
-      "Objectif : t’entraîner à affiner une consigne en suivant des défis progressifs.",
-    highlights: [
-      "Défis à difficulté graduelle",
-      "Retour immédiat sur la qualité du prompt",
-      "Construction d’une version finale personnalisée",
-    ],
-    cta: "Entrer dans le dojo",
-    to: "/prompt-dojo",
-  },
-  {
-    id: "clarity",
-    title: "Parcours de la clarté",
-    description:
-      "Objectif : expérimenter la précision des consignes sur un parcours 10×10.",
-    highlights: [
-      "Plan d’action IA généré avant l’animation",
-      "Visualisation pas à pas avec obstacles",
-      "Analyse des tentatives et du surcoût",
-    ],
-    cta: "Tester la clarté",
-    to: "/parcours-clarte",
-  },
-  {
-    id: "clarte-dabord",
-    title: "Clarté d’abord !",
-    description:
-      "Objectif : mesurer l’impact d’un brief incomplet et révéler la checklist idéale.",
-    highlights: [
-      "Deux missions thématiques en trois manches",
-      "Champs guidés avec validations pédagogiques",
-      "Révélation finale et export JSON du menu",
-    ],
-    cta: "Lancer Clarté d’abord !",
-    to: "/clarte-dabord",
-  },
-];
+import {
+  ACTIVITY_DEFINITIONS,
+  type ActivityDefinition,
+} from "../config/activities";
 
 function ActivitySelector(): JSX.Element {
   const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
@@ -114,7 +63,7 @@ function ActivitySelector(): JSX.Element {
         </header>
 
         <div className="grid gap-6 md:grid-cols-2 animate-section-delayed">
-          {ACTIVITIES.map((activity) => (
+          {ACTIVITY_DEFINITIONS.map((activity: ActivityDefinition) => (
             <article
               key={activity.id}
               className="group relative flex h-full flex-col gap-6 rounded-3xl border border-white/60 bg-white/90 p-8 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg"
@@ -144,10 +93,10 @@ function ActivitySelector(): JSX.Element {
               </ul>
               <div className="mt-auto">
                 <Link
-                  to={activity.to}
+                  to={activity.cta.to}
                   className="cta-button cta-button--primary inline-flex items-center gap-2"
                 >
-                  {activity.cta}
+                  {activity.cta.label}
                   <span className="inline-block text-lg transition group-hover:translate-x-1">→</span>
                 </Link>
               </div>
