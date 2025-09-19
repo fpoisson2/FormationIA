@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
 import { getProgress, type ProgressResponse } from "../api";
@@ -11,6 +11,9 @@ import { useLTI } from "../hooks/useLTI";
 
 function ActivitySelector(): JSX.Element {
   const [completedMap, setCompletedMap] = useState<Record<string, boolean>>({});
+  const [completedActivity, setCompletedActivity] = useState<ActivityDefinition | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
   const { context, isLTISession, loading: ltiLoading } = useLTI();
   const displayName =
     context?.user?.name?.trim() ||
@@ -18,6 +21,43 @@ function ActivitySelector(): JSX.Element {
     context?.user?.subject?.trim() ||
     "";
   const shouldShowWelcome = isLTISession && !ltiLoading && displayName.length > 0;
+  const completedId = (location.state as { completed?: string } | null)?.completed;
+
+  useEffect(() => {
+    if (!completedId) {
+      return;
+    }
+
+    const foundActivity = ACTIVITY_DEFINITIONS.find(
+      (activity: ActivityDefinition) => activity.id === completedId
+    );
+
+    if (foundActivity) {
+      setCompletedActivity(foundActivity);
+    }
+
+    const timeout = window.setTimeout(() => {
+      navigate("/activites", { replace: true, state: null });
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [completedId, navigate]);
+
+  useEffect(() => {
+    if (!completedActivity) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCompletedActivity(null);
+    }, 8000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [completedActivity]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +88,40 @@ function ActivitySelector(): JSX.Element {
   return (
     <div className="landing-gradient min-h-screen px-6 py-16 text-[color:var(--brand-black)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-12">
+        {completedActivity ? (
+          <div className="animate-section flex flex-col gap-4 rounded-3xl border border-green-200/80 bg-green-50/90 p-6 text-green-900 shadow-sm backdrop-blur">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-green-700/80">
+                Activité terminée
+              </p>
+              <p className="text-lg font-semibold md:text-xl">
+                Tu as complété l’activité « {completedActivity.title} »
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 text-sm text-green-800 md:flex-row md:items-center md:justify-between">
+              <span className="text-sm md:text-base">
+                Tu peux rouvrir l’activité pour revoir tes actions ou poursuivre une autre compétence.
+              </span>
+              <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
+                <Link
+                  to={completedActivity.cta.to}
+                  className="cta-button cta-button--secondary inline-flex items-center justify-center gap-2 border-green-600/40 bg-white/80 px-4 py-2 text-green-800 transition hover:border-green-600/70 hover:bg-white"
+                  onClick={() => setCompletedActivity(null)}
+                >
+                  Ouvrir l’activité
+                  <span className="text-lg">↗</span>
+                </Link>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center rounded-full border border-green-600/30 px-4 py-2 text-sm font-medium text-green-700 transition hover:border-green-600/60 hover:text-green-800"
+                  onClick={() => setCompletedActivity(null)}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {shouldShowWelcome ? (
           <div className="animate-section rounded-3xl border border-white/70 bg-white/90 p-6 text-center shadow-sm backdrop-blur">
             <p className="text-lg font-medium text-[color:var(--brand-charcoal)] md:text-xl">
