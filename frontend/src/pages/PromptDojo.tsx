@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
 import { updateActivityProgress } from "../api";
 
-type Stage = "briefing" | "arena";
+type Stage = "briefing" | "arena-writing" | "arena-results";
 
 type MissionDefaults = {
   objective: string;
@@ -110,6 +111,7 @@ const MISSIONS: Mission[] = [
 const DEFAULT_MISSION = MISSIONS[0];
 
 function PromptDojo(): JSX.Element {
+  const navigate = useNavigate();
   const [missionId, setMissionId] = useState(DEFAULT_MISSION.id);
   const mission = useMemo(() => MISSIONS.find((item) => item.id === missionId) ?? DEFAULT_MISSION, [missionId]);
   const [stage, setStage] = useState<Stage>("briefing");
@@ -123,12 +125,41 @@ function PromptDojo(): JSX.Element {
 
   const { isLTISession, submitScore, context, error: ltiError } = useLTI();
 
+  const markActivityCompletion = useCallback(async () => {
+    if (!aiScore || aiScore.total < mission.targetScore) {
+      return false;
+    }
+
+    if (activityProgressMarked) {
+      return true;
+    }
+
+    try {
+      await updateActivityProgress({ activityId: "prompt-dojo", completed: true });
+      setActivityProgressMarked(true);
+      return true;
+    } catch (error) {
+      console.error("Unable to persist Prompt Dojo progress", error);
+      return false;
+    }
+  }, [aiScore, mission, activityProgressMarked]);
+
+  const handleFinish = async () => {
+    if (!aiScore || aiScore.total < mission.targetScore) {
+      return;
+    }
+
+    await markActivityCompletion();
+    navigate("/activites", { state: { completed: "prompt-dojo" } });
+  };
+
   useEffect(() => {
     setPromptText(mission.defaults.starterPrompt);
     setAiScore(null);
     setScoreError(null);
     setStage("briefing");
     setLtiScoreSubmitted(false);
+    setActivityProgressMarked(false);
   }, [mission]);
 
   // Submit score to LTI when activity is successfully completed
@@ -160,18 +191,11 @@ function PromptDojo(): JSX.Element {
         }
       }
 
-      if (aiScore && aiScore.total >= mission.targetScore && !activityProgressMarked) {
-        try {
-          await updateActivityProgress({ activityId: "prompt-dojo", completed: true });
-          setActivityProgressMarked(true);
-        } catch (error) {
-          console.error("Unable to persist Prompt Dojo progress", error);
-        }
-      }
+      await markActivityCompletion();
     };
 
     synchronizeProgress();
-  }, [aiScore, mission, isLTISession, submitScore, ltiScoreSubmitted, activityProgressMarked]);
+  }, [aiScore, mission, isLTISession, submitScore, ltiScoreSubmitted, markActivityCompletion]);
 
   const missionProgress = aiScore
     ? clamp(Math.round((aiScore.total / mission.targetScore) * 100), 0, 120)
@@ -254,6 +278,7 @@ function PromptDojo(): JSX.Element {
 
       const parsed = parseAiScore(raw);
       setAiScore(parsed);
+      setStage("arena-results");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inattendue";
       setScoreError(message);
@@ -312,7 +337,7 @@ function PromptDojo(): JSX.Element {
               <div className="mt-4">
                 <button
                   type="button"
-                  onClick={() => setStage("arena")}
+                  onClick={() => setStage("arena-writing")}
                   className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
                 >
                   <StarsIcon className="h-4 w-4" /> Commencer la mission
@@ -361,151 +386,179 @@ function PromptDojo(): JSX.Element {
     </div>
   );
 
-  const renderArena = () => (
-    <div className="min-h-screen bg-[color:var(--brand-sand)] px-4 py-8 sm:px-6">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6">
-        <header className="rounded-3xl border border-white/60 bg-white/95 p-5 shadow-sm backdrop-blur">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex gap-3">
-              <img src={logoPrincipal} alt="Cégep Limoilou" className="h-10 w-auto" />
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/60">Mission</p>
-                <h1 className="text-xl font-semibold text-[color:var(--brand-black)]">{mission.title}</h1>
-                <p className="text-sm text-[color:var(--brand-charcoal)]/80">{mission.description}</p>
+  const renderArena = () => {
+    const isWritingStage = stage === "arena-writing";
+    const isResultsStage = stage === "arena-results";
+    const canFinishMission = Boolean(aiScore && aiScore.total >= mission.targetScore);
+
+    return (
+      <div className="min-h-screen bg-[color:var(--brand-sand)] px-4 py-8 sm:px-6">
+        <div className="mx-auto flex max-w-4xl flex-col gap-6">
+          <header className="rounded-3xl border border-white/60 bg-white/95 p-5 shadow-sm backdrop-blur">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex gap-3">
+                <img src={logoPrincipal} alt="Cégep Limoilou" className="h-10 w-auto" />
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/60">Mission</p>
+                  <h1 className="text-xl font-semibold text-[color:var(--brand-black)]">{mission.title}</h1>
+                  <p className="text-sm text-[color:var(--brand-charcoal)]/80">{mission.description}</p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setStage("briefing")}
+                className="inline-flex items-center gap-2 rounded-full border border-[color:var(--brand-red)]/40 px-3 py-1.5 text-xs font-semibold text-[color:var(--brand-red)] transition hover:border-[color:var(--brand-red)]"
+              >
+                <RefreshIcon className="h-4 w-4" /> Changer de mission
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setStage("briefing")}
-              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--brand-red)]/40 px-3 py-1.5 text-xs font-semibold text-[color:var(--brand-red)] transition hover:border-[color:var(--brand-red)]"
-            >
-              <RefreshIcon className="h-4 w-4" /> Changer de mission
-            </button>
-          </div>
-          <ul className="mt-4 space-y-1 text-sm text-[color:var(--brand-charcoal)]">
-            {mission.defaults.checkpoints.map((tip) => (
-              <li key={tip}>• {tip}</li>
-            ))}
-          </ul>
-        </header>
+            <ul className="mt-4 space-y-1 text-sm text-[color:var(--brand-charcoal)]">
+              {mission.defaults.checkpoints.map((tip) => (
+                <li key={tip}>• {tip}</li>
+              ))}
+            </ul>
+          </header>
 
-        <section className="rounded-3xl border border-white/60 bg-white/95 p-5 shadow-sm backdrop-blur">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-[color:var(--brand-black)]">Écris ton prompt</h2>
-            <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/60">{wordTotal} mots</span>
-          </div>
-          <textarea
-            value={promptText}
-            onChange={(event) => setPromptText(event.target.value)}
-            placeholder="Compose ton prompt ici en t’inspirant des éléments de mission."
-            className="mt-3 h-64 w-full rounded-2xl border border-[color:var(--brand-charcoal)]/10 bg-white px-4 py-3 text-sm leading-relaxed text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
-          />
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={evaluatePrompt}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300 sm:w-auto"
-              disabled={scoreLoading}
-            >
-              {scoreLoading ? <SpinnerIcon className="h-4 w-4 animate-spin" /> : <TargetIcon className="h-4 w-4" />}
-              {scoreLoading ? "Analyse en cours…" : "Demander le score IA"}
-            </button>
-            <button
-              type="button"
-              onClick={downloadPrompt}
-              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--brand-red)]/40 px-4 py-2 text-xs font-semibold text-[color:var(--brand-red)] transition hover:border-[color:var(--brand-red)]"
-            >
-              <DownloadIcon className="h-4 w-4" /> Exporter
-            </button>
-          </div>
-          {scoreError && <p className="mt-3 rounded-2xl bg-red-50 p-3 text-xs text-red-600">{scoreError}</p>}
-        </section>
-
-        <section className="rounded-3xl border border-white/60 bg-white/95 p-5 shadow-sm backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/60">Score IA</p>
-              <p className="text-3xl font-semibold text-[color:var(--brand-black)]">
-                {aiScore ? `${aiScore.total}/100` : "--"}
-              </p>
-              <p className="text-xs text-[color:var(--brand-charcoal)]/70">Objectif : {mission.targetScore}/100</p>
-            </div>
-            <div className="hidden sm:block">
-              <ProgressBar value={missionProgress} success={Boolean(aiScore && aiScore.total >= mission.targetScore)} />
-            </div>
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <MetricBadge
-              label="Clarté"
-              value={aiScore ? aiScore.clarity : "--"}
-              ok={Boolean(aiScore && aiScore.clarity >= 70)}
-            />
-            <MetricBadge
-              label="Spécificité"
-              value={aiScore ? aiScore.specificity : "--"}
-              ok={Boolean(aiScore && aiScore.specificity >= 70)}
-            />
-            <MetricBadge
-              label="Structure"
-              value={aiScore ? aiScore.structure : "--"}
-              ok={Boolean(aiScore && aiScore.structure >= 70)}
-            />
-            <MetricBadge
-              label="Longueur"
-              value={aiScore ? `${aiScore.length}` : "--"}
-              ok={Boolean(aiScore && aiScore.length >= 70)}
-            />
-          </div>
-          {aiScore && (
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-emerald-300/40 bg-emerald-500/10 p-4 text-sm text-emerald-800">
-                {aiScore.comments && <p className="font-semibold">{aiScore.comments}</p>}
-                {aiScore.advice.length > 0 && (
-                  <ul className="mt-2 space-y-1 text-sm">
-                    {aiScore.advice.map((item, index) => (
-                      <li key={`${item}-${index}`}>• {item}</li>
-                    ))}
-                  </ul>
-                )}
+          {isWritingStage && (
+            <section className="rounded-3xl border border-white/60 bg-white/95 p-5 shadow-sm backdrop-blur">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-semibold text-[color:var(--brand-black)]">Écris ton prompt</h2>
+                <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/60">{wordTotal} mots</span>
               </div>
+              <textarea
+                value={promptText}
+                onChange={(event) => setPromptText(event.target.value)}
+                placeholder="Compose ton prompt ici en t’inspirant des éléments de mission."
+                className="mt-3 h-64 w-full rounded-2xl border border-[color:var(--brand-charcoal)]/10 bg-white px-4 py-3 text-sm leading-relaxed text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={evaluatePrompt}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300 sm:w-auto"
+                  disabled={scoreLoading}
+                >
+                  {scoreLoading ? <SpinnerIcon className="h-4 w-4 animate-spin" /> : <TargetIcon className="h-4 w-4" />}
+                  {scoreLoading ? "Analyse en cours…" : "Demander le score IA"}
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadPrompt}
+                  className="inline-flex items-center gap-2 rounded-full border border-[color:var(--brand-red)]/40 px-4 py-2 text-xs font-semibold text-[color:var(--brand-red)] transition hover:border-[color:var(--brand-red)]"
+                >
+                  <DownloadIcon className="h-4 w-4" /> Exporter
+                </button>
+              </div>
+              {scoreError && <p className="mt-3 rounded-2xl bg-red-50 p-3 text-xs text-red-600">{scoreError}</p>}
+            </section>
+          )}
 
-              {/* LTI Success Indicator */}
-              {isLTISession && aiScore.total >= mission.targetScore && (
-                <div className="rounded-2xl border border-blue-300/40 bg-blue-500/10 p-4 text-sm text-blue-800">
-                  <div className="flex items-center gap-2">
-                    {ltiScoreSubmitted ? (
-                      <>
-                        <CheckIcon className="h-4 w-4 text-green-600" />
-                        <span className="font-semibold">Réussite envoyée à Moodle</span>
-                      </>
-                    ) : (
-                      <>
-                        <SpinnerIcon className="h-4 w-4 animate-spin" />
-                        <span className="font-semibold">Envoi du résultat à Moodle...</span>
-                      </>
+          {isResultsStage && (
+            <section className="rounded-3xl border border-white/60 bg-white/95 p-5 shadow-sm backdrop-blur">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/60">Score IA</p>
+                  <p className="text-3xl font-semibold text-[color:var(--brand-black)]">
+                    {aiScore ? `${aiScore.total}/100` : "--"}
+                  </p>
+                  <p className="text-xs text-[color:var(--brand-charcoal)]/70">Objectif : {mission.targetScore}/100</p>
+                </div>
+                <div className="hidden sm:block">
+                  <ProgressBar value={missionProgress} success={Boolean(aiScore && aiScore.total >= mission.targetScore)} />
+                </div>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <MetricBadge
+                  label="Clarté"
+                  value={aiScore ? aiScore.clarity : "--"}
+                  ok={Boolean(aiScore && aiScore.clarity >= 70)}
+                />
+                <MetricBadge
+                  label="Spécificité"
+                  value={aiScore ? aiScore.specificity : "--"}
+                  ok={Boolean(aiScore && aiScore.specificity >= 70)}
+                />
+                <MetricBadge
+                  label="Structure"
+                  value={aiScore ? aiScore.structure : "--"}
+                  ok={Boolean(aiScore && aiScore.structure >= 70)}
+                />
+                <MetricBadge
+                  label="Longueur"
+                  value={aiScore ? `${aiScore.length}` : "--"}
+                  ok={Boolean(aiScore && aiScore.length >= 70)}
+                />
+              </div>
+              {aiScore && (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-emerald-300/40 bg-emerald-500/10 p-4 text-sm text-emerald-800">
+                    {aiScore.comments && <p className="font-semibold">{aiScore.comments}</p>}
+                    {aiScore.advice.length > 0 && (
+                      <ul className="mt-2 space-y-1 text-sm">
+                        {aiScore.advice.map((item, index) => (
+                          <li key={`${item}-${index}`}>• {item}</li>
+                        ))}
+                      </ul>
                     )}
                   </div>
-                  {ltiScoreSubmitted && context && (
-                    <p className="mt-1 text-xs">
-                      Ta réussite de cette activité a été automatiquement transmise à ton cours Moodle.
-                    </p>
-                  )}
-                </div>
-              )}
 
-              {/* LTI Error Indicator */}
-              {ltiError && isLTISession && (
-                <div className="rounded-2xl border border-red-300/40 bg-red-500/10 p-4 text-sm text-red-800">
-                  <p className="font-semibold">Problème de connexion Moodle</p>
-                  <p className="mt-1 text-xs">{ltiError}</p>
+                  {/* LTI Success Indicator */}
+                  {isLTISession && aiScore.total >= mission.targetScore && (
+                    <div className="rounded-2xl border border-blue-300/40 bg-blue-500/10 p-4 text-sm text-blue-800">
+                      <div className="flex items-center gap-2">
+                        {ltiScoreSubmitted ? (
+                          <>
+                            <CheckIcon className="h-4 w-4 text-green-600" />
+                            <span className="font-semibold">Réussite envoyée à Moodle</span>
+                          </>
+                        ) : (
+                          <>
+                            <SpinnerIcon className="h-4 w-4 animate-spin" />
+                            <span className="font-semibold">Envoi du résultat à Moodle...</span>
+                          </>
+                        )}
+                      </div>
+                      {ltiScoreSubmitted && context && (
+                        <p className="mt-1 text-xs">
+                          Ta réussite de cette activité a été automatiquement transmise à ton cours Moodle.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* LTI Error Indicator */}
+                  {ltiError && isLTISession && (
+                    <div className="rounded-2xl border border-red-300/40 bg-red-500/10 p-4 text-sm text-red-800">
+                      <p className="font-semibold">Problème de connexion Moodle</p>
+                      <p className="mt-1 text-xs">{ltiError}</p>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setStage("arena-writing")}
+                      className="inline-flex items-center gap-2 rounded-full border border-[color:var(--brand-red)]/40 px-4 py-2 text-xs font-semibold text-[color:var(--brand-red)] transition hover:border-[color:var(--brand-red)]"
+                    >
+                      <SparklesIcon className="h-4 w-4" /> Reprendre la rédaction
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleFinish}
+                      disabled={!canFinishMission}
+                      className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+                    >
+                      <StarsIcon className="h-4 w-4" /> Terminer
+                    </button>
+                  </div>
                 </div>
               )}
-            </div>
+            </section>
           )}
-        </section>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return stage === "briefing" ? renderBriefing() : renderArena();
 }
