@@ -9,12 +9,20 @@ from pathlib import Path
 from typing import Any, Generator, Literal, Sequence
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from openai import OpenAI as ResponsesClient
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from .admin_store import (
+    AdminAuthError,
+    AdminStore,
+    AdminUser,
+    create_admin_token,
+    decode_admin_token,
+    get_admin_store,
+)
 from .lti import (
     SESSION_COOKIE_NAME,
     LTIAuthorizationError,
@@ -23,6 +31,7 @@ from .lti import (
     LTIScoreError,
     LTISession,
     LTIService,
+    LTIPlatformConfig,
     get_lti_boot_error,
     get_lti_service,
 )
@@ -40,6 +49,20 @@ MAX_PLAN_ACTIONS = 30
 MAX_STEPS_PER_ACTION = 20
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
+
+ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
+_ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
+_ADMIN_SESSION_REMEMBER_TTL = int(
+    os.getenv("ADMIN_SESSION_REMEMBER_TTL", str(_ADMIN_SESSION_TTL * 24))
+)
+if _ADMIN_SESSION_REMEMBER_TTL < _ADMIN_SESSION_TTL:
+    _ADMIN_SESSION_REMEMBER_TTL = _ADMIN_SESSION_TTL
+_ADMIN_AUTH_SECRET = os.getenv("ADMIN_AUTH_SECRET")
+_ADMIN_COOKIE_SECURE = os.getenv("ADMIN_COOKIE_SECURE", "true").lower() not in {"false", "0", "no"}
+_ADMIN_COOKIE_DOMAIN = os.getenv("ADMIN_COOKIE_DOMAIN") or None
+_ADMIN_COOKIE_SAMESITE = os.getenv("ADMIN_COOKIE_SAMESITE", "lax").lower()
+if _ADMIN_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    _ADMIN_COOKIE_SAMESITE = "lax"
 
 PLAN_SYSTEM_PROMPT = (
     "Tu convertis des instructions naturelles en plan d'actions discret sur une grille 10×10. "
@@ -120,6 +143,84 @@ class PlanModel(BaseModel):
 
 class PlanGenerationError(Exception):
     """Raised when the plan model output cannot be parsed or validated."""
+
+
+class AdminLoginRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=1, max_length=256)
+    remember: bool = False
+
+
+class AdminLtiPlatformCreate(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="forbid")
+
+    issuer: AnyUrl
+    client_id: str = Field(..., alias="clientId", min_length=1, max_length=255)
+    authorization_endpoint: AnyUrl | None = Field(default=None, alias="authorizationEndpoint")
+    token_endpoint: AnyUrl | None = Field(default=None, alias="tokenEndpoint")
+    jwks_uri: AnyUrl | None = Field(default=None, alias="jwksUri")
+    deployment_id: str | None = Field(default=None, alias="deploymentId", max_length=255)
+    deployment_ids: list[str] = Field(default_factory=list, alias="deploymentIds")
+    audience: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "AdminLtiPlatformCreate":
+        deployments = []
+        if self.deployment_ids:
+            deployments.extend([value for value in self.deployment_ids if value])
+        if self.deployment_id:
+            deployments.insert(0, self.deployment_id)
+        unique: list[str] = []
+        for value in deployments:
+            trimmed = value.strip()
+            if not trimmed or trimmed in unique:
+                continue
+            unique.append(trimmed)
+        object.__setattr__(self, "deployment_ids", unique)
+        if unique:
+            object.__setattr__(self, "deployment_id", unique[0])
+        return self
+
+
+class AdminLtiPlatformPatch(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="forbid")
+
+    issuer: AnyUrl
+    client_id: str = Field(..., alias="clientId", min_length=1, max_length=255)
+    authorization_endpoint: AnyUrl | None = Field(default=None, alias="authorizationEndpoint")
+    token_endpoint: AnyUrl | None = Field(default=None, alias="tokenEndpoint")
+    jwks_uri: AnyUrl | None = Field(default=None, alias="jwksUri")
+    deployment_id: str | None = Field(default=None, alias="deploymentId", max_length=255)
+    deployment_ids: list[str] | None = Field(default=None, alias="deploymentIds")
+    audience: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _normalize_patch(self) -> "AdminLtiPlatformPatch":
+        if self.deployment_ids is None:
+            return self
+        unique: list[str] = []
+        for value in self.deployment_ids:
+            trimmed = value.strip()
+            if not trimmed or trimmed in unique:
+                continue
+            unique.append(trimmed)
+        object.__setattr__(self, "deployment_ids", unique)
+        return self
+
+
+class AdminLtiKeyUpload(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    private_key: str | None = Field(default=None, alias="privateKey", min_length=1)
+    public_key: str | None = Field(default=None, alias="publicKey", min_length=1)
+
+    @model_validator(mode="after")
+    def _ensure_any_key(self) -> "AdminLtiKeyUpload":
+        if not self.private_key and not self.public_key:
+            raise ValueError("Fournir au moins une clé privée ou publique.")
+        return self
 
 
 _RUN_ATTEMPTS: dict[str, int] = {}
@@ -488,6 +589,7 @@ class LTIContextResponse(BaseModel):
 
 
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
+admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 frontend_origin = os.getenv(
     "FRONTEND_ORIGIN",
@@ -570,6 +672,8 @@ DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
     },
 ]
 _DEEP_LINK_ACTIVITY_MAP = {item["id"]: item for item in DEEP_LINK_ACTIVITIES}
+
+app.include_router(admin_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -941,6 +1045,113 @@ def _ensure_client() -> ResponsesClient:
     return _client
 
 
+def _require_admin_store() -> AdminStore:
+    store = get_admin_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="Le store administrateur n'est pas initialisé.")
+    return store
+
+
+def _admin_token_ttl(remember: bool) -> int:
+    return _ADMIN_SESSION_REMEMBER_TTL if remember else _ADMIN_SESSION_TTL
+
+
+def _set_admin_cookie(response: Response, token: str, max_age: int) -> None:
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=_ADMIN_COOKIE_SECURE,
+        samesite=_ADMIN_COOKIE_SAMESITE,
+        domain=_ADMIN_COOKIE_DOMAIN,
+        max_age=max_age,
+        path="/",
+    )
+
+
+def _clear_admin_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        domain=_ADMIN_COOKIE_DOMAIN,
+        path="/",
+    )
+
+
+def _serialize_platform(config: LTIPlatformConfig, store: AdminStore | None) -> dict[str, Any]:
+    issuer = str(config.issuer)
+    metadata = store.get_platform(issuer, config.client_id) if store else None
+    read_only = metadata.read_only if metadata else store is None
+    return {
+        "issuer": issuer,
+        "clientId": config.client_id,
+        "authorizationEndpoint": str(config.authorization_endpoint)
+        if config.authorization_endpoint
+        else None,
+        "tokenEndpoint": str(config.token_endpoint) if config.token_endpoint else None,
+        "jwksUri": str(config.jwks_uri) if config.jwks_uri else None,
+        "deploymentId": config.deployment_id,
+        "deploymentIds": config.deployment_ids,
+        "audience": config.audience,
+        "createdAt": metadata.created_at if metadata else None,
+        "updatedAt": metadata.updated_at if metadata else None,
+        "readOnly": read_only,
+    }
+
+
+def _serialize_keyset(store: AdminStore) -> dict[str, Any]:
+    keyset = store.get_keyset()
+    return {
+        "privateKeyPath": keyset.private_key_path,
+        "publicKeyPath": keyset.public_key_path,
+        "updatedAt": keyset.updated_at,
+        "readOnly": keyset.read_only,
+    }
+
+
+def _config_to_payload(config: LTIPlatformConfig) -> dict[str, Any]:
+    return {
+        "issuer": str(config.issuer),
+        "client_id": config.client_id,
+        "authorization_endpoint": str(config.authorization_endpoint)
+        if config.authorization_endpoint
+        else None,
+        "token_endpoint": str(config.token_endpoint) if config.token_endpoint else None,
+        "jwks_uri": str(config.jwks_uri) if config.jwks_uri else None,
+        "deployment_id": config.deployment_id,
+        "deployment_ids": config.deployment_ids,
+        "audience": config.audience,
+    }
+
+
+def _require_admin_user(
+    request: Request,
+    store: AdminStore = Depends(_require_admin_store),
+) -> AdminUser:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    token: str | None = None
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentification administrateur requise.")
+
+    try:
+        username, expires_at = decode_admin_token(token, _ADMIN_AUTH_SECRET)
+    except AdminAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    user = store.get_user(username)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="Compte administrateur introuvable ou inactif.")
+    request.state.admin_user = user
+    request.state.admin_token_exp = expires_at
+    return user
+
+
 def _build_summary_prompt(payload: SummaryRequest) -> str:
     return (
         "Tu es un assistant pédagogique qui crée des synthèses fiables pour des étudiantes et étudiants du cégep. "
@@ -948,6 +1159,210 @@ def _build_summary_prompt(payload: SummaryRequest) -> str:
         "Texte à résumer :\n"
         f"{payload.text.strip()}"
     )
+
+
+@admin_router.post("/login")
+def admin_login(
+    payload: AdminLoginRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+    user = store.verify_credentials(payload.username, payload.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Identifiants administrateur invalides.")
+    ttl = _admin_token_ttl(payload.remember)
+    token, expires_at = create_admin_token(user.username, _ADMIN_AUTH_SECRET, expires_in=ttl)
+    _set_admin_cookie(response, token, ttl)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": {"username": user.username},
+    }
+
+
+@admin_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def admin_logout(response: Response) -> Response:
+    _clear_admin_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+@admin_router.get("/lti-platforms")
+def admin_list_lti_platforms(
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    service = _resolve_lti_service()
+    service.reload_platforms()
+    platforms = [_serialize_platform(config, store) for config in service.list_platforms()]
+    platforms.sort(key=lambda item: (item["issuer"], item["clientId"]))
+    return {"platforms": platforms}
+
+
+def _payload_from_create(payload: AdminLtiPlatformCreate) -> dict[str, Any]:
+    return {
+        "issuer": str(payload.issuer),
+        "client_id": payload.client_id,
+        "authorization_endpoint": str(payload.authorization_endpoint)
+        if payload.authorization_endpoint
+        else None,
+        "token_endpoint": str(payload.token_endpoint) if payload.token_endpoint else None,
+        "jwks_uri": str(payload.jwks_uri) if payload.jwks_uri else None,
+        "deployment_id": payload.deployment_id,
+        "deployment_ids": payload.deployment_ids,
+        "audience": payload.audience,
+    }
+
+
+@admin_router.post("/lti-platforms", status_code=status.HTTP_201_CREATED)
+def admin_create_lti_platform(
+    payload: AdminLtiPlatformCreate,
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    issuer = str(payload.issuer)
+    client_id = payload.client_id
+    existing = store.get_platform(issuer, client_id)
+    if existing:
+        if existing.read_only:
+            raise HTTPException(status_code=403, detail="La plateforme est gérée en lecture seule.")
+        raise HTTPException(status_code=409, detail="La plateforme existe déjà. Utilise PUT ou PATCH.")
+    service = _resolve_lti_service()
+    config = service.register_platform(_payload_from_create(payload), persist=True)
+    return {"platform": _serialize_platform(config, store)}
+
+
+@admin_router.put("/lti-platforms")
+def admin_put_lti_platform(
+    payload: AdminLtiPlatformCreate,
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    issuer = str(payload.issuer)
+    client_id = payload.client_id
+    existing = store.get_platform(issuer, client_id)
+    if existing and existing.read_only:
+        raise HTTPException(status_code=403, detail="Cette plateforme est verrouillée en lecture seule.")
+    service = _resolve_lti_service()
+    config = service.register_platform(_payload_from_create(payload), persist=True)
+    return {"platform": _serialize_platform(config, store)}
+
+
+@admin_router.patch("/lti-platforms")
+def admin_patch_lti_platform(
+    payload: AdminLtiPlatformPatch,
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    issuer = str(payload.issuer)
+    client_id = payload.client_id
+    metadata = store.get_platform(issuer, client_id)
+    if metadata and metadata.read_only:
+        raise HTTPException(status_code=403, detail="Cette plateforme est verrouillée en lecture seule.")
+    service = _resolve_lti_service()
+    try:
+        current = service.get_platform(issuer, client_id, allow_autodiscovery=False)
+    except LTILoginError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "issuer" in updates and str(updates["issuer"]) != issuer:
+        raise HTTPException(status_code=400, detail="Impossible de modifier l'issuer d'une plateforme existante.")
+    if "client_id" in updates and updates["client_id"] != client_id:
+        raise HTTPException(status_code=400, detail="Impossible de modifier le clientId d'une plateforme existante.")
+
+    config_payload = _config_to_payload(current)
+    if "authorization_endpoint" in updates:
+        value = updates["authorization_endpoint"]
+        config_payload["authorization_endpoint"] = str(value) if value else None
+    if "token_endpoint" in updates:
+        value = updates["token_endpoint"]
+        config_payload["token_endpoint"] = str(value) if value else None
+    if "jwks_uri" in updates:
+        value = updates["jwks_uri"]
+        config_payload["jwks_uri"] = str(value) if value else None
+    if "deployment_ids" in updates and updates["deployment_ids"] is not None:
+        config_payload["deployment_ids"] = updates["deployment_ids"]
+    if "deployment_id" in updates:
+        deployment_id = updates["deployment_id"]
+        config_payload["deployment_id"] = deployment_id
+        if deployment_id:
+            existing_ids = config_payload.get("deployment_ids") or []
+            if deployment_id not in existing_ids:
+                config_payload["deployment_ids"] = [deployment_id, *existing_ids]
+    if "audience" in updates:
+        config_payload["audience"] = updates["audience"]
+
+    config = service.register_platform(config_payload, persist=True)
+    return {"platform": _serialize_platform(config, store)}
+
+
+@admin_router.delete("/lti-platforms", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_lti_platform(
+    issuer: str,
+    client_id: str,
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> Response:
+    metadata = store.get_platform(issuer, client_id)
+    if metadata is None:
+        raise HTTPException(status_code=404, detail="Plateforme LTI introuvable.")
+    if metadata.read_only:
+        raise HTTPException(status_code=403, detail="Cette plateforme est verrouillée en lecture seule.")
+    removed = store.delete_platform(issuer, client_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Plateforme LTI introuvable.")
+    service = _resolve_lti_service()
+    service.reload_platforms()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@admin_router.get("/lti-keys")
+def admin_get_lti_keys(
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    return {"keyset": _serialize_keyset(store)}
+
+
+@admin_router.post("/lti-keys")
+def admin_upload_lti_keys(
+    payload: AdminLtiKeyUpload,
+    _: AdminUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    keyset = store.get_keyset()
+    private_path_str = keyset.private_key_path or os.getenv("LTI_PRIVATE_KEY_PATH")
+    public_path_str = keyset.public_key_path or os.getenv("LTI_PUBLIC_KEY_PATH")
+
+    if payload.private_key and not private_path_str:
+        raise HTTPException(
+            status_code=400,
+            detail="Aucun chemin de clé privée défini. Configure LTI_PRIVATE_KEY_PATH.",
+        )
+    if payload.public_key and not public_path_str:
+        raise HTTPException(
+            status_code=400,
+            detail="Aucun chemin de clé publique défini. Configure LTI_PUBLIC_KEY_PATH.",
+        )
+
+    if payload.private_key and private_path_str:
+        private_path = Path(private_path_str).expanduser().resolve()
+        private_path.parent.mkdir(parents=True, exist_ok=True)
+        private_content = payload.private_key.strip()
+        private_path.write_text(private_content + ("\n" if not private_content.endswith("\n") else ""), encoding="utf-8")
+    if payload.public_key and public_path_str:
+        public_path = Path(public_path_str).expanduser().resolve()
+        public_path.parent.mkdir(parents=True, exist_ok=True)
+        public_content = payload.public_key.strip()
+        public_path.write_text(public_content + ("\n" if not public_content.endswith("\n") else ""), encoding="utf-8")
+
+    service = _resolve_lti_service()
+    service.update_key_paths(private_path_str, public_path_str)
+    return {"keyset": _serialize_keyset(store)}
 
 
 def _validate_model(model_name: str) -> str:

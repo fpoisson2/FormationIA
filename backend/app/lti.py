@@ -34,6 +34,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPubl
 from jwt import PyJWTError
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
+from .admin_store import AdminStore, get_admin_store
 
 SESSION_COOKIE_NAME = os.getenv("LTI_SESSION_COOKIE_NAME", "formationia_lti_session")
 
@@ -79,6 +80,19 @@ def _read_env_or_file(name: str, fallback_path_env: str | None = None) -> str:
         path = _env_path_or_none(fallback_path_env)
         if path:
             return path.read_text(encoding="utf-8")
+
+        store = get_admin_store()
+        if store is not None:
+            keyset = store.get_keyset()
+            candidate_path: str | None = None
+            if fallback_path_env == "LTI_PRIVATE_KEY_PATH":
+                candidate_path = keyset.private_key_path
+            elif fallback_path_env == "LTI_PUBLIC_KEY_PATH":
+                candidate_path = keyset.public_key_path
+            if candidate_path:
+                path = Path(candidate_path)
+                if path.exists():
+                    return path.read_text(encoding="utf-8")
 
     raise LTIConfigurationError(
         f"Configurer {name} ou {fallback_path_env} pour activer l'intégration LTI."
@@ -479,9 +493,10 @@ def _load_keys() -> LTIKeySet:
 class LTIService:
     """Aggregates helper utilities to handle the LTI 1.3 workflow."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, admin_store: AdminStore | None = None) -> None:
+        self._admin_store = admin_store if admin_store is not None else get_admin_store()
         self._key_set = _load_keys()
-        self._platforms = _load_platform_configurations()
+        self._platforms = self._load_platforms_from_store()
         state_ttl = int(os.getenv("LTI_STATE_TTL", "600"))
         session_ttl = int(os.getenv("LTI_SESSION_TTL", str(4 * 60 * 60)))
         self.state_store = LTIStateStore(ttl_seconds=state_ttl)
@@ -492,11 +507,78 @@ class LTIService:
     def key_set(self) -> LTIKeySet:
         return self._key_set
 
+    def _load_platforms_from_store(self) -> dict[tuple[str, str], LTIPlatformConfig]:
+        if self._admin_store is None:
+            return _load_platform_configurations()
+
+        platforms = self._admin_store.list_platforms()
+        configs: dict[tuple[str, str], LTIPlatformConfig] = {}
+        for entry in platforms:
+            try:
+                config = LTIPlatformConfig(
+                    issuer=str(entry.issuer),
+                    client_id=entry.client_id,
+                    authorization_endpoint=str(entry.authorization_endpoint)
+                    if entry.authorization_endpoint
+                    else None,
+                    token_endpoint=str(entry.token_endpoint) if entry.token_endpoint else None,
+                    jwks_uri=str(entry.jwks_uri) if entry.jwks_uri else None,
+                    deployment_id=entry.deployment_id,
+                    deployment_ids=entry.deployment_ids,
+                    audience=entry.audience,
+                )
+            except ValidationError as exc:
+                logger.warning("Configuration LTI invalide dans le store admin: %s", exc)
+                continue
+            configs[config.cache_key()] = config
+        if configs:
+            return configs
+        return _load_platform_configurations()
+
+    def refresh_key_set(self) -> None:
+        self._key_set = _load_keys()
+
+    def reload_platforms(self) -> None:
+        self._platforms = self._load_platforms_from_store()
+
     def refresh_configuration(self) -> None:
         """Reload platform metadata and keys (for hot reload scenarios)."""
 
-        self._key_set = _load_keys()
-        self._platforms = _load_platform_configurations()
+        self.refresh_key_set()
+        self.reload_platforms()
+
+    def register_platform(self, payload: dict[str, Any], *, persist: bool = True) -> LTIPlatformConfig:
+        config = LTIPlatformConfig.model_validate(payload)
+        self._platforms[config.cache_key()] = config
+        if persist and self._admin_store is not None:
+            self._admin_store.upsert_platform(
+                {
+                    "issuer": str(config.issuer),
+                    "client_id": config.client_id,
+                    "authorization_endpoint": str(config.authorization_endpoint)
+                    if config.authorization_endpoint
+                    else None,
+                    "token_endpoint": str(config.token_endpoint) if config.token_endpoint else None,
+                    "jwks_uri": str(config.jwks_uri) if config.jwks_uri else None,
+                    "deployment_id": config.deployment_id,
+                    "deployment_ids": config.deployment_ids,
+                    "audience": config.audience,
+                },
+                read_only=False,
+            )
+        return config
+
+    def update_key_paths(self, private_path: str | None, public_path: str | None) -> None:
+        if self._admin_store is not None:
+            self._admin_store.update_keyset(private_path, public_path)
+        if private_path:
+            os.environ["LTI_PRIVATE_KEY_PATH"] = private_path
+        if public_path:
+            os.environ["LTI_PUBLIC_KEY_PATH"] = public_path
+        self.refresh_key_set()
+
+    def list_platforms(self) -> list[LTIPlatformConfig]:
+        return list(self._platforms.values())
 
     def jwks_document(self) -> dict[str, Any]:
         public_key = self._key_set.public_key
@@ -531,12 +613,15 @@ class LTIService:
         key = (issuer, client_id)
         config = self._platforms.get(key)
         if not config and allow_autodiscovery:
-            config = LTIPlatformConfig.auto_configured(
-                issuer=issuer,
-                client_id=client_id,
-                deployment_id=deployment_hint,
+            config = self.register_platform(
+                {
+                    "issuer": issuer,
+                    "client_id": client_id,
+                    "deployment_id": deployment_hint,
+                    "deployment_ids": [deployment_hint] if deployment_hint else [],
+                },
+                persist=True,
             )
-            self._platforms[key] = config
             logger.info(
                 "Création automatique d'une configuration LTI pour %s (client_id=%s)",
                 issuer,

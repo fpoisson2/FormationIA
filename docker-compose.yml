@@ -11,7 +11,8 @@ services:
       API_AUTH_TOKEN: ${API_AUTH_TOKEN}
       PORT: "8001"
     volumes:
-      - ./lti-keys:/app/lti-keys:ro
+      - ./lti-keys:/app/lti-keys
+      - ./storage:/app/storage
     network_mode: "host"
 
   frontend:
