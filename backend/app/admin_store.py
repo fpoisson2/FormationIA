@@ -285,7 +285,7 @@ class AdminStore:
     def _write(self) -> None:
         temp_path = self._path.with_suffix(".tmp")
         with temp_path.open("w", encoding="utf-8") as handle:
-            json.dump(self._data, handle, indent=2, sort_keys=True)
+            json.dump(self._data, handle, indent=2, sort_keys=True, default=str)
         temp_path.replace(self._path)
 
     def _bootstrap(self) -> None:
@@ -293,13 +293,15 @@ class AdminStore:
         if not self._data.get("platforms"):
             legacy_platforms = self._load_legacy_platforms()
             if legacy_platforms:
-                self._data["platforms"] = [platform.model_dump() for platform in legacy_platforms]
+                self._data["platforms"] = [
+                    platform.model_dump(mode="json") for platform in legacy_platforms
+                ]
                 changed = True
 
         if not self._data.get("keyset"):
             keyset = self._load_legacy_keyset()
             if keyset:
-                self._data["keyset"] = keyset.model_dump()
+                self._data["keyset"] = keyset.model_dump(mode="json")
                 changed = True
 
         if "lti_users" not in self._data:
@@ -490,11 +492,11 @@ class AdminStore:
             found = False
             for index, item in enumerate(platforms):
                 if item.get("issuer") == str(platform.issuer) and item.get("client_id") == platform.client_id:
-                    platforms[index] = platform.model_dump()
+                    platforms[index] = platform.model_dump(mode="json")
                     found = True
                     break
             if not found:
-                platforms.append(platform.model_dump())
+                platforms.append(platform.model_dump(mode="json"))
             self._write()
         return platform
 
@@ -531,7 +533,7 @@ class AdminStore:
             read_only=False,
         )
         with self._lock:
-            self._data["keyset"] = keyset.model_dump()
+            self._data["keyset"] = keyset.model_dump(mode="json")
             self._write()
         return keyset
 
