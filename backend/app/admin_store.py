@@ -32,6 +32,11 @@ def _default_store_path() -> Path:
 _STORE_PATH = _default_store_path()
 _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
+def get_admin_storage_directory() -> Path:
+    """Return the directory where admin-related JSON stores are persisted."""
+
+    return _STORE_PATH.parent
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -778,6 +783,7 @@ __all__ = [
     "create_admin_token",
     "decode_admin_token",
     "get_admin_store",
+    "get_admin_storage_directory",
 ]
 
 _ANY_URL = TypeAdapter(AnyUrl)

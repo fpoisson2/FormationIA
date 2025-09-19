@@ -24,6 +24,7 @@ from .admin_store import (
     create_admin_token,
     decode_admin_token,
     get_admin_store,
+    get_admin_storage_directory,
 )
 from .lti import (
     SESSION_COOKIE_NAME,
@@ -51,7 +52,28 @@ MAX_PLAN_ACTIONS = 30
 MAX_STEPS_PER_ACTION = 20
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
-ACTIVITIES_CONFIG_PATH = Path(__file__).resolve().parent.parent / "activities_config.json"
+
+def _resolve_activities_config_path() -> Path:
+    raw_path = os.getenv("ACTIVITIES_CONFIG_PATH")
+    if raw_path:
+        candidate = Path(raw_path).expanduser()
+        treat_as_dir = raw_path.endswith(("/", "\\")) or (
+            candidate.exists() and candidate.is_dir()
+        )
+        if treat_as_dir:
+            candidate.mkdir(parents=True, exist_ok=True)
+            target = candidate / "activities_config.json"
+        else:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            target = candidate
+        return target.resolve()
+
+    storage_dir = get_admin_storage_directory()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    return (storage_dir / "activities_config.json").resolve()
+
+
+ACTIVITIES_CONFIG_PATH = _resolve_activities_config_path()
 
 ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
 _ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
