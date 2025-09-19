@@ -731,6 +731,7 @@ DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
     },
 ]
 _DEEP_LINK_ACTIVITY_MAP = {item["id"]: item for item in DEEP_LINK_ACTIVITIES}
+MAX_DEEP_LINK_SELECTION = 4
 
 app.add_middleware(
     CORSMiddleware,
@@ -777,8 +778,16 @@ def _front_url_with_route(route: str | None) -> str:
 
 
 def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
-    multiple = context.accept_multiple
-    input_type = "checkbox" if multiple else "radio"
+    max_selectable = (
+        min(MAX_DEEP_LINK_SELECTION, len(DEEP_LINK_ACTIVITIES))
+        if DEEP_LINK_ACTIVITIES
+        else 0
+    )
+    # La plateforme peut indiquer accept_multiple=false, mais on autorise
+    # tout de même la sélection multiple (limitée) pour faciliter la création
+    # de plusieurs liens d’un coup.
+    allow_multiple = max_selectable > 1
+    input_type = "checkbox" if allow_multiple else "radio"
     intro_title = context.settings.get("title")
     intro_text = context.settings.get("text")
     action = html.escape("/lti/deep-link/submit", quote=True)
@@ -812,7 +821,45 @@ def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
             "<p class=\"dl-lead\">Sélectionne une ou plusieurs activités à intégrer dans ton cours." \
             " Chaque ressource créera un lien LTI noté (1 point) vers l’expérience FormationIA.</p>"
         )
-    submit_label = "Ajouter l’activité" if not multiple else "Ajouter les activités"
+    selection_hint = ""
+    if allow_multiple:
+        intro_block += (
+            f"<p class=\"dl-hint\">Tu peux sélectionner jusqu’à {max_selectable} activités FormationIA "
+            "et décocher une option pour libérer une place.</p>"
+        )
+        selection_hint = (
+            "<p class=\"dl-hint\">Coche jusqu’à la limite souhaitée, puis valide pour créer chaque ressource.</p>"
+        )
+    submit_label = "Ajouter l’activité" if not allow_multiple else "Ajouter les activités"
+    limit_script = ""
+    if allow_multiple and max_selectable:
+        limit_script = (
+            "\n  <script>\n"
+            "    (function() {\n"
+            f"      var maxSelected = {max_selectable};\n"
+            "      var checkboxes = Array.prototype.slice.call(document.querySelectorAll('input[name=\"activity\"]'));\n"
+            "      function updateDisabled() {\n"
+            "        var selectedCount = checkboxes.filter(function(input) { return input.checked; }).length;\n"
+            "        checkboxes.forEach(function(input) {\n"
+            "          var wrapper = input.closest('.dl-option');\n"
+            "          if (!input.checked) {\n"
+            "            var shouldDisable = selectedCount >= maxSelected;\n"
+            "            input.disabled = shouldDisable;\n"
+            "            if (wrapper) {\n"
+            "              wrapper.classList.toggle('dl-option--disabled', shouldDisable);\n"
+            "            }\n"
+            "          } else if (wrapper) {\n"
+            "            wrapper.classList.remove('dl-option--disabled');\n"
+            "          }\n"
+            "        });\n"
+            "      }\n"
+            "      checkboxes.forEach(function(input) {\n"
+            "        input.addEventListener('change', updateDisabled);\n"
+            "      });\n"
+            "      updateDisabled();\n"
+            "    })();\n"
+            "  </script>\n"
+        )
     return (
         "<!DOCTYPE html>\n"
         "<html lang=\"fr\">\n"
@@ -831,6 +878,8 @@ def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
         "    .dl-option__content { display: flex; flex-direction: column; gap: 0.35rem; }\n"
         "    .dl-option__title { font-weight: 600; color: #111827; }\n"
         "    .dl-option__desc { color: #475569; font-size: 0.95rem; line-height: 1.4; }\n"
+        "    .dl-option--disabled { opacity: 0.55; }\n"
+        "    .dl-hint { margin: 0 0 1rem; color: #6b7280; font-size: 0.9rem; }\n"
         "    .dl-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }\n"
         "    button { cursor: pointer; border: none; border-radius: 999px; padding: 0.75rem 1.75rem; font-size: 0.95rem; font-weight: 600; }\n"
         "    .dl-submit { background: #dc2626; color: white; }\n"
@@ -842,6 +891,7 @@ def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
         f"    {intro_block}\n"
         f"    <form method=\"post\" action=\"{action}\">\n"
         f"      <input type=\"hidden\" name=\"deep_link_id\" value=\"{context_id}\" />\n"
+        f"{'      ' + selection_hint + '\\n' if selection_hint else ''}"
         f"      {options_html}\n"
         "      <div class=\"dl-actions\">\n"
         f"        <button type=\"submit\" name=\"submit_action\" value=\"submit\" class=\"dl-submit\">{html.escape(submit_label)}</button>\n"
@@ -849,6 +899,7 @@ def _render_deep_link_selection_page(context: DeepLinkContext) -> str:
         "      </div>\n"
         "    </form>\n"
         "  </div>\n"
+        f"{limit_script}"
         "</body>\n"
         "</html>"
     )
@@ -2028,6 +2079,23 @@ async def lti_deep_link_submit(request: Request) -> HTMLResponse:
         raise HTTPException(status_code=400, detail="Identifiant de requête deep linking manquant.")
     submit_action = (form_data.get("submit_action") or "submit").lower()
     selected_ids = [item for item in form_data.getlist("activity") if item]
+    if selected_ids:
+        seen: set[str] = set()
+        unique_ids: list[str] = []
+        for activity_id in selected_ids:
+            if activity_id in seen:
+                continue
+            seen.add(activity_id)
+            unique_ids.append(activity_id)
+        max_selectable = (
+            min(MAX_DEEP_LINK_SELECTION, len(DEEP_LINK_ACTIVITIES))
+            if DEEP_LINK_ACTIVITIES
+            else 0
+        )
+        if max_selectable:
+            selected_ids = unique_ids[:max_selectable]
+        else:
+            selected_ids = []
 
     service = _resolve_lti_service()
     context = service.consume_deep_link_context(context_id)
