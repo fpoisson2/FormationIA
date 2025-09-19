@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
-import tinyTownAtlas from "../assets/kenney_tiny-town/Tilemap/tilemap_packed.png";
+import blockPackAtlas from "../assets/kenney_block-pack/Spritesheet/blockPack_spritesheet.png";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
 
@@ -28,8 +28,8 @@ type Progress = {
   visited: QuarterId[];
 };
 
-const GRID_W = 14;
-const GRID_H = 10;
+const GRID_W = 24;
+const GRID_H = 18;
 const TILE = 32;
 
 function dataUri(svg: string) {
@@ -90,39 +90,41 @@ const SPR_PLAYER = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' h
 
 type TilesetMode = "builtin" | "atlas";
 
+type TileCoord = [number, number] | [number, number, number, number];
+
 type Tileset = {
   mode: TilesetMode;
   url?: string;
   size: number;
   map: {
-    grass: [number, number];
-    path: [number, number];
-    water: [number, number];
-    house_green: [number, number];
-    house_blue: [number, number];
-    house_red: [number, number];
-    house_purp: [number, number];
-    town_hall: [number, number];
-    player: [[number, number], [number, number]];
+    grass: TileCoord;
+    path: TileCoord;
+    water: TileCoord;
+    house_green: TileCoord;
+    house_blue: TileCoord;
+    house_red: TileCoord;
+    house_purp: TileCoord;
+    town_hall: TileCoord;
+    player: TileCoord[];
   };
 };
 
 const DEFAULT_ATLAS: Tileset = {
   mode: "atlas",
-  url: tinyTownAtlas,
-  size: 16,
+  url: blockPackAtlas,
+  size: 64,
   map: {
-    grass: [0, 0],
-    path: [1, 2],
-    water: [2, 8],
-    house_green: [6, 8],
-    house_blue: [8, 8],
-    house_red: [10, 8],
-    house_purp: [11, 8],
-    town_hall: [7, 8],
+    grass: [256, 220, 64, 74],
+    path: [64, 366, 64, 74],
+    water: [0, 415, 64, 74],
+    house_green: [384, 518, 64, 74],
+    house_blue: [448, 330, 64, 74],
+    house_red: [448, 128, 64, 74],
+    house_purp: [384, 370, 64, 74],
+    town_hall: [384, 296, 64, 74],
     player: [
-      [0, 0],
-      [0, 0],
+      [564, 164, 16, 25],
+      [570, 519, 16, 26],
     ],
   },
 };
@@ -130,7 +132,17 @@ const DEFAULT_ATLAS: Tileset = {
 function cloneTileset(source: Tileset): Tileset {
   return {
     ...source,
-    map: { ...source.map },
+    map: {
+      grass: [...source.map.grass] as TileCoord,
+      path: [...source.map.path] as TileCoord,
+      water: [...source.map.water] as TileCoord,
+      house_green: [...source.map.house_green] as TileCoord,
+      house_blue: [...source.map.house_blue] as TileCoord,
+      house_red: [...source.map.house_red] as TileCoord,
+      house_purp: [...source.map.house_purp] as TileCoord,
+      town_hall: [...source.map.town_hall] as TileCoord,
+      player: source.map.player.map((frame) => [...frame] as TileCoord),
+    },
   };
 }
 
@@ -171,16 +183,22 @@ function SpriteFromAtlas({
   scale = TILE,
 }: {
   ts: Tileset;
-  coord: [number, number];
+  coord: TileCoord;
   scale?: number;
 }) {
   if (ts.mode !== "atlas" || !ts.url) {
     return null;
   }
-  const [cx, cy] = coord;
-  const offsetX = -cx * ts.size;
-  const offsetY = -cy * ts.size;
-  const zoom = scale / ts.size;
+  const rect = coord as [number, number, number?, number?];
+  const isRect = rect.length >= 3;
+  const baseWidth = isRect ? rect[2] ?? ts.size : ts.size;
+  const baseHeight = isRect ? rect[3] ?? ts.size : ts.size;
+  const sourceX = isRect ? rect[0] : rect[0] * ts.size;
+  const sourceY = isRect ? rect[1] : rect[1] * ts.size;
+  const offsetX = -sourceX;
+  const offsetY = -sourceY;
+  const zoomX = scale / baseWidth;
+  const zoomY = scale / baseHeight;
   return (
     <div
       style={{
@@ -191,13 +209,13 @@ function SpriteFromAtlas({
     >
       <div
         style={{
-          width: ts.size,
-          height: ts.size,
+          width: baseWidth,
+          height: baseHeight,
           backgroundImage: `url(${ts.url})`,
           backgroundRepeat: "no-repeat",
           backgroundPosition: `${offsetX}px ${offsetY}px`,
           imageRendering: "pixelated",
-          transform: `scale(${zoom})`,
+          transform: `scale(${zoomX}, ${zoomY})`,
           transformOrigin: "top left",
         }}
       />
@@ -212,14 +230,14 @@ function TilesetControls({
   ts: Tileset;
   setTs: (t: Tileset) => void;
 }) {
-  const [url, setUrl] = useState(ts.url ?? tinyTownAtlas);
+  const [url, setUrl] = useState(ts.url ?? blockPackAtlas);
   const [size, setSize] = useState(ts.size ?? 16);
 
   const apply = (mode: TilesetMode) => {
     if (mode === "builtin") {
       setTs({ mode: "builtin", size, map: ts.map });
     } else {
-      setTs({ mode: "atlas", url: url || tinyTownAtlas, size, map: ts.map });
+      setTs({ mode: "atlas", url: url || blockPackAtlas, size, map: ts.map });
     }
   };
 
@@ -273,7 +291,7 @@ function TilesetControls({
         </label>
         <p className="text-slate-500">
           Dépose un atlas PNG (16x16) dans public/assets et renseigne l'URL. Packs
-          recommandés: Kenney (CC0) Topdown/RPG.
+          recommandés: Kenney (CC0) Block Pack ou Topdown/RPG.
         </p>
       </div>
     </div>
@@ -281,16 +299,24 @@ function TilesetControls({
 }
 
 const world: number[][] = [
-  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-  [2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2],
-  [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
-  [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
-  [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
-  [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
-  [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2],
-  [2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2],
-  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+  [2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2],
+  [2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2],
+  [2, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 2],
+  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+  [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2],
+  [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
 ];
 
 const buildings: Array<{
@@ -300,14 +326,14 @@ const buildings: Array<{
   label: string;
   color: string;
 }> = [
-  { id: "mairie", x: 2, y: 2, label: "Mairie (Bilan)", color: "#ffd166" },
-  { id: "clarte", x: 5, y: 3, label: "Quartier Clarté", color: "#06d6a0" },
-  { id: "creation", x: 9, y: 3, label: "Quartier Création", color: "#118ab2" },
-  { id: "decision", x: 4, y: 5, label: "Quartier Décision", color: "#ef476f" },
-  { id: "ethique", x: 10, y: 5, label: "Quartier Éthique", color: "#8338ec" },
+  { id: "mairie", x: 12, y: 9, label: "Mairie (Bilan)", color: "#ffd166" },
+  { id: "clarte", x: 6, y: 5, label: "Quartier Clarté", color: "#06d6a0" },
+  { id: "creation", x: 18, y: 5, label: "Quartier Création", color: "#118ab2" },
+  { id: "decision", x: 7, y: 12, label: "Quartier Décision", color: "#ef476f" },
+  { id: "ethique", x: 17, y: 12, label: "Quartier Éthique", color: "#8338ec" },
 ];
 
-const START = { x: 2, y: 6 };
+const START = { x: 12, y: 14 };
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
