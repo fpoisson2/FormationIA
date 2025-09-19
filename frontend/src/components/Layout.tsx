@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
 
 import logoPrincipal from "../assets/logo_principal.svg";
 
@@ -15,6 +16,9 @@ const STEPS = [
 ];
 
 function Layout({ currentStep, children }: LayoutProps): JSX.Element {
+  const { status: adminStatus } = useAdminAuth();
+  const isAdminAuthenticated = adminStatus === "authenticated";
+
   return (
     <div className="landing-gradient min-h-screen px-6 pb-16 pt-10 text-[color:var(--brand-black)]">
       <div className="mx-auto flex max-w-6xl flex-col gap-12">
@@ -26,9 +30,19 @@ function Layout({ currentStep, children }: LayoutProps): JSX.Element {
                 Atelier comparatif IA
               </span>
             </Link>
-            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
-              Trois étapes guidées
-            </span>
+            <div className="flex flex-col items-center gap-2 md:flex-row md:items-center">
+              <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+                Trois étapes guidées
+              </span>
+              {isAdminAuthenticated ? (
+                <Link
+                  to="/admin"
+                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+                >
+                  Administration
+                </Link>
+              ) : null}
+            </div>
           </div>
           <div className="grid gap-6 md:grid-cols-[3fr_2fr] md:items-start">
             <div className="space-y-3">

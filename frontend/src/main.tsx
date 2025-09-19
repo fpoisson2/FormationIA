@@ -3,15 +3,15 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 
 import App from "./App";
-import AuthGate from "./components/AuthGate";
+import { AdminAuthProvider } from "./providers/AdminAuthProvider";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AuthGate>
+      <AdminAuthProvider>
         <App />
-      </AuthGate>
+      </AdminAuthProvider>
     </BrowserRouter>
   </React.StrictMode>
 );
