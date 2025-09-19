@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { API_AUTH_KEY, API_BASE_URL } from "../config";
 import { useLTI } from "../hooks/useLTI";
@@ -36,7 +37,7 @@ interface ClientStats extends ServerStatsPayload {
   durationMs: number;
 }
 
-type GamePhase = "intro" | "play";
+type GamePhase = "intro" | "brief" | "animating" | "results";
 type RunStatus = "idle" | "running" | "success" | "blocked";
 
 const START_POSITION: GridCoord = { x: 0, y: 0 };
@@ -299,35 +300,28 @@ function StatsModal({
   onReplay,
   onShuffle,
   onExit,
-  onClose,
+  onComplete,
+  isCompleting,
 }: {
   stats: ClientStats;
   summary: string;
   onReplay: () => void;
   onShuffle: () => void;
   onExit: () => void;
-  onClose: () => void;
+  onComplete: () => void;
+  isCompleting: boolean;
 }): JSX.Element {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="max-h-[95vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/60 bg-white/95 p-8 shadow-2xl">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-2xl font-semibold text-[color:var(--brand-black)]">🎉 Bilan de la manche</h3>
-            <p className="mt-2 whitespace-pre-line text-sm text-[color:var(--brand-charcoal)]">{summary}</p>
-            {stats.ambiguity && (
-              <p className="mt-3 rounded-2xl bg-[color:var(--brand-yellow)]/40 p-3 text-xs text-[color:var(--brand-charcoal)]">
-                Hypothèse détectée : {stats.ambiguity}
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            className="rounded-full border border-white/60 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--brand-charcoal)] hover:text-[color:var(--brand-black)]"
-            onClick={onClose}
-          >
-            Fermer
-          </button>
+        <div>
+          <h3 className="text-2xl font-semibold text-[color:var(--brand-black)]">🎉 Bilan de la manche</h3>
+          <p className="mt-2 whitespace-pre-line text-sm text-[color:var(--brand-charcoal)]">{summary}</p>
+          {stats.ambiguity && (
+            <p className="mt-3 rounded-2xl bg-[color:var(--brand-yellow)]/40 p-3 text-xs text-[color:var(--brand-charcoal)]">
+              Hypothèse détectée : {stats.ambiguity}
+            </p>
+          )}
         </div>
         <ul className="mt-6 grid gap-3 text-sm text-[color:var(--brand-charcoal)] md:grid-cols-2">
           <li className="rounded-2xl bg-white/80 p-3 shadow-sm">
@@ -350,7 +344,16 @@ function StatsModal({
           <button
             type="button"
             className="cta-button cta-button--primary inline-flex items-center gap-2"
+            onClick={onComplete}
+            disabled={isCompleting}
+          >
+            {isCompleting ? "Redirection…" : "Terminer l’activité"}
+          </button>
+          <button
+            type="button"
+            className="cta-button inline-flex items-center gap-2 border border-white/60 bg-white/80 text-[color:var(--brand-charcoal)] hover:bg-white"
             onClick={onReplay}
+            disabled={isCompleting}
           >
             Rejouer (nouvel objet)
           </button>
@@ -358,6 +361,7 @@ function StatsModal({
             type="button"
             className="cta-button inline-flex items-center gap-2 border border-[color:var(--brand-red)]/30 bg-white/80 text-[color:var(--brand-red)] hover:bg-white"
             onClick={onShuffle}
+            disabled={isCompleting}
           >
             Changer les obstacles
           </button>
@@ -365,6 +369,7 @@ function StatsModal({
             type="button"
             className="cta-button inline-flex items-center gap-2 border border-white/60 bg-white/80 text-[color:var(--brand-charcoal)] hover:bg-white"
             onClick={onExit}
+            disabled={isCompleting}
           >
             Retour à l’intro
           </button>
@@ -375,6 +380,7 @@ function StatsModal({
 }
 
 function ClarityPath(): JSX.Element {
+  const navigate = useNavigate();
   const [phase, setPhase] = useState<GamePhase>("intro");
   const [status, setStatus] = useState<RunStatus>("idle");
   const [instruction, setInstruction] = useState("");
@@ -391,8 +397,14 @@ function ClarityPath(): JSX.Element {
   const [isStatsModalOpen, setIsStatsModalOpen] = useState(false);
   const [ltiScoreSubmitted, setLtiScoreSubmitted] = useState(false);
   const [activityProgressMarked, setActivityProgressMarked] = useState(false);
+  const [isCompletingActivity, setIsCompletingActivity] = useState(false);
 
   const { isLTISession, submitScore, context, error: ltiError } = useLTI();
+
+  const isResultsPhase = phase === "results";
+  const isBriefPhase = phase === "brief";
+  const isInstructionDisabled = isLoading || !isBriefPhase;
+  const areObstacleActionsDisabled = isLoading || !isBriefPhase;
 
   const runIdRef = useRef<string>(createRunId());
   const controllerRef = useRef<AbortController | null>(null);
@@ -426,6 +438,7 @@ function ClarityPath(): JSX.Element {
   useEffect(() => {
     const synchronizeProgress = async () => {
       if (
+        isResultsPhase &&
         isLTISession &&
         status === "success" &&
         stats &&
@@ -459,7 +472,7 @@ function ClarityPath(): JSX.Element {
         }
       }
 
-      if (status === "success" && stats?.success && !activityProgressMarked) {
+      if (isResultsPhase && stats?.success && !activityProgressMarked) {
         try {
           await updateActivityProgress({ activityId: "clarity", completed: true });
           setActivityProgressMarked(true);
@@ -470,7 +483,7 @@ function ClarityPath(): JSX.Element {
     };
 
     synchronizeProgress();
-  }, [status, stats, isLTISession, submitScore, ltiScoreSubmitted, activityProgressMarked]);
+  }, [status, stats, isLTISession, submitScore, ltiScoreSubmitted, activityProgressMarked, isResultsPhase]);
 
   const triggerCelebration = useCallback(() => {
     setCelebrating(true);
@@ -492,6 +505,7 @@ function ClarityPath(): JSX.Element {
     openModalTimeoutRef.current = window.setTimeout(() => {
       openModalTimeoutRef.current = null;
       if (mountedRef.current) {
+        setPhase("results");
         setIsStatsModalOpen(true);
       }
     }, 400);
@@ -637,6 +651,7 @@ function ClarityPath(): JSX.Element {
               : "Impossible de générer un plan pour cette consigne.";
           setMessage(errorMessage);
           setIsLoading(false);
+          setPhase("brief");
           break;
         }
         case "stats": {
@@ -676,6 +691,7 @@ function ClarityPath(): JSX.Element {
       const controller = new AbortController();
       controllerRef.current = controller;
 
+      setPhase("animating");
       setIsLoading(true);
       setStatus("running");
       setMessage("");
@@ -782,6 +798,7 @@ function ClarityPath(): JSX.Element {
         if (mountedRef.current) {
           setStatus("idle");
           setMessage((error as Error).message || "Erreur lors de l'exécution du plan.");
+          setPhase("brief");
         }
       } finally {
         if (mountedRef.current) {
@@ -793,7 +810,7 @@ function ClarityPath(): JSX.Element {
   );
 
   const handleStart = useCallback(() => {
-    setPhase("play");
+    setPhase("brief");
     resetRoundState({ nextTarget: createRandomTarget(), nextObstacles: [], newRunId: true });
   }, [resetRoundState]);
 
@@ -804,6 +821,7 @@ function ClarityPath(): JSX.Element {
   }, [resetRoundState]);
 
   const handleReplay = useCallback(() => {
+    setPhase("brief");
     const nextTarget = createRandomTarget(target);
     const sanitizedObstacles = blocked.filter((cell) => cell.x !== nextTarget.x || cell.y !== nextTarget.y);
     resetRoundState({ nextTarget, nextObstacles: sanitizedObstacles, newRunId: true });
@@ -811,10 +829,29 @@ function ClarityPath(): JSX.Element {
   }, [blocked, resetRoundState, target]);
 
   const handleShuffleObstacles = useCallback(() => {
+    setPhase("brief");
     const next = createRandomObstacles(target);
     resetRoundState({ nextObstacles: next, newRunId: true });
     setInstruction("");
   }, [resetRoundState, target]);
+
+  const handleCompleteActivity = useCallback(async () => {
+    if (isCompletingActivity) {
+      return;
+    }
+    setIsCompletingActivity(true);
+    try {
+      await updateActivityProgress({ activityId: "clarity", completed: true });
+      setActivityProgressMarked(true);
+    } catch (error) {
+      console.error("Unable to persist clarity path progress", error);
+    } finally {
+      if (mountedRef.current) {
+        setIsCompletingActivity(false);
+      }
+      navigate("/activites", { state: { completed: "clarity" } });
+    }
+  }, [isCompletingActivity, navigate]);
 
   const statsSummary = useMemo(() => {
     if (!stats) {
@@ -921,7 +958,7 @@ function ClarityPath(): JSX.Element {
                       type="button"
                       className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--brand-charcoal)] hover:text-[color:var(--brand-black)]"
                       onClick={() => setInstruction("Descends 9 cases puis va à droite 9 cases jusqu’à l’objet en bas à droite.")}
-                      disabled={isLoading}
+                      disabled={isInstructionDisabled}
                     >
                       Exemple clair
                     </button>
@@ -932,7 +969,7 @@ function ClarityPath(): JSX.Element {
                     placeholder="Exemple : Descends 9 cases puis va à droite 9 cases jusqu'à l’objet en bas à droite."
                     rows={4}
                     className="w-full rounded-2xl border border-white/60 bg-white/95 p-4 text-sm text-[color:var(--brand-charcoal)] shadow-sm outline-none transition focus:border-[color:var(--brand-red)]/40 focus:ring-2 focus:ring-[color:var(--brand-red)]/30"
-                    disabled={isLoading}
+                    disabled={isInstructionDisabled}
                   />
                   <div className="flex flex-wrap gap-2 text-xs text-[color:var(--brand-charcoal)]/90">
                     {MICRO_TIPS.map((tip) => (
@@ -945,7 +982,7 @@ function ClarityPath(): JSX.Element {
                     <button
                       type="submit"
                       className="cta-button cta-button--primary inline-flex items-center gap-2"
-                      disabled={isLoading}
+                      disabled={isInstructionDisabled}
                     >
                       {isLoading ? "Calcul en cours…" : "Envoyer"}
                       <span className="text-lg">→</span>
@@ -954,7 +991,7 @@ function ClarityPath(): JSX.Element {
                       type="button"
                       className="cta-button inline-flex items-center gap-2 border border-[color:var(--brand-red)]/25 bg-white/80 text-[color:var(--brand-red)] hover:bg-white"
                       onClick={handleShuffleObstacles}
-                      disabled={isLoading}
+                      disabled={areObstacleActionsDisabled}
                     >
                       Changer les obstacles
                     </button>
@@ -971,6 +1008,8 @@ function ClarityPath(): JSX.Element {
             <StatsModal
               stats={stats}
               summary={statsSummary}
+              onComplete={handleCompleteActivity}
+              isCompleting={isCompletingActivity}
               onReplay={() => {
                 setIsStatsModalOpen(false);
                 handleReplay();
@@ -983,7 +1022,6 @@ function ClarityPath(): JSX.Element {
                 setIsStatsModalOpen(false);
                 handleBackToIntro();
               }}
-              onClose={() => setIsStatsModalOpen(false)}
             />
           )}
         </div>
