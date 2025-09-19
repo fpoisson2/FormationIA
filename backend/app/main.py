@@ -276,29 +276,73 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Mission introuvable.")
 
 
-def _load_activities_config() -> list[dict[str, Any]]:
+def _load_activities_config() -> dict[str, Any]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
     if not ACTIVITIES_CONFIG_PATH.exists():
-        # Retourner la configuration par défaut si le fichier n'existe pas
-        return []
+        return {"activities": []}
 
     try:
         with ACTIVITIES_CONFIG_PATH.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
+            raw_data = json.load(handle)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail="activities_config.json contient un JSON invalide.") from exc
 
-    if not isinstance(data, list):
-        raise HTTPException(status_code=500, detail="activities_config.json doit contenir un tableau d'activités.")
+    activities: list[dict[str, Any]]
+    activity_selector_header: dict[str, Any] | None = None
 
-    return data
+    if isinstance(raw_data, list):
+        activities = raw_data
+    elif isinstance(raw_data, dict):
+        data_activities = raw_data.get("activities", [])
+        if not isinstance(data_activities, list):
+            raise HTTPException(
+                status_code=500,
+                detail="activities_config.json doit contenir un tableau d'activités.",
+            )
+        activities = data_activities
+        header_data = raw_data.get("activitySelectorHeader")
+        if header_data is not None:
+            if not isinstance(header_data, dict):
+                raise HTTPException(
+                    status_code=500,
+                    detail="activitySelectorHeader doit être un objet JSON.",
+                )
+            activity_selector_header = header_data
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail="activities_config.json doit contenir une configuration valide.",
+        )
+
+    config: dict[str, Any] = {"activities": activities}
+    if activity_selector_header is not None:
+        config["activitySelectorHeader"] = activity_selector_header
+
+    return config
 
 
-def _save_activities_config(activities: list[dict[str, Any]]) -> None:
+def _save_activities_config(config: dict[str, Any]) -> None:
     """Sauvegarde la configuration des activités dans le fichier."""
+    activities = config.get("activities", [])
+    if not isinstance(activities, list):
+        raise HTTPException(
+            status_code=400,
+            detail="activities doit être un tableau d'activités.",
+        )
+
+    payload: dict[str, Any] = {"activities": activities}
+    header = config.get("activitySelectorHeader")
+    if header is not None:
+        if not isinstance(header, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="activitySelectorHeader doit être un objet JSON.",
+            )
+        payload["activitySelectorHeader"] = header
+
     try:
         with ACTIVITIES_CONFIG_PATH.open("w", encoding="utf-8") as handle:
-            json.dump(activities, handle, ensure_ascii=False, indent=2)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
 
@@ -603,10 +647,20 @@ class ActivityProgressRequest(BaseModel):
     completed: bool = Field(default=True)
 
 
+class ActivitySelectorHeader(BaseModel):
+    eyebrow: str | None = None
+    title: str | None = None
+    subtitle: str | None = None
+    badge: str | None = None
+
+
 class ActivityConfigRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
     activities: list[dict[str, Any]] = Field(..., min_items=1)
+    activity_selector_header: ActivitySelectorHeader | None = Field(
+        default=None, alias="activitySelectorHeader"
+    )
 
 class LTIScoreRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
@@ -1761,8 +1815,7 @@ def admin_list_lti_users(
 @app.get("/activities-config")
 def get_activities_config() -> dict[str, Any]:
     """Endpoint public renvoyant la configuration des activités."""
-    activities = _load_activities_config()
-    return {"activities": activities}
+    return _load_activities_config()
 
 
 @admin_router.get("/activities")
@@ -1770,8 +1823,7 @@ def admin_get_activities_config(
     _: LocalUser = Depends(_require_admin_user),
 ) -> dict[str, Any]:
     """Récupère la configuration des activités."""
-    activities = _load_activities_config()
-    return {"activities": activities}
+    return _load_activities_config()
 
 
 @admin_router.post("/activities")
@@ -1780,7 +1832,7 @@ def admin_save_activities_config(
     _: LocalUser = Depends(_require_admin_user),
 ) -> dict[str, Any]:
     """Sauvegarde la configuration des activités."""
-    _save_activities_config(payload.activities)
+    _save_activities_config(payload.model_dump(by_alias=True, exclude_none=True))
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 

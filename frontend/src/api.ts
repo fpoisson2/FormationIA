@@ -331,13 +331,19 @@ export interface AdminLocalUserResponse {
   user: AdminLocalUser;
 }
 
-export interface ActivityConfig {
-  activities: any[];
+export interface ActivitySelectorHeaderConfig {
+  eyebrow?: string;
+  title?: string;
+  subtitle?: string;
+  badge?: string;
 }
 
-export interface ActivityConfigResponse {
+export interface ActivityConfig {
   activities: any[];
+  activitySelectorHeader?: ActivitySelectorHeaderConfig;
 }
+
+export interface ActivityConfigResponse extends ActivityConfig {}
 
 export interface SaveActivityConfigResponse {
   ok: boolean;
