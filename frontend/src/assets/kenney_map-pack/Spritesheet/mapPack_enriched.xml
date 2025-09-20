@@ -1,0 +1,272 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TextureAtlas imagePath="mapPack_spritesheet.png">
+
+  <!-- ====== TERRAIN TYPES ====== -->
+
+  <!-- Gazon -->
+  <SubTexture name="mapTile_022.png" x="768" y="128" width="64" height="64"
+    type="terrain" subtype="grass" desc="gazon"
+    walkable="true" />
+  <SubTexture name="mapTile_006.png" x="832" y="256" width="64" height="64"
+    type="terrain" subtype="grass" desc="gazon nord-ouest"
+    connections="northwest" walkable="true" />
+  <SubTexture name="mapTile_007.png" x="832" y="192" width="64" height="64"
+    type="terrain" subtype="grass" desc="gazon nord"
+    connections="north" walkable="true" />
+  <SubTexture name="mapTile_008.png" x="832" y="128" width="64" height="64"
+    type="terrain" subtype="grass" desc="gazon nord-est"
+    connections="northeast" walkable="true" />
+  <SubTexture name="mapTile_021.png" x="768" y="192" width="64" height="64"
+    type="terrain" subtype="grass" desc="gazon ouest"
+    connections="west" walkable="true" />
+  <SubTexture name="mapTile_023.png" x="768" y="64" width="64" height="64"
+    type="terrain" subtype="grass" desc="gazon est"
+    connections="east" walkable="true" />
+
+  <!-- Sable -->
+  <SubTexture name="mapTile_017.png" x="768" y="448" width="64" height="64"
+    type="terrain" subtype="sand" desc="sable"
+    walkable="true" />
+  <SubTexture name="mapTile_001.png" x="0" y="192" width="64" height="64"
+    type="terrain" subtype="sand" desc="sable nord-ouest"
+    connections="northwest" walkable="true" />
+  <SubTexture name="mapTile_002.png" x="0" y="128" width="64" height="64"
+    type="terrain" subtype="sand" desc="sable nord"
+    connections="north" walkable="true" />
+  <SubTexture name="mapTile_003.png" x="0" y="64" width="64" height="64"
+    type="terrain" subtype="sand" desc="sable nord-est"
+    connections="northeast" walkable="true" />
+  <SubTexture name="mapTile_016.png" x="768" y="512" width="64" height="64"
+    type="terrain" subtype="sand" desc="sable ouest"
+    connections="west" walkable="true" />
+  <SubTexture name="mapTile_018.png" x="768" y="384" width="64" height="64"
+    type="terrain" subtype="sand" desc="sable est"
+    connections="east" walkable="true" />
+
+  <!-- Eau -->
+  <SubTexture name="mapTile_188.png" x="0" y="256" width="64" height="64"
+    type="terrain" subtype="water" desc="eau profonde"
+    walkable="false" />
+  <SubTexture name="mapTile_171.png" x="64" y="448" width="64" height="64"
+    type="terrain" subtype="water" desc="eau peu profonde"
+    walkable="false" />
+  <SubTexture name="mapTile_187.png" x="0" y="320" width="64" height="64"
+    type="terrain" subtype="water" desc="eau"
+    walkable="false" />
+
+  <!-- Terre -->
+  <SubTexture name="mapTile_087.png" x="448" y="448" width="64" height="64"
+    type="terrain" subtype="farmland" desc="terre cultivée"
+    walkable="true" />
+
+  <!-- ====== PATH TYPES ====== -->
+
+  <!-- Trajets droits -->
+  <SubTexture name="mapTile_126.png" x="256" y="640" width="64" height="64"
+    type="path" subtype="straight" desc="trajet nord-sud"
+    connections="north,south" walkable="true" transparent="true" />
+  <SubTexture name="mapTile_127.png" x="256" y="576" width="64" height="64"
+    type="path" subtype="straight" desc="trajet est-ouest"
+    connections="east,west" walkable="true" transparent="true" />
+
+  <!-- Virages -->
+  <SubTexture name="mapTile_140.png" x="192" y="640" width="64" height="64"
+    type="path" subtype="corner" desc="trajet nord-est"
+    connections="north,east" walkable="true" />
+  <SubTexture name="mapTile_141.png" x="192" y="576" width="64" height="64"
+    type="path" subtype="corner" desc="trajet nord-ouest"
+    connections="north,west" walkable="true" />
+  <SubTexture name="mapTile_124.png" x="256" y="768" width="64" height="64"
+    type="path" subtype="corner" desc="trajet sud-ouest"
+    connections="south,west" walkable="true" />
+  <SubTexture name="mapTile_123.png" x="256" y="832" width="64" height="64"
+    type="path" subtype="corner" desc="trajet sud-est"
+    connections="south,east" walkable="true" />
+  <SubTexture name="mapTile_158.png" x="128" y="384" width="64" height="64"
+    type="path" subtype="corner" desc="trajet sud-ouest"
+    connections="south,west" walkable="true" />
+  <SubTexture name="mapTile_156.png" x="128" y="512" width="64" height="64"
+    type="path" subtype="corner" desc="trajet tournant sud-ouest"
+    connections="south,west" walkable="true" />
+  <SubTexture name="mapTile_155.png" x="128" y="576" width="64" height="64"
+    type="path" subtype="corner" desc="trajet tournant sud-est"
+    connections="south,east" walkable="true" />
+  <SubTexture name="mapTile_139.png" x="192" y="704" width="64" height="64"
+    type="path" subtype="corner" desc="trajet tournant nord-ouest"
+    connections="north,west" walkable="true" />
+  <SubTexture name="mapTile_138.png" x="192" y="768" width="64" height="64"
+    type="path" subtype="corner" desc="trajet tournant sud-est"
+    connections="south,east" walkable="true" />
+  <SubTexture name="mapTile_122.png" x="320" y="0" width="64" height="64"
+    type="path" subtype="corner" desc="trajet tournant ouest-sud"
+    connections="south,west" walkable="true" />
+
+  <!-- Intersections T -->
+  <SubTexture name="mapTile_125.png" x="256" y="704" width="64" height="64"
+    type="path" subtype="t_junction" desc="trajet T est-sud-ouest"
+    connections="east,south,west" walkable="true" />
+  <SubTexture name="mapTile_142.png" x="192" y="512" width="64" height="64"
+    type="path" subtype="t_junction" desc="trajet T nord-est-ouest"
+    connections="north,east,west" walkable="true" />
+  <SubTexture name="mapTile_144.png" x="192" y="384" width="64" height="64"
+    type="path" subtype="t_junction" desc="trajet T nord-sud-ouest"
+    connections="north,south,west" walkable="true" />
+  <SubTexture name="mapTile_143.png" x="192" y="448" width="64" height="64"
+    type="path" subtype="t_junction" desc="trajet T nord-est-sud"
+    connections="north,east,south" walkable="true" />
+
+  <!-- Fins de chemins -->
+  <SubTexture name="mapTile_146.png" x="192" y="256" width="64" height="64"
+    type="path" subtype="end" desc="trajet fin nord"
+    connections="north" walkable="true" />
+  <SubTexture name="mapTile_129.png" x="256" y="448" width="64" height="64"
+    type="path" subtype="end" desc="trajet fin sud"
+    connections="south" walkable="true" />
+  <SubTexture name="mapTile_130.png" x="256" y="384" width="64" height="64"
+    type="path" subtype="end" desc="trajet fin ouest"
+    connections="west" walkable="true" />
+  <SubTexture name="mapTile_147.png" x="192" y="192" width="64" height="64"
+    type="path" subtype="end" desc="trajet fin est"
+    connections="east" walkable="true" />
+
+  <!-- Croisements -->
+  <SubTexture name="mapTile_128.png" x="256" y="512" width="64" height="64"
+    type="path" subtype="crossroads" desc="trajet croisement"
+    connections="north,east,south,west" walkable="true" />
+
+  <!-- ====== OBJECTS/DECORATIONS ====== -->
+
+  <!-- Arbres -->
+  <SubTexture name="mapTile_115.png" x="320" y="448" width="64" height="64"
+    type="object" subtype="tree" desc="arbre"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_055.png" x="576" y="704" width="64" height="64"
+    type="object" subtype="tree" desc="arbre"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_040.png" x="640" y="768" width="64" height="64"
+    type="object" subtype="tree" desc="sapin"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_045.png" x="640" y="448" width="64" height="64"
+    type="object" subtype="tree" desc="arbre mauve"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_109.png" x="320" y="832" width="64" height="64"
+    type="object" subtype="tree" desc="arbre avec neige"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_110.png" x="320" y="768" width="64" height="64"
+    type="object" subtype="tree" desc="sapin avec neige"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_120.png" x="320" y="128" width="64" height="64"
+    type="object" subtype="tree" desc="arbre mort"
+    walkable="false" overlay="true" />
+
+  <!-- Fleurs et plantes (seulement celles avec fond transparent) -->
+  <SubTexture name="mapTile_054.png" x="576" y="768" width="64" height="64"
+    type="object" subtype="flower" desc="arbuste fleuri"
+    walkable="false" overlay="true" transparent_bg="true" />
+  <SubTexture name="mapTile_060.png" x="576" y="384" width="64" height="64"
+    type="object" subtype="flower" desc="champignons verts"
+    walkable="false" overlay="true" transparent_bg="true" />
+
+  <!-- Champignons avec fond blanc (exclus temporairement) -->
+  <SubTexture name="mapTile_105.png" x="384" y="192" width="64" height="64"
+    type="object" subtype="flower_whitebg" desc="champignon"
+    walkable="false" overlay="true" transparent_bg="false" />
+  <SubTexture name="mapTile_104.png" x="384" y="256" width="64" height="64"
+    type="object" subtype="flower_whitebg" desc="champignon rouge"
+    walkable="false" overlay="true" transparent_bg="false" />
+  <SubTexture name="mapTile_119.png" x="320" y="192" width="64" height="64"
+    type="object" subtype="flower_whitebg" desc="3 champignons"
+    walkable="false" overlay="true" transparent_bg="false" />
+
+  <!-- Objets spéciaux -->
+  <SubTexture name="mapTile_035.png" x="704" y="192" width="64" height="64"
+    type="object" subtype="plant" desc="cactus"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_039.png" x="640" y="832" width="64" height="64"
+    type="object" subtype="rock" desc="caillou"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_044.png" x="640" y="512" width="64" height="64"
+    type="object" subtype="treasure" desc="diamant rose"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_049.png" x="640" y="192" width="64" height="64"
+    type="object" subtype="rock" desc="tas de terre"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_034.png" x="704" y="256" width="64" height="64"
+    type="object" subtype="rock" desc="tas de terre"
+    walkable="false" overlay="true" />
+
+  <!-- Structures -->
+  <SubTexture name="mapTile_050.png" x="640" y="128" width="64" height="64"
+    type="object" subtype="building" desc="tente"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_095.png" x="384" y="832" width="64" height="64"
+    type="object" subtype="building" desc="igloo"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_099.png" x="832" y="320" width="64" height="64"
+    type="object" subtype="building" desc="tour château"
+    walkable="false" overlay="true" />
+  <SubTexture name="mapTile_100.png" x="384" y="512" width="64" height="64"
+    type="object" subtype="building" desc="château 2 tours"
+    walkable="false" overlay="true" />
+
+  <!-- ====== CHARACTERS ====== -->
+
+  <SubTexture name="mapTile_136.png" x="256" y="0" width="64" height="64"
+    type="character" subtype="player" desc="alien vert"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_137.png" x="192" y="832" width="64" height="64"
+    type="character" subtype="npc" desc="alien bleu"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_153.png" x="128" y="704" width="64" height="64"
+    type="character" subtype="npc" desc="alien rose"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_154.png" x="128" y="640" width="64" height="64"
+    type="character" subtype="npc" desc="alien jaune"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_170.png" x="64" y="512" width="64" height="64"
+    type="character" subtype="npc" desc="alien beige"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_094.png" x="448" y="0" width="64" height="64"
+    type="character" subtype="npc" desc="bonhomme de neige"
+    walkable="true" overlay="true" />
+
+  <!-- ====== UI/NUMBERS ====== -->
+
+  <SubTexture name="mapTile_131.png" x="256" y="320" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 1"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_132.png" x="256" y="256" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 2"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_133.png" x="256" y="192" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 3"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_134.png" x="256" y="128" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 4"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_148.png" x="192" y="128" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 6"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_151.png" x="128" y="832" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 9"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_152.png" x="128" y="768" width="64" height="64"
+    type="ui" subtype="number" desc="chiffre 10"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_145.png" x="192" y="320" width="64" height="64"
+    type="ui" subtype="number" desc="pas de chiffre"
+    walkable="true" overlay="true" />
+
+  <!-- ====== SPECIAL/ITEMS ====== -->
+
+  <SubTexture name="mapTile_179.png" x="0" y="832" width="64" height="64"
+    type="ui" subtype="marker" desc="bulle verte"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_114.png" x="320" y="512" width="64" height="64"
+    type="ui" subtype="marker" desc="carré jaune avec point d'exclamation"
+    walkable="true" overlay="true" />
+  <SubTexture name="mapTile_059.png" x="576" y="448" width="64" height="64"
+    type="object" subtype="vehicle" desc="ovni turquoise"
+    walkable="false" overlay="true" />
+
+</TextureAtlas>

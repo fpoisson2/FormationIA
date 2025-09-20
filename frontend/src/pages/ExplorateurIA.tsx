@@ -7,7 +7,7 @@ import {
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
-import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.xml?raw";
+import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
 
@@ -30,7 +30,7 @@ type Progress = {
 };
 
 const TILE = 32;
-const TILE_GAP = 2;
+const TILE_GAP = 0;
 const CELL_SIZE = TILE + TILE_GAP;
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
@@ -42,6 +42,12 @@ type AtlasEntry = {
   width: number;
   height: number;
   description?: string;
+  type?: "terrain" | "path" | "object" | "character" | "ui";
+  subtype?: string;
+  connections?: string; // "north,south,east,west"
+  walkable?: boolean;
+  overlay?: boolean;
+  transparent_bg?: boolean; // true si le fond est transparent
 };
 
 function parseAtlasDescription(xml: string): Map<string, AtlasEntry> {
@@ -67,6 +73,12 @@ function parseAtlasDescription(xml: string): Map<string, AtlasEntry> {
       width: Number(attributes.width ?? 0),
       height: Number(attributes.height ?? 0),
       description: attributes.description ?? attributes.desc,
+      type: attributes.type as AtlasEntry["type"],
+      subtype: attributes.subtype,
+      connections: attributes.connections,
+      walkable: attributes.walkable === "true",
+      overlay: attributes.overlay === "true",
+      transparent_bg: attributes.transparent_bg === "true",
     };
     entries.set(name, entry);
   }
@@ -94,6 +106,34 @@ function atlas(name: string): TileCoord {
 const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
 const DEFAULT_POI_TILE = atlas("mapTile_179.png");
 
+// Fonctions utilitaires pour rechercher les tuiles par métadonnées
+function getTilesByType(type: AtlasEntry["type"], subtype?: string): AtlasEntry[] {
+  const results: AtlasEntry[] = [];
+  for (const entry of MAP_PACK_ATLAS.values()) {
+    if (entry.type === type && (!subtype || entry.subtype === subtype)) {
+      // Exclure les sprites avec fond blanc pour les overlays
+      if (entry.overlay && entry.transparent_bg === false) {
+        continue; // Passer ce sprite
+      }
+      results.push(entry);
+    }
+  }
+  return results;
+}
+
+function getRandomTileByType(type: AtlasEntry["type"], subtype?: string, seed?: number): TileCoord | null {
+  const candidates = getTilesByType(type, subtype);
+  if (candidates.length === 0) return null;
+
+  // Utiliser une seed déterministe au lieu de Math.random()
+  const index = seed !== undefined
+    ? seed % candidates.length
+    : Math.floor(Math.random() * candidates.length);
+
+  const randomEntry = candidates[index];
+  return atlas(randomEntry.name);
+}
+
 const TILE_KIND = {
   GRASS: 0,
   PATH: 1,
@@ -103,6 +143,12 @@ const TILE_KIND = {
   FLOWER: 5,
   FIELD: 6,
 } as const;
+
+// Types pour la superposition de tuiles
+type TerrainTile = {
+  base: TileKind;
+  overlay?: TileKind;
+};
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
 
@@ -178,11 +224,11 @@ const DEFAULT_ATLAS: Tileset = {
       flower: atlas("mapTile_054.png"),
     },
     houses: {
-      clarte: [...DEFAULT_POI_TILE] as TileCoord,
-      creation: [...DEFAULT_POI_TILE] as TileCoord,
-      decision: [...DEFAULT_POI_TILE] as TileCoord,
-      ethique: [...DEFAULT_POI_TILE] as TileCoord,
-      townHall: [...DEFAULT_POI_TILE] as TileCoord,
+      clarte: atlas("mapTile_131.png"), // chiffre 1
+      creation: atlas("mapTile_132.png"), // chiffre 2
+      decision: atlas("mapTile_133.png"), // chiffre 3
+      ethique: atlas("mapTile_134.png"), // chiffre 4
+      townHall: atlas("mapTile_145.png"), // pas de chiffre (mairie)
     },
     player: DEFAULT_PLAYER_FRAMES.map((frame) => [...frame] as TileCoord),
   },
@@ -360,17 +406,7 @@ function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
 
 function useTileset(): [Tileset, (t: Tileset) => void] {
   const [ts, setTs] = useState<Tileset>(() => {
-    if (typeof window !== "undefined") {
-      const raw = window.localStorage.getItem("explorateur.tileset");
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as Partial<Tileset>;
-          return mergeWithDefault(parsed);
-        } catch {
-          // ignore invalid cache
-        }
-      }
-    }
+    // Force l'utilisation du bon atlas par défaut
     return cloneTileset(DEFAULT_ATLAS);
   });
 
@@ -406,8 +442,8 @@ function SpriteFromAtlas({
   if (!baseWidth || !baseHeight) {
     return null;
   }
-  const sourceX = isRect ? rect[0] : rect[0] * ts.size;
-  const sourceY = isRect ? rect[1] : rect[1] * ts.size;
+  const sourceX = rect[0];
+  const sourceY = rect[1];
   const offsetX = -sourceX;
   const offsetY = -sourceY;
   const zoomX = scale / baseWidth;
@@ -427,7 +463,7 @@ function SpriteFromAtlas({
           backgroundImage: `url(${ts.url})`,
           backgroundRepeat: "no-repeat",
           backgroundPosition: `${offsetX}px ${offsetY}px`,
-          imageRendering: "pixelated",
+          imageRendering: "crisp-edges",
           transform: `scale(${zoomX}, ${zoomY})`,
           transformOrigin: "top left",
         }}
@@ -514,9 +550,9 @@ function TilesetControls({
 const WORLD_WIDTH = 60;
 const WORLD_HEIGHT = 44;
 
-function generateWorld(): number[][] {
+function generateWorld(): TerrainTile[][] {
   const map = Array.from({ length: WORLD_HEIGHT }, () =>
-    Array.from({ length: WORLD_WIDTH }, () => TILE_KIND.GRASS)
+    Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.GRASS }))
   );
 
   const fillRect = (
@@ -524,12 +560,17 @@ function generateWorld(): number[][] {
     startY: number,
     width: number,
     height: number,
-    tile: TileKind
+    tile: TileKind,
+    asOverlay = false
   ) => {
     for (let y = startY; y < startY + height; y++) {
       for (let x = startX; x < startX + width; x++) {
         if (map[y]?.[x] !== undefined) {
-          map[y][x] = tile;
+          if (asOverlay) {
+            map[y][x].overlay = tile;
+          } else {
+            map[y][x].base = tile;
+          }
         }
       }
     }
@@ -540,17 +581,40 @@ function generateWorld(): number[][] {
     startY: number,
     width: number,
     height: number,
-    tile: TileKind
+    tile: TileKind,
+    asOverlay = false
   ) => {
     for (let x = startX; x < startX + width; x++) {
-      if (map[startY]?.[x] !== undefined) map[startY][x] = tile;
-      if (map[startY + height - 1]?.[x] !== undefined)
-        map[startY + height - 1][x] = tile;
+      if (map[startY]?.[x] !== undefined) {
+        if (asOverlay) {
+          map[startY][x].overlay = tile;
+        } else {
+          map[startY][x].base = tile;
+        }
+      }
+      if (map[startY + height - 1]?.[x] !== undefined) {
+        if (asOverlay) {
+          map[startY + height - 1][x].overlay = tile;
+        } else {
+          map[startY + height - 1][x].base = tile;
+        }
+      }
     }
     for (let y = startY; y < startY + height; y++) {
-      if (map[y]?.[startX] !== undefined) map[y][startX] = tile;
-      if (map[y]?.[startX + width - 1] !== undefined)
-        map[y][startX + width - 1] = tile;
+      if (map[y]?.[startX] !== undefined) {
+        if (asOverlay) {
+          map[y][startX].overlay = tile;
+        } else {
+          map[y][startX].base = tile;
+        }
+      }
+      if (map[y]?.[startX + width - 1] !== undefined) {
+        if (asOverlay) {
+          map[y][startX + width - 1].overlay = tile;
+        } else {
+          map[y][startX + width - 1].base = tile;
+        }
+      }
     }
   };
 
@@ -562,7 +626,8 @@ function generateWorld(): number[][] {
   ) => {
     for (let x = startX; x <= endX; x++) {
       if (map[y]?.[x] !== undefined) {
-        map[y][x] = tile;
+        map[y][x].base = TILE_KIND.GRASS; // Gazon en base
+        map[y][x].overlay = tile; // Chemin en overlay
       }
     }
   };
@@ -575,14 +640,108 @@ function generateWorld(): number[][] {
   ) => {
     for (let y = startY; y <= endY; y++) {
       if (map[y]?.[x] !== undefined) {
-        map[y][x] = tile;
+        map[y][x].base = TILE_KIND.GRASS; // Gazon en base
+        map[y][x].overlay = tile; // Chemin en overlay
+      }
+    }
+  };
+
+  // Chemin organique avec courbes mais connexions garanties
+  const drawSmartPath = (
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number
+  ) => {
+    // Tracer un chemin avec variation mais connexions garanties
+    let currentX = startX;
+    let currentY = startY;
+
+    // Placer le point de départ
+    if (map[currentY]?.[currentX] !== undefined) {
+      map[currentY][currentX].base = TILE_KIND.GRASS;
+      map[currentY][currentX].overlay = TILE_KIND.PATH;
+    }
+
+    // Alterner entre horizontal et vertical pour créer des angles naturels
+    let preferHorizontal = Math.abs(endX - startX) > Math.abs(endY - startY);
+
+    while (currentX !== endX || currentY !== endY) {
+      const needsHorizontal = currentX !== endX;
+      const needsVertical = currentY !== endY;
+
+      // Changer de direction parfois pour créer des angles et jonctions
+      if (needsHorizontal && needsVertical) {
+        // Créer des T naturels en alternant la priorité
+        if (preferHorizontal && needsHorizontal) {
+          if (currentX < endX) currentX++;
+          else currentX--;
+        } else if (needsVertical) {
+          if (currentY < endY) currentY++;
+          else currentY--;
+        }
+
+        // Changer de priorité de temps en temps pour créer des angles
+        if (Math.random() < 0.3) {
+          preferHorizontal = !preferHorizontal;
+        }
+      } else if (needsHorizontal) {
+        if (currentX < endX) currentX++;
+        else currentX--;
+      } else if (needsVertical) {
+        if (currentY < endY) currentY++;
+        else currentY--;
+      }
+
+      // Placer le chemin à cette position
+      if (map[currentY]?.[currentX] !== undefined) {
+        map[currentY][currentX].base = TILE_KIND.GRASS;
+        map[currentY][currentX].overlay = TILE_KIND.PATH;
+      }
+    }
+  };
+
+  // Fonction locale pour vérifier les tuiles dans le contexte de génération
+  const getPathAt = (x: number, y: number): boolean => {
+    if (y < 0 || y >= WORLD_HEIGHT || x < 0 || x >= WORLD_WIDTH) {
+      return false;
+    }
+    const terrain = map[y][x];
+    return terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
+  };
+
+  // Fonction pour s'assurer que toutes les extrémités de chemins ont des connexions correctes
+  const validateAndFixPathEnds = () => {
+    for (let y = 0; y < WORLD_HEIGHT; y++) {
+      for (let x = 0; x < WORLD_WIDTH; x++) {
+        const terrain = map[y][x];
+        if (terrain.overlay === TILE_KIND.PATH || terrain.base === TILE_KIND.PATH) {
+          // Compter les connexions adjacentes
+          const connections = [
+            getPathAt(x, y - 1), // north
+            getPathAt(x, y + 1), // south
+            getPathAt(x + 1, y), // east
+            getPathAt(x - 1, y), // west
+          ].filter(Boolean).length;
+
+          // Si c'est un chemin isolé (0 connexions), le supprimer
+          if (connections === 0) {
+            if (terrain.overlay === TILE_KIND.PATH) {
+              terrain.overlay = undefined;
+            } else if (terrain.base === TILE_KIND.PATH) {
+              terrain.base = TILE_KIND.GRASS;
+            }
+          }
+        }
       }
     }
   };
 
   const plantTree = (x: number, y: number) => {
     if (map[y]?.[x] !== undefined) {
-      map[y][x] = TILE_KIND.TREE;
+      // Garder le gazon en base et mettre un arbre aléatoire en overlay
+      map[y][x].base = TILE_KIND.GRASS;
+      map[y][x].overlay = TILE_KIND.TREE;
     }
   };
 
@@ -594,7 +753,9 @@ function generateWorld(): number[][] {
 
   const plantFlower = (x: number, y: number) => {
     if (map[y]?.[x] !== undefined) {
-      map[y][x] = TILE_KIND.FLOWER;
+      // Garder le gazon en base et mettre les fleurs en overlay
+      map[y][x].base = TILE_KIND.GRASS;
+      map[y][x].overlay = TILE_KIND.FLOWER;
     }
   };
 
@@ -606,27 +767,31 @@ function generateWorld(): number[][] {
 
   // Coastline
   for (let x = 0; x < WORLD_WIDTH; x++) {
-    map[0][x] = TILE_KIND.WATER;
-    map[WORLD_HEIGHT - 1][x] = TILE_KIND.WATER;
+    map[0][x].base = TILE_KIND.WATER;
+    map[WORLD_HEIGHT - 1][x].base = TILE_KIND.WATER;
   }
   for (let y = 0; y < WORLD_HEIGHT; y++) {
-    map[y][0] = TILE_KIND.WATER;
-    map[y][WORLD_WIDTH - 1] = TILE_KIND.WATER;
+    map[y][0].base = TILE_KIND.WATER;
+    map[y][WORLD_WIDTH - 1].base = TILE_KIND.WATER;
   }
   for (let x = 1; x < WORLD_WIDTH - 1; x++) {
-    map[1][x] = TILE_KIND.SAND;
-    map[WORLD_HEIGHT - 2][x] = TILE_KIND.SAND;
+    map[1][x].base = TILE_KIND.WATER; // Eau en base
+    map[1][x].overlay = TILE_KIND.SAND; // Sable en overlay (plage)
+    map[WORLD_HEIGHT - 2][x].base = TILE_KIND.WATER;
+    map[WORLD_HEIGHT - 2][x].overlay = TILE_KIND.SAND;
   }
   for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
-    map[y][1] = TILE_KIND.SAND;
-    map[y][WORLD_WIDTH - 2] = TILE_KIND.SAND;
+    map[y][1].base = TILE_KIND.WATER;
+    map[y][1].overlay = TILE_KIND.SAND;
+    map[y][WORLD_WIDTH - 2].base = TILE_KIND.WATER;
+    map[y][WORLD_WIDTH - 2].overlay = TILE_KIND.SAND;
   }
 
   // Ponds and beaches
   fillRect(6, 5, 10, 4, TILE_KIND.WATER);
-  outlineRect(5, 4, 12, 6, TILE_KIND.SAND);
+  outlineRect(5, 4, 12, 6, TILE_KIND.SAND, true); // true = en overlay
   fillRect(42, 30, 10, 6, TILE_KIND.WATER);
-  outlineRect(41, 29, 12, 8, TILE_KIND.SAND);
+  outlineRect(41, 29, 12, 8, TILE_KIND.SAND, true);
 
   // Farmland belt in the south-west
   fillRect(6, 34, 12, 6, TILE_KIND.FIELD);
@@ -667,29 +832,22 @@ function generateWorld(): number[][] {
     [32, 31],
   ]);
 
-  // Path network connecting the quarters
-  drawVertical(6, 38, 30);
+  // Path network - réseau unifié centré sur la mairie (30,22)
+  // Épine dorsale principale horizontale passant par la mairie
   drawHorizontal(12, 48, 22);
-  drawVertical(12, 32, 14);
-  drawVertical(12, 32, 44);
-  drawHorizontal(14, 30, 12);
-  drawHorizontal(30, 44, 12);
-  drawHorizontal(14, 44, 32);
-  drawHorizontal(20, 40, 16);
-  drawHorizontal(20, 40, 28);
-  drawVertical(16, 28, 24);
-  drawVertical(16, 28, 36);
 
-  // Small plazas at each point of interest
-  fillRect(13, 11, 3, 3, TILE_KIND.PATH);
-  fillRect(43, 11, 3, 3, TILE_KIND.PATH);
-  fillRect(13, 31, 3, 3, TILE_KIND.PATH);
-  fillRect(43, 31, 3, 3, TILE_KIND.PATH);
-  fillRect(29, 21, 3, 3, TILE_KIND.PATH);
+  // Connexions vers les quartiers depuis la ligne principale
+  // Clarté (14,12) - Nord-Ouest depuis (14,22)
+  drawVertical(12, 22, 14);
 
-  // Scenic overlooks near the ponds
-  fillRect(24, 8, 6, 3, TILE_KIND.PATH);
-  fillRect(36, 34, 6, 3, TILE_KIND.PATH);
+  // Création (44,12) - Nord-Est depuis (44,22)
+  drawVertical(12, 22, 44);
+
+  // Décision (14,32) - Sud-Ouest depuis (14,22)
+  drawVertical(22, 32, 14);
+
+  // Éthique (44,32) - Sud-Est depuis (44,22)
+  drawVertical(22, 32, 44);
 
   // Decorative trees framing the plazas
   scatterTrees([
@@ -701,10 +859,73 @@ function generateWorld(): number[][] {
     [42, 24],
   ]);
 
+  // Add much more natural variety and scattered elements
+  // Random scattered trees across the landscape
+  const randomTrees = [];
+  for (let i = 0; i < 40; i++) {
+    const x = 3 + Math.floor(Math.random() * (WORLD_WIDTH - 6));
+    const y = 3 + Math.floor(Math.random() * (WORLD_HEIGHT - 6));
+    // Avoid placing on water, paths, or buildings
+    if (x !== 14 && x !== 44 && x !== 30 && y !== 12 && y !== 32 && y !== 22) {
+      randomTrees.push([x, y] as [number, number]);
+    }
+  }
+  scatterTrees(randomTrees);
+
+  // Random scattered flowers
+  const randomFlowers = [];
+  for (let i = 0; i < 60; i++) {
+    const x = 3 + Math.floor(Math.random() * (WORLD_WIDTH - 6));
+    const y = 3 + Math.floor(Math.random() * (WORLD_HEIGHT - 6));
+    // Avoid placing on water, paths, or buildings
+    if (x !== 14 && x !== 44 && x !== 30 && y !== 12 && y !== 32 && y !== 22) {
+      randomFlowers.push([x, y] as [number, number]);
+    }
+  }
+  scatterFlowers(randomFlowers);
+
+  // Add natural clusters of trees (forests)
+  const forestClusters = [
+    // Forest near top-left
+    [[8, 8], [9, 8], [10, 8], [8, 9], [9, 9], [10, 9], [11, 10]],
+    // Forest near bottom-right
+    [[48, 35], [49, 35], [50, 35], [48, 36], [49, 36], [50, 36], [51, 37]],
+    // Small grove near center
+    [[25, 18], [26, 18], [27, 19], [25, 19]],
+  ];
+
+  for (const cluster of forestClusters) {
+    scatterTrees(cluster);
+  }
+
+  // Add flower meadows
+  const flowerMeadows = [
+    // Meadow near clarte
+    [[10, 15], [11, 15], [12, 15], [10, 16], [11, 16]],
+    // Meadow near ethique
+    [[46, 28], [47, 28], [48, 28], [46, 29], [47, 29]],
+  ];
+
+  for (const meadow of flowerMeadows) {
+    scatterFlowers(meadow);
+  }
+
+  // Nettoyer les chemins isolés et mal connectés
+  validateAndFixPathEnds();
+
   return map;
 }
 
-const world = generateWorld();
+// Générée une seule fois et mise en cache
+let _worldCache: TerrainTile[][] | null = null;
+function getWorld(): TerrainTile[][] {
+  if (!_worldCache) {
+    _worldCache = generateWorld();
+  }
+  return _worldCache;
+}
+
+const world = getWorld();
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
@@ -722,7 +943,7 @@ const buildings: Array<{
   { id: "ethique", x: 44, y: 32, label: "Quartier Éthique", color: "#8338ec" },
 ];
 
-const START = { x: 30, y: 24 };
+const START = { x: 30, y: 22 }; // Au centre du réseau principal de chemins
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -785,12 +1006,76 @@ function BuildingSprite({
   return null;
 }
 
-function isWalkable(x: number, y: number) {
+function isWalkable(x: number, y: number, fromX?: number, fromY?: number) {
   if (x < 0 || y < 0 || y >= world.length || x >= world[0].length) {
     return false;
   }
-  const tile = world[y][x] as TileKind;
-  return tile === TILE_KIND.PATH;
+  const terrain = world[y][x];
+  // Un chemin peut être soit en base soit en overlay
+  const isPath = terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
+
+  if (!isPath) return false;
+
+  // Si on a les coordonnées d'origine, vérifier les connexions des deux côtés
+  if (fromX !== undefined && fromY !== undefined) {
+    // Déterminer la direction du mouvement
+    const dx = x - fromX;
+    const dy = y - fromY;
+
+    // Obtenir les directions requises
+    let sourceExitDirection = "";  // Direction de sortie de la tuile source
+    let targetEntryDirection = ""; // Direction d'entrée dans la tuile cible
+
+    if (dx === 1) {
+      sourceExitDirection = "east";   // On sort vers l'est
+      targetEntryDirection = "west";  // On arrive par l'ouest
+    } else if (dx === -1) {
+      sourceExitDirection = "west";   // On sort vers l'ouest
+      targetEntryDirection = "east";  // On arrive par l'est
+    } else if (dy === 1) {
+      sourceExitDirection = "south";  // On sort vers le sud
+      targetEntryDirection = "north"; // On arrive par le nord
+    } else if (dy === -1) {
+      sourceExitDirection = "north";  // On sort vers le nord
+      targetEntryDirection = "south"; // On arrive par le sud
+    }
+
+    if (sourceExitDirection && targetEntryDirection) {
+      // Vérifier la tuile source
+      const sourcePathTileCoord = getPathTileCoord(fromX, fromY);
+      const sourceTileName = getTileNameFromCoord(sourcePathTileCoord);
+
+      // Vérifier la tuile de destination
+      const targetPathTileCoord = getPathTileCoord(x, y);
+      const targetTileName = getTileNameFromCoord(targetPathTileCoord);
+
+      if (sourceTileName && targetTileName) {
+        const sourceTileEntry = MAP_PACK_ATLAS.get(sourceTileName);
+        const targetTileEntry = MAP_PACK_ATLAS.get(targetTileName);
+
+        if (sourceTileEntry && targetTileEntry &&
+            sourceTileEntry.connections && targetTileEntry.connections) {
+          // Les deux tuiles doivent avoir les connexions appropriées
+          const sourceHasExit = sourceTileEntry.connections.includes(sourceExitDirection);
+          const targetHasEntry = targetTileEntry.connections.includes(targetEntryDirection);
+
+          return sourceHasExit && targetHasEntry;
+        }
+      }
+    }
+  }
+
+  return true; // Fallback si pas de vérification de connexion possible
+}
+
+// Fonction utilitaire pour retrouver le nom de tuile à partir de ses coordonnées
+function getTileNameFromCoord(coord: TileCoord): string | null {
+  for (const [tileName, entry] of MAP_PACK_ATLAS.entries()) {
+    if (entry.x === coord[0] && entry.y === coord[1]) {
+      return tileName;
+    }
+  }
+  return null;
 }
 
 function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
@@ -841,7 +1126,9 @@ function tileAt(x: number, y: number): TileKind | null {
   if (!row || x < 0 || x >= row.length) {
     return null;
   }
-  return row[x] as TileKind;
+  // Pour les connexions de chemins, regarder d'abord l'overlay puis la base
+  const terrain = row[x];
+  return terrain.overlay || terrain.base;
 }
 
 function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
@@ -878,6 +1165,78 @@ function getWaterTileCoord(x: number, y: number, ts: Tileset): TileCoord {
   return touchesLand ? ts.map.water.shore : ts.map.water.deep;
 }
 
+function getPathTileCoord(x: number, y: number): TileCoord {
+  // Vérifier les connexions dans les 4 directions
+  const north = tileAt(x, y - 1) === TILE_KIND.PATH;
+  const south = tileAt(x, y + 1) === TILE_KIND.PATH;
+  const east = tileAt(x + 1, y) === TILE_KIND.PATH;
+  const west = tileAt(x - 1, y) === TILE_KIND.PATH;
+
+  // Créer un pattern de connexions pour recherche intelligente (ordre alphabétique)
+  const directionList = [];
+  if (east) directionList.push("east");
+  if (north) directionList.push("north");
+  if (south) directionList.push("south");
+  if (west) directionList.push("west");
+  const connectionString = directionList.join(",");
+
+  // Chercher une tuile qui correspond exactement aux connexions, en priorisant les tuiles recommandées
+  const availableMatches = [];
+  for (const [tileName, entry] of MAP_PACK_ATLAS.entries()) {
+    if (entry.type === "path" && entry.connections === connectionString) {
+      // Tuiles prioritaires spécifiées par l'utilisateur
+      const priorityTiles = [
+        "mapTile_126.png", "mapTile_127.png", "mapTile_128.png", "mapTile_123.png", "mapTile_124.png",
+        "mapTile_121.png", "mapTile_122.png", "mapTile_138.png", "mapTile_139.png",
+        "mapTile_140.png", "mapTile_141.png"
+      ];
+
+      const isPriorityTile = priorityTiles.includes(tileName);
+      const priority = isPriorityTile ? 1 :
+                       entry.subtype === "straight" ? 2 :
+                       entry.subtype === "corner" ? 3 :
+                       entry.subtype === "T" ? 4 : 5;
+      availableMatches.push({ tileName, priority });
+    }
+  }
+
+  // Prendre la tuile avec la priorité la plus haute (numéro le plus bas)
+  if (availableMatches.length > 0) {
+    availableMatches.sort((a, b) => a.priority - b.priority);
+    return atlas(availableMatches[0].tileName);
+  }
+
+  // Fallback vers l'ancienne logique si pas de correspondance exacte
+  const connectionCount = [north, south, east, west].filter(Boolean).length;
+
+  if (connectionCount === 0) {
+    return atlas("mapTile_126.png"); // trajet nord-sud simple à la place du croisement
+  } else if (connectionCount === 1) {
+    if (north) return atlas("mapTile_129.png"); // trajet fin sud
+    if (south) return atlas("mapTile_146.png"); // trajet fin nord
+    if (east) return atlas("mapTile_130.png"); // trajet fin ouest
+    if (west) return atlas("mapTile_147.png"); // trajet fin est
+  } else if (connectionCount === 2) {
+    if (north && south) return atlas("mapTile_126.png"); // trajet nord-sud
+    if (east && west) return atlas("mapTile_127.png"); // trajet est-ouest
+    if (north && east) return atlas("mapTile_140.png"); // trajet nord-est
+    if (north && west) return atlas("mapTile_141.png"); // trajet nord-ouest
+    if (south && east) return atlas("mapTile_124.png"); // trajet sud-est
+    if (south && west) return atlas("mapTile_158.png"); // trajet sud-ouest
+  } else if (connectionCount === 3) {
+    // Pour les T, préférer des connexions plus simples quand possible
+    if (!north) return atlas("mapTile_127.png"); // est-ouest simple au lieu du T
+    if (!south) return atlas("mapTile_127.png"); // est-ouest simple au lieu du T
+    if (!east) return atlas("mapTile_126.png"); // nord-sud simple au lieu du T
+    if (!west) return atlas("mapTile_126.png"); // nord-sud simple au lieu du T
+  } else {
+    // 4 connexions : préférer une tuile simple au lieu du croisement complet
+    return atlas("mapTile_126.png"); // trajet nord-sud simple
+  }
+
+  return atlas("mapTile_126.png"); // Default: ligne droite nord-sud
+}
+
 function getAtlasTile(
   tileKind: TileKind,
   ts: Tileset,
@@ -888,7 +1247,7 @@ function getAtlasTile(
     case TILE_KIND.GRASS:
       return ts.map.grass;
     case TILE_KIND.PATH:
-      return ts.map.path;
+      return getPathTileCoord(x, y);
     case TILE_KIND.WATER:
       return getWaterTileCoord(x, y, ts);
     case TILE_KIND.SAND:
@@ -896,33 +1255,48 @@ function getAtlasTile(
     case TILE_KIND.FIELD:
       return ts.map.farmland;
     case TILE_KIND.TREE:
-      return ts.map.details.tree;
+      return getRandomTileByType("object", "tree", x * 1000 + y) || ts.map.details.tree;
     case TILE_KIND.FLOWER:
-      return ts.map.details.flower;
+      return getRandomTileByType("object", "flower", x * 2000 + y) || ts.map.details.flower;
     default:
       return ts.map.grass;
   }
 }
 
 function TileWithTs({
-  kind,
+  terrain,
   ts,
   x,
   y,
 }: {
-  kind: number;
+  terrain: TerrainTile;
   ts: Tileset;
   x: number;
   y: number;
 }) {
-  const tileKind = (kind as TileKind) ?? TILE_KIND.GRASS;
-  const activeTileset =
-    ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
-  const coord = getAtlasTile(tileKind, activeTileset, x, y);
-  if (!coord) {
-    return null;
-  }
-  return <SpriteFromAtlas ts={activeTileset} coord={coord} scale={TILE} />;
+  const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
+
+  // Rendu simple : base + overlay si existe
+  const baseCoord = getAtlasTile(terrain.base, activeTileset, x, y);
+  const overlayCoord = terrain.overlay
+    ? getAtlasTile(terrain.overlay, activeTileset, x, y)
+    : null;
+
+  return (
+    <div className="relative">
+      {/* Couche de base */}
+      {baseCoord && (
+        <SpriteFromAtlas ts={activeTileset} coord={baseCoord} scale={TILE} />
+      )}
+
+      {/* Couche overlay par-dessus */}
+      {overlayCoord && (
+        <div className="absolute inset-0">
+          <SpriteFromAtlas ts={activeTileset} coord={overlayCoord} scale={TILE} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Modal({
@@ -1720,7 +2094,7 @@ export default function ExplorateurIA({
   const move = (dx: number, dy: number) => {
     const nx = player.x + dx;
     const ny = player.y + dy;
-    if (!isWalkable(nx, ny)) return;
+    if (!isWalkable(nx, ny, player.x, player.y)) return;
     attemptPlayMusic();
     setPlayer({ x: nx, y: ny });
     setWalkStep((step) => step + 1);
@@ -1823,11 +2197,11 @@ export default function ExplorateurIA({
                 }}
               >
                 {world.map((row, y) =>
-                  row.map((tileKind, x) => {
-                    const highlight = HIGHLIGHT_TILES.has(tileKind as TileKind);
+                  row.map((terrain, x) => {
+                    const highlight = HIGHLIGHT_TILES.has(terrain.base);
                     return (
                       <div key={`${x}-${y}`} className="relative">
-                        <TileWithTs kind={tileKind} ts={tileset} x={x} y={y} />
+                        <TileWithTs terrain={terrain} ts={tileset} x={x} y={y} />
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
