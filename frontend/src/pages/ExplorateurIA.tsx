@@ -7,7 +7,7 @@ import {
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
-import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet_described.xml?raw";
+import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
 
@@ -34,143 +34,6 @@ const TILE_GAP = 2;
 const CELL_SIZE = TILE + TILE_GAP;
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
-
-function dataUri(svg: string) {
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
-const SPR_TILE_GRASS = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#46a049'/>
-  <rect x='0' y='8' width='16' height='1' fill='#3d8f43'/>
-  <rect x='8' y='0' width='1' height='16' fill='#3d8f43'/>
-  <rect x='2' y='2' width='2' height='2' fill='#67c16a'/>
-  <rect x='10' y='5' width='2' height='2' fill='#67c16a'/>
-  <rect x='6' y='11' width='2' height='2' fill='#67c16a'/>
-</svg>`);
-const SPR_TILE_PATH = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#caa56a'/>
-  <rect x='0' y='7' width='16' height='2' fill='#b18959'/>
-  <rect x='7' y='0' width='2' height='16' fill='#b18959'/>
-</svg>`);
-const SPR_TILE_WATER = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#4fc3f7'/>
-  <rect x='0' y='7' width='16' height='2' fill='#29b6f6'/>
-  <rect x='2' y='3' width='12' height='1' fill='#81d4fa'/>
-  <rect x='4' y='11' width='8' height='1' fill='#81d4fa'/>
-</svg>`);
-
-function houseSvg(roof: string, wall = "#f4f4f5") {
-  return dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-    <rect x='3' y='7' width='10' height='7' fill='${wall}' stroke='#9aa0a6' stroke-width='1'/>
-    <polygon points='8,3 2,8 14,8' fill='${roof}' stroke='#5b5b5b' stroke-width='1'/>
-    <rect x='7' y='10' width='2' height='4' fill='#8d6e63'/>
-    <rect x='4' y='9' width='2' height='2' fill='#90caf9'/>
-    <rect x='10' y='9' width='2' height='2' fill='#90caf9'/>
-  </svg>`);
-}
-
-const SPR_HOUSE_GREEN = houseSvg("#06d6a0");
-const SPR_HOUSE_BLUE = houseSvg("#118ab2");
-const SPR_HOUSE_RED = houseSvg("#ef476f");
-const SPR_HOUSE_PURP = houseSvg("#8338ec");
-const SPR_TOWN_HALL = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect x='2' y='8' width='12' height='6' fill='#ffe08a' stroke='#bfa15c' stroke-width='1'/>
-  <rect x='6' y='9' width='4' height='5' fill='#d7ccc8'/>
-  <polygon points='8,3 1,8 15,8' fill='#f4c430' stroke='#bfa15c' stroke-width='1'/>
-  <rect x='4' y='9' width='2' height='2' fill='#fff3c4'/>
-  <rect x='10' y='9' width='2' height='2' fill='#fff3c4'/>
-</svg>`);
-
-const SPR_PLAYER = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='none'/>
-  <rect x='6' y='2' width='4' height='3' fill='#f9d7b6'/>
-  <rect x='5' y='5' width='6' height='1' fill='#3e2723'/>
-  <rect x='5' y='6' width='6' height='5' fill='#1976d2'/>
-  <rect x='6' y='11' width='4' height='3' fill='#263238'/>
-  <rect x='6' y='14' width='2' height='2' fill='#424242'/>
-  <rect x='8' y='14' width='2' height='2' fill='#424242'/>
-</svg>`);
-
-const SPR_TILE_PLAZA = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#d4c4a1'/>
-  <rect x='0' y='7' width='16' height='2' fill='#c0b091'/>
-  <rect x='7' y='0' width='2' height='16' fill='#c0b091'/>
-  <rect x='2' y='2' width='4' height='4' fill='#e5d4af'/>
-  <rect x='10' y='10' width='4' height='4' fill='#e5d4af'/>
-</svg>`);
-
-function houseRoofTile(color: string, side: "left" | "right") {
-  const darker = side === "left" ? "#4c1d95" : "#5b21b6";
-  const lighter = side === "left" ? "#a855f7" : "#c084fc";
-  const polygon =
-    side === "left"
-      ? "0,12 8,2 8,16 0,16"
-      : "8,2 16,12 16,16 8,16";
-  const edgeX = side === "left" ? 7 : 8;
-  return dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-    <rect width='16' height='16' fill='${color}'/>
-    <polygon points='${polygon}' fill='${lighter}'/>
-    <rect x='${edgeX}' y='2' width='1' height='14' fill='${darker}'/>
-    <rect x='0' y='12' width='16' height='1' fill='${darker}'/>
-  </svg>`);
-}
-
-function houseWallTile(side: "left" | "right") {
-  const offset = side === "left" ? 0 : 8;
-  const windowX = side === "left" ? 2 : 10;
-  const edgeX = side === "left" ? 0 : 15;
-  const shadowX = side === "left" ? 1 : 14;
-  return dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-    <rect width='16' height='16' fill='#f1ede4'/>
-    <rect x='${edgeX}' y='0' width='1' height='16' fill='#bda48c'/>
-    <rect x='${shadowX}' y='0' width='1' height='16' fill='#d7c2aa'/>
-    <rect x='${windowX}' y='6' width='4' height='4' fill='#90caf9'/>
-    <rect x='${windowX}' y='10' width='4' height='1' fill='#64b5f6'/>
-    <rect x='${windowX + 1}' y='11' width='2' height='1' fill='#bbdefb'/>
-    <rect x='${offset + 2}' y='13' width='4' height='3' fill='#795548'/>
-    <rect x='${offset + 2}' y='14' width='4' height='1' fill='#5d4037'/>
-  </svg>`);
-}
-
-const SPR_TILE_ROOF_LEFT = houseRoofTile("#6d28d9", "left");
-const SPR_TILE_ROOF_RIGHT = houseRoofTile("#7c3aed", "right");
-const SPR_TILE_WALL_LEFT = houseWallTile("left");
-const SPR_TILE_WALL_RIGHT = houseWallTile("right");
-
-const SPR_TILE_TREE = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#46a049'/>
-  <circle cx='8' cy='6' r='5' fill='#2f855a'/>
-  <circle cx='5' cy='8' r='3' fill='#38a169'/>
-  <circle cx='11' cy='8' r='3' fill='#38a169'/>
-  <rect x='7' y='9' width='2' height='5' fill='#6d4c41'/>
-  <rect x='6' y='10' width='4' height='1' fill='#8d6e63'/>
-</svg>`);
-
-const SPR_TILE_FLOWER = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#5dbb63'/>
-  <circle cx='5' cy='5' r='2' fill='#fcd34d'/>
-  <circle cx='11' cy='5' r='2' fill='#f472b6'/>
-  <circle cx='5' cy='11' r='2' fill='#60a5fa'/>
-  <circle cx='11' cy='11' r='2' fill='#f97316'/>
-  <rect x='7' y='7' width='2' height='2' fill='#f9fafb'/>
-</svg>`);
-
-const SPR_TILE_FIELD = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#d19a66'/>
-  <rect x='0' y='3' width='16' height='2' fill='#b07846'/>
-  <rect x='0' y='8' width='16' height='2' fill='#b07846'/>
-  <rect x='0' y='13' width='16' height='2' fill='#b07846'/>
-  <rect x='4' y='0' width='2' height='16' fill='#e0b989'/>
-  <rect x='9' y='0' width='2' height='16' fill='#e0b989'/>
-</svg>`);
-
-const SPR_TILE_SAND = dataUri(`<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'>
-  <rect width='16' height='16' fill='#f0e4c3'/>
-  <rect x='0' y='6' width='16' height='1' fill='#e2d3aa'/>
-  <rect x='0' y='12' width='16' height='1' fill='#e2d3aa'/>
-  <rect x='3' y='3' width='2' height='2' fill='#fff3d6'/>
-  <rect x='11' y='9' width='2' height='2' fill='#fff3d6'/>
-</svg>`);
 
 type AtlasEntry = {
   name: string;
@@ -203,7 +66,7 @@ function parseAtlasDescription(xml: string): Map<string, AtlasEntry> {
       y: Number(attributes.y ?? 0),
       width: Number(attributes.width ?? 0),
       height: Number(attributes.height ?? 0),
-      description: attributes.description,
+      description: attributes.description ?? attributes.desc,
     };
     entries.set(name, entry);
   }
@@ -228,56 +91,22 @@ function atlas(name: string): TileCoord {
   ];
 }
 
+const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
+const DEFAULT_POI_TILE = atlas("mapTile_179.png");
+
 const TILE_KIND = {
   GRASS: 0,
   PATH: 1,
   WATER: 2,
-  PLAZA: 3,
-  ROOF_LEFT: 4,
-  ROOF_RIGHT: 5,
-  WALL_LEFT: 6,
-  WALL_RIGHT: 7,
-  TREE: 8,
-  FLOWER: 9,
-  FIELD: 10,
-  SAND: 11,
+  SAND: 3,
+  TREE: 4,
+  FLOWER: 5,
+  FIELD: 6,
 } as const;
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
 
-const TILE_DEFINITIONS: Record<
-  TileKind,
-  { sprite: string; highlight?: boolean }
-> = {
-  [TILE_KIND.GRASS]: { sprite: SPR_TILE_GRASS },
-  [TILE_KIND.PATH]: { sprite: SPR_TILE_PATH, highlight: true },
-  [TILE_KIND.WATER]: { sprite: SPR_TILE_WATER },
-  [TILE_KIND.PLAZA]: { sprite: SPR_TILE_PLAZA, highlight: true },
-  [TILE_KIND.ROOF_LEFT]: { sprite: SPR_TILE_ROOF_LEFT },
-  [TILE_KIND.ROOF_RIGHT]: { sprite: SPR_TILE_ROOF_RIGHT },
-  [TILE_KIND.WALL_LEFT]: { sprite: SPR_TILE_WALL_LEFT },
-  [TILE_KIND.WALL_RIGHT]: { sprite: SPR_TILE_WALL_RIGHT },
-  [TILE_KIND.TREE]: { sprite: SPR_TILE_TREE },
-  [TILE_KIND.FLOWER]: { sprite: SPR_TILE_FLOWER },
-  [TILE_KIND.FIELD]: { sprite: SPR_TILE_FIELD },
-  [TILE_KIND.SAND]: { sprite: SPR_TILE_SAND },
-};
-
-const BLOCKING_TILES = new Set<TileKind>([
-  TILE_KIND.WATER,
-  TILE_KIND.ROOF_LEFT,
-  TILE_KIND.ROOF_RIGHT,
-  TILE_KIND.WALL_LEFT,
-  TILE_KIND.WALL_RIGHT,
-  TILE_KIND.TREE,
-  TILE_KIND.FLOWER,
-  TILE_KIND.FIELD,
-]);
-
-const HIGHLIGHT_TILES = new Set<TileKind>([
-  TILE_KIND.PATH,
-  TILE_KIND.PLAZA,
-]);
+const HIGHLIGHT_TILES = new Set<TileKind>([TILE_KIND.PATH]);
 
 type TilesetMode = "builtin" | "atlas";
 
@@ -290,7 +119,6 @@ type Tileset = {
   map: {
     grass: TileCoord;
     path: TileCoord;
-    plaza: TileCoord;
     farmland: TileCoord;
     sand: {
       center: TileCoord;
@@ -327,42 +155,36 @@ const DEFAULT_ATLAS: Tileset = {
   url: mapPackAtlas,
   size: DEFAULT_TILE_SIZE,
   map: {
-    grass: atlas("mapTile_010.png"),
-    path: atlas("mapTile_185.png"),
-    plaza: atlas("mapTile_187.png"),
-    farmland: atlas("mapTile_101.png"),
+    grass: atlas("mapTile_022.png"),
+    path: atlas("mapTile_128.png"),
+    farmland: atlas("mapTile_087.png"),
     sand: {
-      center: atlas("mapTile_061.png"),
-      north: atlas("mapTile_053.png"),
-      south: atlas("mapTile_054.png"),
-      east: atlas("mapTile_056.png"),
-      west: atlas("mapTile_055.png"),
-      northeast: atlas("mapTile_057.png"),
-      northwest: atlas("mapTile_059.png"),
-      southeast: atlas("mapTile_058.png"),
-      southwest: atlas("mapTile_060.png"),
+      center: atlas("mapTile_017.png"),
+      north: atlas("mapTile_002.png"),
+      south: atlas("mapTile_047.png"),
+      east: atlas("mapTile_018.png"),
+      west: atlas("mapTile_016.png"),
+      northeast: atlas("mapTile_003.png"),
+      northwest: atlas("mapTile_001.png"),
+      southeast: atlas("mapTile_033.png"),
+      southwest: atlas("mapTile_046.png"),
     },
     water: {
-      deep: atlas("mapTile_004.png"),
-      shore: atlas("mapTile_003.png"),
+      deep: atlas("mapTile_188.png"),
+      shore: atlas("mapTile_171.png"),
     },
     details: {
-      tree: atlas("mapTile_118.png"),
-      flower: atlas("mapTile_137.png"),
+      tree: atlas("mapTile_115.png"),
+      flower: atlas("mapTile_054.png"),
     },
     houses: {
-      clarte: atlas("mapTile_141.png"),
-      creation: atlas("mapTile_147.png"),
-      decision: atlas("mapTile_145.png"),
-      ethique: atlas("mapTile_134.png"),
-      townHall: atlas("mapTile_146.png"),
+      clarte: [...DEFAULT_POI_TILE] as TileCoord,
+      creation: [...DEFAULT_POI_TILE] as TileCoord,
+      decision: [...DEFAULT_POI_TILE] as TileCoord,
+      ethique: [...DEFAULT_POI_TILE] as TileCoord,
+      townHall: [...DEFAULT_POI_TILE] as TileCoord,
     },
-    player: [
-      atlas("mapTile_177.png"),
-      atlas("mapTile_178.png"),
-      atlas("mapTile_179.png"),
-      atlas("mapTile_180.png"),
-    ],
+    player: DEFAULT_PLAYER_FRAMES.map((frame) => [...frame] as TileCoord),
   },
 };
 
@@ -372,7 +194,6 @@ function cloneTileset(source: Tileset): Tileset {
     map: {
       grass: [...source.map.grass] as TileCoord,
       path: [...source.map.path] as TileCoord,
-      plaza: [...source.map.plaza] as TileCoord,
       farmland: [...source.map.farmland] as TileCoord,
       sand: {
         center: [...source.map.sand.center] as TileCoord,
@@ -440,7 +261,6 @@ function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
     map: {
       grass: normalizeCoord(map.grass as TileCoord | undefined, base.map.grass),
       path: normalizeCoord(map.path as TileCoord | undefined, base.map.path),
-      plaza: normalizeCoord(map.plaza as TileCoord | undefined, base.map.plaza),
       farmland: normalizeCoord(
         map.farmland as TileCoord | undefined,
         base.map.farmland
@@ -583,6 +403,9 @@ function SpriteFromAtlas({
   const isRect = rect.length >= 3;
   const baseWidth = isRect ? rect[2] ?? ts.size : ts.size;
   const baseHeight = isRect ? rect[3] ?? ts.size : ts.size;
+  if (!baseWidth || !baseHeight) {
+    return null;
+  }
   const sourceX = isRect ? rect[0] : rect[0] * ts.size;
   const sourceY = isRect ? rect[1] : rect[1] * ts.size;
   const offsetX = -sourceX;
@@ -769,41 +592,19 @@ function generateWorld(): number[][] {
     }
   };
 
-  const placeHouse = (x: number, y: number) => {
-    if (map[y]?.[x] !== undefined) map[y][x] = TILE_KIND.ROOF_LEFT;
-    if (map[y]?.[x + 1] !== undefined) map[y][x + 1] = TILE_KIND.ROOF_RIGHT;
-    if (map[y + 1]?.[x] !== undefined) map[y + 1][x] = TILE_KIND.WALL_LEFT;
-    if (map[y + 1]?.[x + 1] !== undefined)
-      map[y + 1][x + 1] = TILE_KIND.WALL_RIGHT;
+  const plantFlower = (x: number, y: number) => {
+    if (map[y]?.[x] !== undefined) {
+      map[y][x] = TILE_KIND.FLOWER;
+    }
   };
 
-  const placeHouseWithYard = (x: number, y: number) => {
-    placeHouse(x, y);
-    drawHorizontal(x - 1, x + 2, y + 2);
-    if (map[y + 2]?.[x - 1] !== undefined)
-      map[y + 2][x - 1] = TILE_KIND.FLOWER;
-    if (map[y + 2]?.[x + 2] !== undefined)
-      map[y + 2][x + 2] = TILE_KIND.FLOWER;
-    plantTree(x - 1, y - 1);
-    plantTree(x + 2, y - 1);
+  const scatterFlowers = (points: Array<[number, number]>) => {
+    for (const [x, y] of points) {
+      plantFlower(x, y);
+    }
   };
 
-  const placeGarden = (startX: number, startY: number) => {
-    fillRect(startX, startY, 2, 2, TILE_KIND.FLOWER);
-    plantTree(startX - 1, startY);
-    plantTree(startX + 2, startY + 1);
-  };
-
-  const placeNeighborhood = (originX: number, originY: number) => {
-    placeHouseWithYard(originX, originY);
-    placeHouseWithYard(originX + 6, originY);
-    placeHouseWithYard(originX, originY + 6);
-    placeHouseWithYard(originX + 6, originY + 6);
-    placeGarden(originX + 1, originY + 4);
-    placeGarden(originX + 7, originY + 2);
-  };
-
-  // Surround the map with water and sand beaches
+  // Coastline
   for (let x = 0; x < WORLD_WIDTH; x++) {
     map[0][x] = TILE_KIND.WATER;
     map[WORLD_HEIGHT - 1][x] = TILE_KIND.WATER;
@@ -821,72 +622,84 @@ function generateWorld(): number[][] {
     map[y][WORLD_WIDTH - 2] = TILE_KIND.SAND;
   }
 
-  // Lakes and leisure areas
-  fillRect(6, 5, 12, 5, TILE_KIND.WATER);
-  outlineRect(5, 4, 14, 7, TILE_KIND.SAND);
-  fillRect(44, 32, 10, 5, TILE_KIND.WATER);
-  outlineRect(43, 31, 12, 7, TILE_KIND.SAND);
+  // Ponds and beaches
+  fillRect(6, 5, 10, 4, TILE_KIND.WATER);
+  outlineRect(5, 4, 12, 6, TILE_KIND.SAND);
+  fillRect(42, 30, 10, 6, TILE_KIND.WATER);
+  outlineRect(41, 29, 12, 8, TILE_KIND.SAND);
 
-  // Farmland
-  fillRect(8, 34, 12, 6, TILE_KIND.FIELD);
-  drawHorizontal(7, 21, 34);
-  drawHorizontal(7, 21, 39);
-  drawVertical(34, 39, 7);
-  drawVertical(34, 39, 21);
+  // Farmland belt in the south-west
+  fillRect(6, 34, 12, 6, TILE_KIND.FIELD);
   scatterTrees([
-    [6, 33],
-    [22, 33],
-    [6, 40],
-    [22, 40],
+    [5, 33],
+    [18, 33],
+    [5, 41],
+    [18, 41],
   ]);
 
-  // Road network connecting quarters
-  drawHorizontal(4, WORLD_WIDTH - 5, 22);
-  drawVertical(6, WORLD_HEIGHT - 7, 30);
+  // Flower meadows near the creative quarter
+  fillRect(38, 16, 6, 4, TILE_KIND.FLOWER);
+  fillRect(38, 28, 6, 4, TILE_KIND.FLOWER);
+  scatterFlowers([
+    [32, 14],
+    [46, 18],
+    [34, 30],
+    [48, 30],
+  ]);
 
-  drawVertical(6, 20, 18);
-  drawVertical(6, 20, 42);
-  drawVertical(24, 38, 18);
-  drawVertical(24, 38, 42);
-
-  drawHorizontal(6, 24, 12);
-  drawHorizontal(36, WORLD_WIDTH - 6, 12);
-  drawHorizontal(6, 24, 32);
-  drawHorizontal(36, WORLD_WIDTH - 6, 32);
-
-  drawHorizontal(27, 33, 18);
-  drawHorizontal(27, 33, 26);
-  drawVertical(19, 25, 27);
-  drawVertical(19, 25, 34);
-
-  // Plazas for each quarter and central hub
-  fillRect(10, 9, 10, 7, TILE_KIND.PLAZA);
-  fillRect(40, 9, 10, 7, TILE_KIND.PLAZA);
-  fillRect(10, 29, 10, 7, TILE_KIND.PLAZA);
-  fillRect(40, 29, 10, 7, TILE_KIND.PLAZA);
-  fillRect(26, 20, 10, 6, TILE_KIND.PLAZA);
-
-  // Neighbourhood decorations
-  placeNeighborhood(7, 5);
-  placeNeighborhood(41, 5);
-  placeNeighborhood(7, 25);
-  placeNeighborhood(41, 25);
-
+  // Woodland clusters for ambiance
   scatterTrees([
+    [22, 11],
+    [20, 18],
+    [34, 14],
+    [22, 27],
+    [28, 34],
+    [50, 26],
+    [10, 26],
+  ]);
+
+  // Additional flowers along the central path
+  scatterFlowers([
     [26, 18],
-    [35, 18],
-    [26, 27],
-    [35, 27],
-    [30, 15],
-    [30, 28],
-    [18, 21],
-    [42, 21],
+    [34, 18],
+    [16, 23],
+    [42, 23],
+    [32, 31],
   ]);
 
-  placeGarden(24, 16);
-  placeGarden(36, 16);
-  placeGarden(24, 28);
-  placeGarden(36, 28);
+  // Path network connecting the quarters
+  drawVertical(6, 38, 30);
+  drawHorizontal(12, 48, 22);
+  drawVertical(12, 32, 14);
+  drawVertical(12, 32, 44);
+  drawHorizontal(14, 30, 12);
+  drawHorizontal(30, 44, 12);
+  drawHorizontal(14, 44, 32);
+  drawHorizontal(20, 40, 16);
+  drawHorizontal(20, 40, 28);
+  drawVertical(16, 28, 24);
+  drawVertical(16, 28, 36);
+
+  // Small plazas at each point of interest
+  fillRect(13, 11, 3, 3, TILE_KIND.PATH);
+  fillRect(43, 11, 3, 3, TILE_KIND.PATH);
+  fillRect(13, 31, 3, 3, TILE_KIND.PATH);
+  fillRect(43, 31, 3, 3, TILE_KIND.PATH);
+  fillRect(29, 21, 3, 3, TILE_KIND.PATH);
+
+  // Scenic overlooks near the ponds
+  fillRect(24, 8, 6, 3, TILE_KIND.PATH);
+  fillRect(36, 34, 6, 3, TILE_KIND.PATH);
+
+  // Decorative trees framing the plazas
+  scatterTrees([
+    [12, 10],
+    [46, 10],
+    [12, 30],
+    [46, 30],
+    [18, 20],
+    [42, 24],
+  ]);
 
   return map;
 }
@@ -920,20 +733,24 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function PlayerSprite({ ts, step }: { ts: Tileset; step: number }) {
-  if (ts.mode === "atlas" && ts.url) {
-    const frame = ts.map.player[step % ts.map.player.length];
-    return <SpriteFromAtlas ts={ts} coord={frame} />;
+  const hasCustomFrames =
+    ts.mode === "atlas" && ts.url && ts.map.player.length > 0;
+  const frames = hasCustomFrames ? ts.map.player : DEFAULT_PLAYER_FRAMES;
+  const frame = frames[step % frames.length] ?? frames[0];
+  const renderTileset = hasCustomFrames ? ts : DEFAULT_ATLAS;
+  const tileSize = renderTileset.size ?? DEFAULT_TILE_SIZE;
+  const width =
+    (Array.isArray(frame) && typeof frame[2] === "number"
+      ? frame[2]
+      : tileSize) ?? tileSize;
+  const height =
+    (Array.isArray(frame) && typeof frame[3] === "number"
+      ? frame[3]
+      : tileSize) ?? tileSize;
+  if (width > 0 && height > 0) {
+    return <SpriteFromAtlas ts={renderTileset} coord={frame} />;
   }
-  return (
-    <div
-      className="w-full h-full rounded-sm"
-      style={{
-        backgroundImage: `url(${SPR_PLAYER})`,
-        backgroundSize: "cover",
-        imageRendering: "pixelated",
-      }}
-    />
-  );
+  return null;
 }
 
 function BuildingSprite({
@@ -943,36 +760,29 @@ function BuildingSprite({
   id: QuarterId;
   ts: Tileset;
 }) {
-  if (ts.mode === "atlas" && ts.url) {
-    const coord =
-      id === "mairie"
-        ? ts.map.houses.townHall
-        : id === "clarte"
-        ? ts.map.houses.clarte
-        : id === "creation"
-        ? ts.map.houses.creation
-        : id === "decision"
-        ? ts.map.houses.decision
-        : ts.map.houses.ethique;
-    return <SpriteFromAtlas ts={ts} coord={coord} />;
+  const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
+  const coord =
+    id === "mairie"
+      ? activeTileset.map.houses.townHall
+      : id === "clarte"
+      ? activeTileset.map.houses.clarte
+      : id === "creation"
+      ? activeTileset.map.houses.creation
+      : id === "decision"
+      ? activeTileset.map.houses.decision
+      : activeTileset.map.houses.ethique;
+  const width =
+    (Array.isArray(coord) && typeof coord[2] === "number"
+      ? coord[2]
+      : activeTileset.size) ?? activeTileset.size;
+  const height =
+    (Array.isArray(coord) && typeof coord[3] === "number"
+      ? coord[3]
+      : activeTileset.size) ?? activeTileset.size;
+  if (width > 0 && height > 0) {
+    return <SpriteFromAtlas ts={activeTileset} coord={coord} />;
   }
-
-  let src = SPR_HOUSE_GREEN;
-  if (id === "creation") src = SPR_HOUSE_BLUE;
-  else if (id === "decision") src = SPR_HOUSE_RED;
-  else if (id === "ethique") src = SPR_HOUSE_PURP;
-  else if (id === "mairie") src = SPR_TOWN_HALL;
-  return (
-    <div
-      className="w-5 h-5"
-      style={{
-        backgroundImage: `url(${src})`,
-        backgroundSize: "cover",
-        imageRendering: "pixelated",
-      }}
-      aria-hidden
-    />
-  );
+  return null;
 }
 
 function isWalkable(x: number, y: number) {
@@ -980,7 +790,7 @@ function isWalkable(x: number, y: number) {
     return false;
   }
   const tile = world[y][x] as TileKind;
-  return !BLOCKING_TILES.has(tile);
+  return tile === TILE_KIND.PATH;
 }
 
 function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
@@ -1020,21 +830,6 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
       </button>
       <div />
     </div>
-  );
-}
-
-function BuiltinTile({ sprite }: { sprite: string }) {
-  return (
-    <div
-      className="rounded-sm"
-      style={{
-        width: TILE,
-        height: TILE,
-        backgroundImage: `url(${sprite})`,
-        backgroundSize: "cover",
-        imageRendering: "pixelated",
-      }}
-    />
   );
 }
 
@@ -1094,8 +889,6 @@ function getAtlasTile(
       return ts.map.grass;
     case TILE_KIND.PATH:
       return ts.map.path;
-    case TILE_KIND.PLAZA:
-      return ts.map.plaza;
     case TILE_KIND.WATER:
       return getWaterTileCoord(x, y, ts);
     case TILE_KIND.SAND:
@@ -1105,12 +898,6 @@ function getAtlasTile(
     case TILE_KIND.TREE:
       return ts.map.details.tree;
     case TILE_KIND.FLOWER:
-      return ts.map.details.flower;
-    case TILE_KIND.ROOF_LEFT:
-    case TILE_KIND.WALL_LEFT:
-      return ts.map.details.tree;
-    case TILE_KIND.ROOF_RIGHT:
-    case TILE_KIND.WALL_RIGHT:
       return ts.map.details.flower;
     default:
       return ts.map.grass;
@@ -1129,15 +916,13 @@ function TileWithTs({
   y: number;
 }) {
   const tileKind = (kind as TileKind) ?? TILE_KIND.GRASS;
-  const definition =
-    TILE_DEFINITIONS[tileKind] ?? TILE_DEFINITIONS[TILE_KIND.GRASS];
-  if (ts.mode === "atlas" && ts.url) {
-    const coord = getAtlasTile(tileKind, ts, x, y);
-    if (coord) {
-      return <SpriteFromAtlas ts={ts} coord={coord} scale={TILE} />;
-    }
+  const activeTileset =
+    ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
+  const coord = getAtlasTile(tileKind, activeTileset, x, y);
+  if (!coord) {
+    return null;
   }
-  return <BuiltinTile sprite={definition.sprite} />;
+  return <SpriteFromAtlas ts={activeTileset} coord={coord} scale={TILE} />;
 }
 
 function Modal({
