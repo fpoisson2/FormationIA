@@ -28,6 +28,7 @@ except ImportError as exc:  # pragma: no cover - module availability depends on 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 XML_PATH = REPO_ROOT / "frontend" / "src" / "assets" / "kenney_map-pack" / "Spritesheet" / "mapPack_enriched.xml"
 PNG_DIR = REPO_ROOT / "frontend" / "src" / "assets" / "kenney_map-pack" / "PNG"
+DEFAULT_OUTPUT_DIR = PNG_DIR.parent / "PNG_with_metadata"
 
 IGNORED_XML_KEYS = {"x", "y", "width", "height"}
 
@@ -73,7 +74,9 @@ def merge_png_metadata(image: Image.Image, new_meta: dict[str, str]) -> PngImage
     return png_info
 
 
-def update_png(name: str, metadata: dict[str, str], dry_run: bool = False) -> None:
+def update_png(
+    name: str, metadata: dict[str, str], output_dir: Path, dry_run: bool = False
+) -> None:
     """Update a single PNG file with the provided metadata."""
     png_path = PNG_DIR / name
     if not png_path.exists():
@@ -81,13 +84,16 @@ def update_png(name: str, metadata: dict[str, str], dry_run: bool = False) -> No
         return
 
     if dry_run:
-        print(f"[DRY-RUN] {name} ← {json.dumps(metadata, ensure_ascii=False)}")
+        target_path = output_dir / name
+        print(f"[DRY-RUN] {target_path} ← {json.dumps(metadata, ensure_ascii=False)}")
         return
 
     with Image.open(png_path) as image:
         png_info = merge_png_metadata(image, metadata)
-        image.save(png_path, pnginfo=png_info)
-        print(f"[OK] Métadonnées injectées dans {name}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        target_path = output_dir / name
+        image.save(target_path, pnginfo=png_info)
+        print(f"[OK] Métadonnées injectées dans {target_path}")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -103,16 +109,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Nombre maximum de fichiers PNG à traiter (pour tests).",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Dossier de sortie pour les PNG enrichis (défaut : {DEFAULT_OUTPUT_DIR}).",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     textures = collect_metadata()
+    output_dir = args.output_dir
+
+    if output_dir.resolve() == PNG_DIR.resolve():
+        raise SystemExit(
+            "Le dossier de sortie doit être distinct du dossier source des PNG."
+        )
 
     processed = 0
     for name, metadata in textures.items():
-        update_png(name, metadata, dry_run=args.dry_run)
+        update_png(name, metadata, output_dir=output_dir, dry_run=args.dry_run)
         processed += 1
         if args.limit is not None and processed >= args.limit:
             break
