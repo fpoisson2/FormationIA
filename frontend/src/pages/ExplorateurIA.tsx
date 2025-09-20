@@ -1124,24 +1124,35 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   );
 }
 
-function tileAt(x: number, y: number): TileKind | null {
+function tileLayersAt(
+  x: number,
+  y: number
+): { base: TileKind | null; overlay: TileKind | null } {
   if (y < 0 || y >= world.length) {
-    return null;
+    return { base: null, overlay: null };
   }
   const row = world[y];
   if (!row || x < 0 || x >= row.length) {
-    return null;
+    return { base: null, overlay: null };
   }
-  // Pour les connexions de chemins, regarder d'abord l'overlay puis la base
   const terrain = row[x];
-  return terrain.overlay || terrain.base;
+  return {
+    base: terrain.base ?? null,
+    overlay: terrain.overlay ?? null,
+  };
+}
+
+function tileAt(x: number, y: number): TileKind | null {
+  const { base, overlay } = tileLayersAt(x, y);
+  // Pour les connexions de chemins, regarder d'abord l'overlay puis la base
+  return overlay ?? base;
 }
 
 function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
-  const northWater = tileAt(x, y - 1) === TILE_KIND.WATER;
-  const southWater = tileAt(x, y + 1) === TILE_KIND.WATER;
-  const westWater = tileAt(x - 1, y) === TILE_KIND.WATER;
-  const eastWater = tileAt(x + 1, y) === TILE_KIND.WATER;
+  const northWater = tileLayersAt(x, y - 1).base === TILE_KIND.WATER;
+  const southWater = tileLayersAt(x, y + 1).base === TILE_KIND.WATER;
+  const westWater = tileLayersAt(x - 1, y).base === TILE_KIND.WATER;
+  const eastWater = tileLayersAt(x + 1, y).base === TILE_KIND.WATER;
 
   if (northWater && eastWater) return ts.map.sand.northeast;
   if (southWater && eastWater) return ts.map.sand.southeast;
