@@ -115,6 +115,12 @@ function getTilesByType(type: AtlasEntry["type"], subtype?: string): AtlasEntry[
       if (entry.overlay && entry.transparent_bg === false) {
         continue; // Passer ce sprite
       }
+      if (type === "object" && subtype === "tree") {
+        const description = entry.description?.toLowerCase() ?? "";
+        if (description.includes("neige") || description.includes("mort")) {
+          continue;
+        }
+      }
       results.push(entry);
     }
   }
