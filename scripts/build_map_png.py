@@ -172,10 +172,10 @@ def collect_edge_tiles(
     textures: Dict[str, Texture],
     include_bordure: bool,
     include_falaise: bool,
-) -> Dict[str | None, Dict[Tuple[str, ...], str]]:
+) -> Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]]:
     """Indexe les tuiles de bordure/falaise par sous-type et orientation."""
 
-    result: Dict[str | None, Dict[Tuple[str, ...], str]] = {}
+    result: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]] = {}
     for texture in textures.values():
         if texture.category != "terrain":
             continue
@@ -183,13 +183,20 @@ def collect_edge_tiles(
             continue
 
         type_tokens = (texture.type or "").split()
-        if include_falaise and "falaise" in type_tokens:
-            result.setdefault(texture.subtype, {})[texture.connections] = texture.name
-        elif include_bordure and (
-            "bordure" in type_tokens
-            or ("coin_interieur" in type_tokens and "falaise" not in type_tokens)
+        is_falaise = "falaise" in type_tokens
+        is_interior = "coin_interieur" in type_tokens
+
+        if is_falaise and not include_falaise:
+            continue
+        if not is_falaise and not (
+            include_bordure
+            and ("bordure" in type_tokens or is_interior)
         ):
-            result.setdefault(texture.subtype, {})[texture.connections] = texture.name
+            continue
+
+        orientation = texture.connections
+        bucket = result.setdefault(texture.subtype, {}).setdefault(orientation, {})
+        bucket["interior" if is_interior else "exterior"] = texture.name
 
     return result
 
@@ -379,6 +386,24 @@ def carve_path(
     length = min(desired_length, len(cells))
     min_length = 1
 
+    def is_too_close(candidate: tuple[int, int], current_path: List[tuple[int, int]]) -> bool:
+        """Vérifie qu'une case ne longe pas un segment déjà visité."""
+
+        if not current_path:
+            return False
+
+        allowed: set[tuple[int, int]] = {current_path[-1]}
+        if len(current_path) >= 2:
+            allowed.add(current_path[-2])
+
+        cx, cy = candidate
+        for px, py in current_path:
+            if (px, py) in allowed:
+                continue
+            if abs(cx - px) + abs(cy - py) == 1:
+                return True
+        return False
+
     for current_length in range(length, min_length - 1, -1):
         for _ in range(200):
             start = rng.choice(cells)
@@ -393,16 +418,20 @@ def carve_path(
                     return path
 
                 node, options = stack[-1]
-                while options and options[-1] in visited:
-                    options.pop()
+                nxt: tuple[int, int] | None = None
+                while options:
+                    candidate = options.pop()
+                    if candidate in visited or is_too_close(candidate, path):
+                        continue
+                    nxt = candidate
+                    break
 
-                if not options:
+                if nxt is None:
                     stack.pop()
                     if stack:
                         path.pop()
                     continue
 
-                nxt = options.pop()
                 visited.add(nxt)
                 path.append(nxt)
                 stack[-1] = (node, options)
@@ -431,39 +460,69 @@ def distribute_indices(total: int, count: int) -> List[int]:
     return [round(i * step) for i in range(count)]
 
 
-def compute_edge_keys(missing: set[str]) -> List[Tuple[str, ...]]:
-    """Décompose les directions manquantes en clés d'orientation."""
+def classify_edge_cell(
+    cell: tuple[int, int],
+    island: set[tuple[int, int]],
+) -> tuple[Tuple[str, ...], str] | None:
+    """Détermine la tuile de contour à utiliser pour une case d'eau donnée."""
 
-    keys: List[Tuple[str, ...]] = []
-    diagonals = (
-        ("north", "west", "northwest"),
-        ("north", "east", "northeast"),
-        ("south", "west", "southwest"),
-        ("south", "east", "southeast"),
-    )
+    x, y = cell
+    north = (x, y - 1) in island
+    south = (x, y + 1) in island
+    east = (x + 1, y) in island
+    west = (x - 1, y) in island
+    northeast = (x + 1, y - 1) in island
+    northwest = (x - 1, y - 1) in island
+    southeast = (x + 1, y + 1) in island
+    southwest = (x - 1, y + 1) in island
 
-    for first, second, diag in diagonals:
-        if first in missing and second in missing:
-            keys.append((diag,))
-            missing.remove(first)
-            missing.remove(second)
+    if not (north or south or east or west or northeast or northwest or southeast or southwest):
+        return None
 
-    for direction in sorted(missing):
-        keys.append((direction,))
+    # Coins intérieurs : la case touche l'île sur deux axes adjacents.
+    if north and west and not south and not east:
+        return (("northwest",), "interior")
+    if north and east and not south and not west:
+        return (("northeast",), "interior")
+    if south and west and not north and not east:
+        return (("southwest",), "interior")
+    if south and east and not north and not west:
+        return (("southeast",), "interior")
 
-    return keys
+    # Bords droits (cases adjacentes sur un seul axe cardinal).
+    if south:
+        return (("north",), "exterior")
+    if north:
+        return (("south",), "exterior")
+    if east:
+        return (("west",), "exterior")
+    if west:
+        return (("east",), "exterior")
+
+    # Coins extérieurs (uniquement la diagonale touche l'île).
+    if southwest:
+        return (("northeast",), "exterior")
+    if southeast:
+        return (("northwest",), "exterior")
+    if northwest:
+        return (("southeast",), "exterior")
+    if northeast:
+        return (("southwest",), "exterior")
+
+    return None
 
 
 def choose_edge_tile(
     subtype: str,
     orientation: Tuple[str, ...],
+    orientation_type: str,
     preferred_style: str,
-    bordure_tiles: Dict[str | None, Dict[Tuple[str, ...], str]],
-    falaise_tiles: Dict[str | None, Dict[Tuple[str, ...], str]],
+    bordure_tiles: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]],
+    falaise_tiles: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]],
 ) -> str | None:
     """Sélectionne la tuile de contour appropriée avec repli."""
 
-    lookup_order: List[Dict[str | None, Dict[Tuple[str, ...], str]]] = []
+    lookup_order: List[Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]]]
     if preferred_style == "falaise":
         lookup_order = [falaise_tiles, bordure_tiles]
     elif preferred_style == "bordure":
@@ -471,10 +530,20 @@ def choose_edge_tile(
     else:  # auto
         lookup_order = [falaise_tiles, bordure_tiles]
 
+    fallback_key = "interior" if orientation_type == "exterior" else "exterior"
+
     for index in lookup_order:
         by_subtype = index.get(subtype) or {}
-        if orientation in by_subtype:
-            return by_subtype[orientation]
+        options = by_subtype.get(orientation)
+        if not options:
+            continue
+        if orientation_type in options:
+            return options[orientation_type]
+        if fallback_key in options:
+            return options[fallback_key]
+        # Dernier recours : retourner n'importe quelle variante disponible.
+        for candidate in options.values():
+            return candidate
 
     return None
 
@@ -483,36 +552,40 @@ def compute_island_edges(
     island: set[tuple[int, int]],
     subtype: str,
     preferred_style: str,
-    bordure_tiles: Dict[str | None, Dict[Tuple[str, ...], str]],
-    falaise_tiles: Dict[str | None, Dict[Tuple[str, ...], str]],
+    bordure_tiles: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]],
+    falaise_tiles: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]],
+    width: int,
+    height: int,
 ) -> List[tuple[str, tuple[int, int]]]:
     """Calcule les tuiles de contour à superposer sur l'île."""
 
     overlays: List[tuple[str, tuple[int, int]]] = []
+    candidates: set[tuple[int, int]] = set()
     for (x, y) in island:
-        missing: set[str] = set()
-        if (x, y - 1) not in island:
-            missing.add("north")
-        if (x + 1, y) not in island:
-            missing.add("east")
-        if (x, y + 1) not in island:
-            missing.add("south")
-        if (x - 1, y) not in island:
-            missing.add("west")
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in island:
+                    candidates.add((nx, ny))
 
-        if not missing:
+    for (x, y) in sorted(candidates, key=lambda item: (item[1], item[0])):
+        classification = classify_edge_cell((x, y), island)
+        if not classification:
             continue
 
-        for orientation in compute_edge_keys(missing):
-            tile = choose_edge_tile(
-                subtype,
-                orientation,
-                preferred_style,
-                bordure_tiles,
-                falaise_tiles,
-            )
-            if tile:
-                overlays.append((tile, (x, y)))
+        orientation, orientation_type = classification
+        tile = choose_edge_tile(
+            subtype,
+            orientation,
+            orientation_type,
+            preferred_style,
+            bordure_tiles,
+            falaise_tiles,
+        )
+        if tile:
+            overlays.append((tile, (x, y)))
 
     return overlays
 
@@ -581,6 +654,8 @@ def assemble_map(
         edge_style,
         bordure_tiles,
         falaise_tiles,
+        width,
+        height,
     )
     for tile_name, (x, y) in edge_overlays:
         tile_image = library.get(tile_name)
@@ -594,7 +669,8 @@ def assemble_map(
     if not numbers_available:
         raise SystemExit("Aucun chiffre marchable n'a été trouvé dans le XML.")
 
-    desired_length = min(len(island_cells), max(numbers_requested, (width + height) // 2))
+    coverage_target = max(4, int(len(island_cells) * 0.6))
+    desired_length = max(numbers_requested, coverage_target)
     path_cells_list = carve_path(island_cells, desired_length, rng)
     path_cells = set(path_cells_list)
 
@@ -613,7 +689,8 @@ def assemble_map(
 
     # Positionne les chiffres le long du trajet.
     digit_positions: List[tuple[int, int]] = []
-    indices = distribute_indices(len(path_cells_list), min(numbers_requested, len(numbers_available)))
+    max_digits = min(numbers_requested, len(numbers_available), len(path_cells_list))
+    indices = distribute_indices(len(path_cells_list), max_digits)
     for index in indices:
         if 0 <= index < len(path_cells_list):
             digit_positions.append(path_cells_list[index])
