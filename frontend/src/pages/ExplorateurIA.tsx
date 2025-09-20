@@ -1178,12 +1178,24 @@ function getPathTileCoord(x: number, y: number): TileCoord {
   if (north) directionList.push("north");
   if (south) directionList.push("south");
   if (west) directionList.push("west");
+  directionList.sort();
   const connectionString = directionList.join(",");
 
   // Chercher une tuile qui correspond exactement aux connexions, en priorisant les tuiles recommandées
   const availableMatches = [];
   for (const [tileName, entry] of MAP_PACK_ATLAS.entries()) {
-    if (entry.type === "path" && entry.connections === connectionString) {
+    if (entry.type !== "path" || !entry.connections) {
+      continue;
+    }
+
+    const entryConnections = entry.connections
+      .split(",")
+      .map((dir) => dir.trim())
+      .filter(Boolean)
+      .sort()
+      .join(",");
+
+    if (entryConnections === connectionString) {
       // Tuiles prioritaires spécifiées par l'utilisateur
       const priorityTiles = [
         "mapTile_126.png", "mapTile_127.png", "mapTile_128.png", "mapTile_123.png", "mapTile_124.png",
@@ -1230,8 +1242,8 @@ function getPathTileCoord(x: number, y: number): TileCoord {
     if (!east) return atlas("mapTile_126.png"); // nord-sud simple au lieu du T
     if (!west) return atlas("mapTile_126.png"); // nord-sud simple au lieu du T
   } else {
-    // 4 connexions : préférer une tuile simple au lieu du croisement complet
-    return atlas("mapTile_126.png"); // trajet nord-sud simple
+    // 4 connexions : préférer la tuile de croisement NESO standard
+    return atlas("mapTile_128.png");
   }
 
   return atlas("mapTile_126.png"); // Default: ligne droite nord-sud
