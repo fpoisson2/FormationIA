@@ -795,8 +795,13 @@ function generateWorld(): TerrainTile[][] {
 
   // Ponds and beaches
   fillRect(6, 5, 10, 4, TILE_KIND.WATER);
-  outlineRect(5, 4, 12, 6, TILE_KIND.SAND, true); // true = en overlay
+  // Bordure de sable en base pour éviter que le décor repose sur du gazon
+  outlineRect(5, 4, 12, 6, TILE_KIND.SAND);
+  // Conserver une transition douce éventuellement utilisée par le rendu
+  outlineRect(5, 4, 12, 6, TILE_KIND.SAND, true);
+
   fillRect(42, 30, 10, 6, TILE_KIND.WATER);
+  outlineRect(41, 29, 12, 8, TILE_KIND.SAND);
   outlineRect(41, 29, 12, 8, TILE_KIND.SAND, true);
 
   // Farmland belt in the south-west
