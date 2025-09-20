@@ -79,6 +79,15 @@ class Texture:
     description: str | None
 
 
+@dataclass(frozen=True)
+class EdgePlacement:
+    """Décrit l'application d'une tuile de contour sur l'île."""
+
+    tile: str
+    position: tuple[int, int]
+    is_outside: bool
+
+
 def parse_connections(raw: str | None) -> Tuple[str, ...]:
     """Transforme la chaîne de directions en tuple trié."""
 
@@ -648,12 +657,32 @@ def compute_island_edges(
     falaise_tiles: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]],
     width: int,
     height: int,
-) -> List[tuple[str, tuple[int, int]]]:
+) -> List[EdgePlacement]:
     """Calcule les tuiles de contour à superposer sur l'île."""
 
-    overlays: List[tuple[str, tuple[int, int]]] = []
+    orientation_to_delta: Dict[str, tuple[int, int]] = {
+        "north": (0, 1),
+        "south": (0, -1),
+        "east": (-1, 0),
+        "west": (1, 0),
+        "northeast": (-1, 1),
+        "northwest": (1, 1),
+        "southeast": (-1, -1),
+        "southwest": (1, -1),
+    }
+
+    def priority(orientation: Tuple[str, ...], orientation_type: str) -> tuple[int, int]:
+        direction = orientation[0] if orientation else ""
+        is_diagonal = direction in {"northeast", "northwest", "southeast", "southwest"}
+        # Les coins (diagonaux) priment sur les bords, et les variantes interior sur exterior.
+        diagonal_rank = 0 if is_diagonal else 1
+        interior_rank = 0 if orientation_type == "interior" else 1
+        return (diagonal_rank, interior_rank)
+
     candidates: set[tuple[int, int]] = set()
     outside_water = find_outside_water(island, width, height)
+    by_island_cell: Dict[tuple[int, int], tuple[Tuple[str, ...], str, bool]] = {}
+    priorities: Dict[tuple[int, int], tuple[int, int]] = {}
 
     for (x, y) in island:
         for dx in (-1, 0, 1):
@@ -671,7 +700,34 @@ def compute_island_edges(
             continue
 
         orientation, orientation_type = classification
-        effective_style = preferred_style if (is_outside or preferred_style == "bordure") else "bordure"
+        if not orientation:
+            continue
+
+        direction = orientation[0]
+        delta = orientation_to_delta.get(direction)
+        if delta is None:
+            continue
+
+        target = (x + delta[0], y + delta[1])
+        if target not in island:
+            continue
+
+        current_priority = priority(orientation, orientation_type)
+        previous_priority = priorities.get(target)
+        if previous_priority is not None and previous_priority <= current_priority:
+            continue
+
+        priorities[target] = current_priority
+        by_island_cell[target] = (orientation, orientation_type, is_outside)
+
+    overlays: List[EdgePlacement] = []
+    for (x, y) in sorted(by_island_cell, key=lambda item: (item[1], item[0])):
+        orientation, orientation_type, is_outside = by_island_cell[(x, y)]
+        effective_style = (
+            preferred_style
+            if is_outside or preferred_style == "bordure"
+            else "bordure"
+        )
 
         tile = choose_edge_tile(
             subtype,
@@ -682,7 +738,7 @@ def compute_island_edges(
             falaise_tiles,
         )
         if tile:
-            overlays.append((tile, (x, y)))
+            overlays.append(EdgePlacement(tile=tile, position=(x, y), is_outside=is_outside))
 
     return overlays
 
@@ -729,6 +785,17 @@ def assemble_map(
     island_cells = generate_island(width, height, rng)
     fill_small_lakes(island_cells, width, height)
 
+    # Détermine les tuiles de contour avant de peindre l'île pour pouvoir ajuster le fond.
+    edge_overlays = compute_island_edges(
+        island_cells,
+        chosen_material,
+        edge_style,
+        bordure_tiles,
+        falaise_tiles,
+        width,
+        height,
+    )
+
     tile_size = background.width
     path_index = build_path_index(textures, path_style)
     library = TileLibrary(PNG_DIR)
@@ -745,18 +812,17 @@ def assemble_map(
     for (x, y) in island_cells:
         canvas.paste(material_image, (x * tile_size, y * tile_size))
 
+    # Replace l'eau sous les bordures extérieures pour éviter que le matériau plein transparesse.
+    for placement in edge_overlays:
+        if not placement.is_outside:
+            continue
+        x, y = placement.position
+        canvas.paste(background_image, (x * tile_size, y * tile_size))
+
     # Ajoute le contour (falaise ou bordure).
-    edge_overlays = compute_island_edges(
-        island_cells,
-        chosen_material,
-        edge_style,
-        bordure_tiles,
-        falaise_tiles,
-        width,
-        height,
-    )
-    for tile_name, (x, y) in edge_overlays:
-        tile_image = library.get(tile_name)
+    for placement in edge_overlays:
+        tile_image = library.get(placement.tile)
+        x, y = placement.position
         canvas.paste(tile_image, (x * tile_size, y * tile_size), tile_image)
 
     # Génère un trajet continu à l'intérieur de l'île.
