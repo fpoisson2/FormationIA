@@ -494,9 +494,67 @@ def find_outside_water(
     return outside
 
 
+def fill_small_lakes(
+    island: set[tuple[int, int]],
+    width: int,
+    height: int,
+    min_span: int = 3,
+) -> None:
+    """Bouche les nappes d'eau internes dont l'envergure est trop faible."""
+
+    if min_span <= 1:
+        return
+
+    outside = find_outside_water(island, width, height)
+    visited: set[tuple[int, int]] = set(outside)
+
+    for x in range(1, width - 1):
+        for y in range(1, height - 1):
+            cell = (x, y)
+            if cell in island or cell in visited:
+                continue
+
+            component: set[tuple[int, int]] = {cell}
+            queue: deque[tuple[int, int]] = deque([cell])
+            visited.add(cell)
+
+            min_x = max_x = x
+            min_y = max_y = y
+
+            while queue:
+                cx, cy = queue.popleft()
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = cx + dx, cy + dy
+                    if not (0 <= nx < width and 0 <= ny < height):
+                        continue
+
+                    candidate = (nx, ny)
+                    if candidate in island or candidate in visited:
+                        continue
+
+                    visited.add(candidate)
+                    queue.append(candidate)
+                    component.add(candidate)
+
+                    if nx < min_x:
+                        min_x = nx
+                    elif nx > max_x:
+                        max_x = nx
+                    if ny < min_y:
+                        min_y = ny
+                    elif ny > max_y:
+                        max_y = ny
+
+            span_x = max_x - min_x + 1
+            span_y = max_y - min_y + 1
+            if span_x < min_span or span_y < min_span:
+                island.update(component)
+
+
 def classify_edge_cell(
     cell: tuple[int, int],
     island: set[tuple[int, int]],
+    is_outside: bool,
 ) -> tuple[Tuple[str, ...], str] | None:
     """Détermine la tuile de contour à utiliser pour une case d'eau donnée."""
 
@@ -515,13 +573,13 @@ def classify_edge_cell(
 
     # Coins intérieurs : la case touche l'île sur deux axes adjacents.
     if north and west and not south and not east:
-        return (("southeast",), "interior")
+        return (("southeast",), "exterior" if is_outside else "interior")
     if north and east and not south and not west:
-        return (("southwest",), "interior")
+        return (("southwest",), "exterior" if is_outside else "interior")
     if south and west and not north and not east:
-        return (("northeast",), "interior")
+        return (("northeast",), "exterior" if is_outside else "interior")
     if south and east and not north and not west:
-        return (("northwest",), "interior")
+        return (("northwest",), "exterior" if is_outside else "interior")
 
     # Bords droits (cases adjacentes sur un seul axe cardinal).
     if south:
@@ -607,12 +665,12 @@ def compute_island_edges(
                     candidates.add((nx, ny))
 
     for (x, y) in sorted(candidates, key=lambda item: (item[1], item[0])):
-        classification = classify_edge_cell((x, y), island)
+        is_outside = (x, y) in outside_water
+        classification = classify_edge_cell((x, y), island, is_outside)
         if not classification:
             continue
 
         orientation, orientation_type = classification
-        is_outside = (x, y) in outside_water
         effective_style = preferred_style if (is_outside or preferred_style == "bordure") else "bordure"
 
         tile = choose_edge_tile(
@@ -669,6 +727,7 @@ def assemble_map(
     falaise_tiles = collect_edge_tiles(textures, include_bordure=False, include_falaise=True)
 
     island_cells = generate_island(width, height, rng)
+    fill_small_lakes(island_cells, width, height)
 
     tile_size = background.width
     path_index = build_path_index(textures, path_style)
