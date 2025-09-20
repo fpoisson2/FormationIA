@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import math
 import random
-from collections import deque
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -31,33 +31,104 @@ DEFAULT_OUTPUT = REPO_ROOT / "generated_island_border.png"
 WATER_TILE = "mapTile_187.png"
 SAND_TILE = "mapTile_017.png"
 
+CARDINAL_DIRECTIONS: Tuple[str, ...] = ("north", "east", "south", "west")
 CARDINAL_OFFSETS = {
     "north": (0, -1),
     "east": (1, 0),
     "south": (0, 1),
     "west": (-1, 0),
 }
-
-EDGE_TILE = "mapTile_002.png"
-CORNER_TILE = "mapTile_003.png"
-INTERIOR_CORNER_TILE = "mapTile_019.png"
-
-ROTATION_BY_DIRECTION = {
-    "north": 0,
-    "east": 90,
-    "south": 180,
-    "west": 270,
-    "northeast": 0,
-    "southeast": 90,
-    "southwest": 180,
-    "northwest": 270,
+DIAGONAL_DIRECTIONS: Tuple[str, ...] = (
+    "northeast",
+    "southeast",
+    "southwest",
+    "northwest",
+)
+DIAGONAL_OFFSETS = {
+    "northeast": (1, -1),
+    "southeast": (1, 1),
+    "southwest": (-1, 1),
+    "northwest": (-1, -1),
 }
-
+NEIGHBOR_OFFSETS = {**CARDINAL_OFFSETS, **DIAGONAL_OFFSETS}
 
 @dataclass(frozen=True)
 class OrientationTile:
     name: str
     rotation: int
+
+
+class TileCategory(Enum):
+    INTERIOR = "interior"
+    BORDER = "border"
+    INNER_CORNER = "inner_corner"
+    CLIFF = "cliff"
+
+
+@dataclass(frozen=True)
+class TilePlacement:
+    category: TileCategory
+    orientation: str | None
+
+
+BORDER_SPRITES: Dict[str, OrientationTile] = {
+    "north": OrientationTile("mapTile_002.png", 0),
+    "northeast": OrientationTile("mapTile_003.png", 0),
+    "east": OrientationTile("mapTile_018.png", 0),
+    "southeast": OrientationTile("mapTile_003.png", 90),
+    "south": OrientationTile("mapTile_002.png", 180),
+    "southwest": OrientationTile("mapTile_003.png", 180),
+    "west": OrientationTile("mapTile_016.png", 0),
+    "northwest": OrientationTile("mapTile_003.png", 270),
+}
+
+INNER_CORNER_SPRITES: Dict[str, OrientationTile] = {
+    "northeast": OrientationTile("mapTile_019.png", 0),
+    "northwest": OrientationTile("mapTile_020.png", 0),
+    "southwest": OrientationTile("mapTile_019.png", 180),
+    "southeast": OrientationTile("mapTile_020.png", 180),
+}
+
+CLIFF_SPRITES: Dict[str, OrientationTile] = {
+    "north": OrientationTile("mapTile_032.png", 180),
+    "east": OrientationTile("mapTile_032.png", 270),
+    "south": OrientationTile("mapTile_032.png", 0),
+    "west": OrientationTile("mapTile_032.png", 90),
+}
+
+TILE_LOOKUP: Dict[TileCategory, Dict[str, OrientationTile]] = {
+    TileCategory.BORDER: BORDER_SPRITES,
+    TileCategory.INNER_CORNER: INNER_CORNER_SPRITES,
+    TileCategory.CLIFF: CLIFF_SPRITES,
+}
+
+OPPOSITE_DIRECTION = {
+    "north": "south",
+    "south": "north",
+    "east": "west",
+    "west": "east",
+}
+
+PERPENDICULAR_DIRECTIONS = {
+    "north": ("east", "west"),
+    "south": ("east", "west"),
+    "east": ("north", "south"),
+    "west": ("north", "south"),
+}
+
+INNER_CORNER_RULES = {
+    "northeast": ("north", "east", "northeast"),
+    "northwest": ("north", "west", "northwest"),
+    "southeast": ("south", "east", "southeast"),
+    "southwest": ("south", "west", "southwest"),
+}
+
+OUTER_CORNER_RULES = {
+    "northeast": ("north", "east"),
+    "southeast": ("south", "east"),
+    "southwest": ("south", "west"),
+    "northwest": ("north", "west"),
+}
 
 
 class TileLoader:
@@ -168,202 +239,88 @@ def generate_inside_mask(
     return mask, distances
 
 
-def mask_to_island(inside: List[List[bool]]) -> set[tuple[int, int]]:
-    island: set[tuple[int, int]] = set()
-    for y, row in enumerate(inside):
-        for x, value in enumerate(row):
-            if value:
-                island.add((x, y))
-    return island
-
-
-def find_outside_water(
-    island: set[tuple[int, int]], width: int, height: int
-) -> set[tuple[int, int]]:
-    outside: set[tuple[int, int]] = set()
-    visited: set[tuple[int, int]] = set()
-    queue: deque[tuple[int, int]] = deque()
-
-    def enqueue(candidate: tuple[int, int]) -> None:
-        if candidate in island or candidate in visited:
-            return
-        visited.add(candidate)
-        outside.add(candidate)
-        queue.append(candidate)
-
-    for x in range(width):
-        enqueue((x, 0))
-        enqueue((x, height - 1))
-    for y in range(height):
-        enqueue((0, y))
-        enqueue((width - 1, y))
-
-    while queue:
-        cx, cy = queue.popleft()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            nx, ny = cx + dx, cy + dy
-            if 0 <= nx < width and 0 <= ny < height:
-                enqueue((nx, ny))
-
-    return outside
-
-
-def classify_edge_cell(
-    cell: tuple[int, int],
-    island: set[tuple[int, int]],
-    is_outside: bool,
-) -> tuple[Tuple[str, ...], str] | None:
-    x, y = cell
-    north = (x, y - 1) in island
-    south = (x, y + 1) in island
-    east = (x + 1, y) in island
-    west = (x - 1, y) in island
-    northeast = (x + 1, y - 1) in island
-    northwest = (x - 1, y - 1) in island
-    southeast = (x + 1, y + 1) in island
-    southwest = (x - 1, y + 1) in island
-
-    if not (
-        north
-        or south
-        or east
-        or west
-        or northeast
-        or northwest
-        or southeast
-        or southwest
-    ):
-        return None
-
-    if north and west and not south and not east:
-        return (("southeast",), "exterior" if is_outside else "interior")
-    if north and east and not south and not west:
-        return (("southwest",), "exterior" if is_outside else "interior")
-    if south and west and not north and not east:
-        return (("northeast",), "exterior" if is_outside else "interior")
-    if south and east and not north and not west:
-        return (("northwest",), "exterior" if is_outside else "interior")
-
-    if south:
-        return (("north",), "exterior")
-    if north:
-        return (("south",), "exterior")
-    if east:
-        return (("west",), "exterior")
-    if west:
-        return (("east",), "exterior")
-
-    if southwest:
-        return (("northeast",), "exterior")
-    if southeast:
-        return (("northwest",), "exterior")
-    if northwest:
-        return (("southeast",), "exterior")
-    if northeast:
-        return (("southwest",), "exterior")
-
-    return None
-
-
-def compute_border_orientations(
+def gather_neighbors(
     inside: List[List[bool]],
-) -> Dict[tuple[int, int], tuple[Tuple[str, ...], str]]:
+    x: int,
+    y: int,
+) -> Dict[str, bool]:
     height = len(inside)
-    width = len(inside[0]) if inside else 0
-    island = mask_to_island(inside)
-    outside_water = find_outside_water(island, width, height)
-
-    orientation_to_delta: Dict[str, tuple[int, int]] = {
-        "north": (0, 1),
-        "south": (0, -1),
-        "east": (-1, 0),
-        "west": (1, 0),
-        "northeast": (-1, 1),
-        "northwest": (1, 1),
-        "southeast": (-1, -1),
-        "southwest": (1, -1),
-    }
-
-    def priority(orientation: Tuple[str, ...], orientation_type: str) -> tuple[int, int]:
-        direction = orientation[0] if orientation else ""
-        is_diagonal = direction in {
-            "northeast",
-            "northwest",
-            "southeast",
-            "southwest",
-        }
-        diagonal_rank = 0 if is_diagonal else 1
-        interior_rank = 0 if orientation_type == "interior" else 1
-        return (diagonal_rank, interior_rank)
-
-    candidates: set[tuple[int, int]] = set()
-    for (x, y) in island:
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                if dx == 0 and dy == 0:
-                    continue
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in island:
-                    candidates.add((nx, ny))
-
-    by_island_cell: Dict[tuple[int, int], tuple[Tuple[str, ...], str]] = {}
-    priorities: Dict[tuple[int, int], tuple[int, int]] = {}
-
-    for (x, y) in sorted(candidates, key=lambda item: (item[1], item[0])):
-        is_outside = (x, y) in outside_water
-        classification = classify_edge_cell((x, y), island, is_outside)
-        if not classification:
-            continue
-        orientation, orientation_type = classification
-        if not orientation:
-            continue
-        direction = orientation[0]
-        delta = orientation_to_delta.get(direction)
-        if delta is None:
-            continue
-        target = (x + delta[0], y + delta[1])
-        if target not in island:
-            continue
-        current_priority = priority(orientation, orientation_type)
-        previous_priority = priorities.get(target)
-        if previous_priority is not None and previous_priority <= current_priority:
-            continue
-        priorities[target] = current_priority
-        by_island_cell[target] = (orientation, orientation_type)
-
-    return by_island_cell
+    width = len(inside[0]) if height else 0
+    neighbors: Dict[str, bool] = {}
+    for direction, (dx, dy) in NEIGHBOR_OFFSETS.items():
+        nx, ny = x + dx, y + dy
+        if 0 <= nx < width and 0 <= ny < height:
+            neighbors[direction] = inside[ny][nx]
+        else:
+            neighbors[direction] = False
+    return neighbors
 
 
-def select_border_tile(
-    orientation: Tuple[str, ...], orientation_type: str
-) -> OrientationTile:
-    if not orientation:
-        return OrientationTile(EDGE_TILE, 0)
+def classify_land_cell(inside: List[List[bool]], x: int, y: int) -> TilePlacement:
+    if not inside[y][x]:
+        return TilePlacement(TileCategory.INTERIOR, None)
 
-    direction = orientation[0]
-    rotation = ROTATION_BY_DIRECTION.get(direction, 0)
+    neighbors = gather_neighbors(inside, x, y)
 
-    if direction in {"north", "east", "south", "west"}:
-        base = EDGE_TILE
-    else:
-        base = INTERIOR_CORNER_TILE if orientation_type == "interior" else CORNER_TILE
+    if all(
+        neighbors.get(direction, True)
+        for direction in (*CARDINAL_DIRECTIONS, *DIAGONAL_DIRECTIONS)
+    ):
+        return TilePlacement(TileCategory.INTERIOR, None)
 
-    return OrientationTile(base, rotation)
+    for orientation in ("northeast", "northwest", "southeast", "southwest"):
+        card_a, card_b, diag = INNER_CORNER_RULES[orientation]
+        if neighbors[card_a] and neighbors[card_b] and not neighbors[diag]:
+            return TilePlacement(TileCategory.INNER_CORNER, orientation)
+
+    for orientation in CARDINAL_DIRECTIONS:
+        if not neighbors[orientation]:
+            opposite = OPPOSITE_DIRECTION[orientation]
+            perpendicular = PERPENDICULAR_DIRECTIONS[orientation]
+            if neighbors[opposite] and all(neighbors[p] for p in perpendicular):
+                return TilePlacement(TileCategory.CLIFF, orientation)
+
+    for orientation in ("northeast", "southeast", "southwest", "northwest"):
+        card_a, card_b = OUTER_CORNER_RULES[orientation]
+        if not neighbors[card_a] and not neighbors[card_b]:
+            return TilePlacement(TileCategory.BORDER, orientation)
+
+    for orientation in CARDINAL_DIRECTIONS:
+        if not neighbors[orientation]:
+            return TilePlacement(TileCategory.BORDER, orientation)
+
+    for orientation in DIAGONAL_DIRECTIONS:
+        if not neighbors[orientation]:
+            return TilePlacement(TileCategory.BORDER, orientation)
+
+    return TilePlacement(TileCategory.INTERIOR, None)
 
 
-def compute_border_tiles(inside: List[List[bool]]) -> Dict[tuple[int, int], OrientationTile]:
-    orientation_map = compute_border_orientations(inside)
-    return {
-        position: select_border_tile(orientation, orientation_type)
-        for position, (orientation, orientation_type) in orientation_map.items()
-    }
+def compute_overlay_tiles(inside: List[List[bool]]) -> Dict[tuple[int, int], OrientationTile]:
+    overlays: Dict[tuple[int, int], OrientationTile] = {}
+    for y, row in enumerate(inside):
+        for x, is_land in enumerate(row):
+            if not is_land:
+                continue
+            placement = classify_land_cell(inside, x, y)
+            if placement.category is TileCategory.INTERIOR:
+                continue
+            if placement.orientation is None:
+                continue
+            sprite_map = TILE_LOOKUP.get(placement.category)
+            if not sprite_map:
+                continue
+            tile = sprite_map.get(placement.orientation)
+            if tile:
+                overlays[(x, y)] = tile
+    return overlays
 
 
 def build_image(
     width: int,
     height: int,
     inside: List[List[bool]],
-    border_tiles: Dict[tuple[int, int], OrientationTile],
+    overlay_tiles: Dict[tuple[int, int], OrientationTile],
     loader: TileLoader,
 ) -> Image.Image:
     base_tile = loader.get(WATER_TILE)
@@ -380,7 +337,7 @@ def build_image(
             if inside[y][x]:
                 canvas.paste(sand_tile, (px, py))
 
-    for (x, y), tile in border_tiles.items():
+    for (x, y), tile in overlay_tiles.items():
         image = loader.get(tile.name, tile.rotation)
         canvas.paste(image, (x * tile_size, y * tile_size), image)
 
@@ -427,14 +384,14 @@ def main() -> None:
     if not any(value for row in inside_mask for value in row):
         raise SystemExit("Impossible de générer une île avec ces dimensions.")
 
-    border_tiles = compute_border_tiles(inside_mask)
+    overlay_tiles = compute_overlay_tiles(inside_mask)
 
     loader = TileLoader(ASSET_DIR)
     image = build_image(
         width,
         height,
         inside_mask,
-        border_tiles,
+        overlay_tiles,
         loader,
     )
 
