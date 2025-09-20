@@ -17,6 +17,7 @@ après avoir installé Pillow si vous souhaitez générer un rendu.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 import random
@@ -460,6 +461,39 @@ def distribute_indices(total: int, count: int) -> List[int]:
     return [round(i * step) for i in range(count)]
 
 
+def find_outside_water(
+    island: set[tuple[int, int]], width: int, height: int
+) -> set[tuple[int, int]]:
+    """Repère toutes les cases d'eau reliées au bord de la carte."""
+
+    outside: set[tuple[int, int]] = set()
+    visited: set[tuple[int, int]] = set()
+    queue: deque[tuple[int, int]] = deque()
+
+    def enqueue(candidate: tuple[int, int]) -> None:
+        if candidate in island or candidate in visited:
+            return
+        visited.add(candidate)
+        outside.add(candidate)
+        queue.append(candidate)
+
+    for x in range(width):
+        enqueue((x, 0))
+        enqueue((x, height - 1))
+    for y in range(height):
+        enqueue((0, y))
+        enqueue((width - 1, y))
+
+    while queue:
+        cx, cy = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < width and 0 <= ny < height:
+                enqueue((nx, ny))
+
+    return outside
+
+
 def classify_edge_cell(
     cell: tuple[int, int],
     island: set[tuple[int, int]],
@@ -481,13 +515,13 @@ def classify_edge_cell(
 
     # Coins intérieurs : la case touche l'île sur deux axes adjacents.
     if north and west and not south and not east:
-        return (("northwest",), "interior")
-    if north and east and not south and not west:
-        return (("northeast",), "interior")
-    if south and west and not north and not east:
-        return (("southwest",), "interior")
-    if south and east and not north and not west:
         return (("southeast",), "interior")
+    if north and east and not south and not west:
+        return (("southwest",), "interior")
+    if south and west and not north and not east:
+        return (("northeast",), "interior")
+    if south and east and not north and not west:
+        return (("northwest",), "interior")
 
     # Bords droits (cases adjacentes sur un seul axe cardinal).
     if south:
@@ -561,6 +595,8 @@ def compute_island_edges(
 
     overlays: List[tuple[str, tuple[int, int]]] = []
     candidates: set[tuple[int, int]] = set()
+    outside_water = find_outside_water(island, width, height)
+
     for (x, y) in island:
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
@@ -576,11 +612,14 @@ def compute_island_edges(
             continue
 
         orientation, orientation_type = classification
+        is_outside = (x, y) in outside_water
+        effective_style = preferred_style if (is_outside or preferred_style == "bordure") else "bordure"
+
         tile = choose_edge_tile(
             subtype,
             orientation,
             orientation_type,
-            preferred_style,
+            effective_style,
             bordure_tiles,
             falaise_tiles,
         )
