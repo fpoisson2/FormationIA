@@ -824,34 +824,6 @@ function generateWorld(): TerrainTile[][] {
     }
   };
 
-  const drawHorizontal = (
-    startX: number,
-    endX: number,
-    y: number,
-    tile: TileKind = TILE_KIND.PATH
-  ) => {
-    for (let x = startX; x <= endX; x++) {
-      if (map[y]?.[x] !== undefined) {
-        map[y][x].base = TILE_KIND.GRASS; // Gazon en base
-        map[y][x].overlay = tile; // Chemin en overlay
-      }
-    }
-  };
-
-  const drawVertical = (
-    startY: number,
-    endY: number,
-    x: number,
-    tile: TileKind = TILE_KIND.PATH
-  ) => {
-    for (let y = startY; y <= endY; y++) {
-      if (map[y]?.[x] !== undefined) {
-        map[y][x].base = TILE_KIND.GRASS; // Gazon en base
-        map[y][x].overlay = tile; // Chemin en overlay
-      }
-    }
-  };
-
   // Chemin organique avec courbes mais connexions garanties
   type SmartPathOptions = {
     waypoints?: Array<[number, number]>;
@@ -931,6 +903,104 @@ function generateWorld(): TerrainTile[][] {
     }
   };
 
+  type SmartAxisOptions = Omit<SmartPathOptions, "waypoints"> & {
+    jitter?: number;
+    segmentLength?: number;
+    stepEvery?: number;
+    stepSize?: number;
+    axisJitter?: number;
+    extraWaypoints?: Array<[number, number]>;
+  };
+
+  const drawCurvedAxis = (
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    options?: SmartAxisOptions
+  ) => {
+    const horizontal = Math.abs(endX - startX) >= Math.abs(endY - startY);
+    const axisLength = horizontal
+      ? Math.abs(endX - startX)
+      : Math.abs(endY - startY);
+    const seed =
+      options?.seed ??
+      startX * 673 +
+        startY * 1013 +
+        endX * 1429 +
+        endY * 1789;
+    const jitterAmplitude = options?.jitter ?? 2;
+    const axisJitter = options?.axisJitter ?? 1;
+    const segmentLength = Math.max(2, Math.round(options?.segmentLength ?? 5));
+    const segmentCount = Math.max(1, Math.floor(axisLength / segmentLength));
+    const generatedWaypoints: Array<[number, number]> = [];
+    let steppedOffset = 0;
+
+    for (let index = 1; index <= segmentCount; index++) {
+      const ratio = index / (segmentCount + 1);
+      const baseX = Math.round(startX + (endX - startX) * ratio);
+      const baseY = Math.round(startY + (endY - startY) * ratio);
+      const noise = pseudoRandom(seed + index * 37) * 2 - 1;
+      const axisNoise = pseudoRandom(seed + index * 53) * 2 - 1;
+
+      if (options?.stepEvery && index % options.stepEvery === 0) {
+        const stepDirection = axisNoise >= 0 ? 1 : -1;
+        steppedOffset = clamp(
+          steppedOffset + stepDirection * (options.stepSize ?? 1),
+          -jitterAmplitude,
+          jitterAmplitude
+        );
+      }
+
+      let offsetX = 0;
+      let offsetY = 0;
+
+      if (horizontal) {
+        offsetY = Math.round(noise * jitterAmplitude) + steppedOffset;
+        offsetX = Math.round(axisNoise * axisJitter);
+      } else {
+        offsetX = Math.round(noise * jitterAmplitude) + steppedOffset;
+        offsetY = Math.round(axisNoise * axisJitter);
+      }
+
+      const waypointX = clamp(baseX + offsetX, 1, WORLD_WIDTH - 2);
+      const waypointY = clamp(baseY + offsetY, 1, WORLD_HEIGHT - 2);
+      generatedWaypoints.push([waypointX, waypointY]);
+    }
+
+    const combined = [
+      ...generatedWaypoints,
+      ...(options?.extraWaypoints ?? []),
+    ];
+    const seen = new Set<string>();
+    const uniqueWaypoints: Array<[number, number]> = [];
+
+    for (const [x, y] of combined) {
+      if ((x === startX && y === startY) || (x === endX && y === endY)) {
+        continue;
+      }
+      const key = `${x},${y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueWaypoints.push([x, y]);
+    }
+
+    const axisDelta = horizontal ? endX - startX : endY - startY;
+    const axisDirection = axisDelta >= 0 ? 1 : -1;
+
+    uniqueWaypoints.sort((a, b) =>
+      horizontal
+        ? (a[0] - b[0]) * axisDirection
+        : (a[1] - b[1]) * axisDirection
+    );
+
+    drawSmartPath(startX, startY, endX, endY, {
+      seed: options?.seed,
+      switchChance: options?.switchChance,
+      waypoints: uniqueWaypoints,
+    });
+  };
+
   // Fonction locale pour vérifier les tuiles dans le contexte de génération
   const getPathAt = (x: number, y: number): boolean => {
     if (y < 0 || y >= WORLD_HEIGHT || x < 0 || x >= WORLD_WIDTH) {
@@ -992,6 +1062,111 @@ function generateWorld(): TerrainTile[][] {
   const scatterFlowers = (points: Array<[number, number]>) => {
     for (const [x, y] of points) {
       plantFlower(x, y);
+    }
+  };
+
+  const sculptRectWithNoise = (
+    startX: number,
+    startY: number,
+    width: number,
+    height: number,
+    tileKind: TileKind,
+    options?: {
+      seed?: number;
+      maxInset?: number;
+      stepEvery?: number;
+      stepSize?: number;
+      growthChance?: number;
+    }
+  ) => {
+    if (width <= 0 || height <= 0) return;
+    const seed =
+      options?.seed ?? startX * 193 + startY * 211 + width * 17 + height * 19;
+    const maxInset = Math.max(
+      1,
+      Math.min(
+        options?.maxInset ?? 2,
+        Math.floor(Math.min(width, height) / 2)
+      )
+    );
+    const stepEvery = Math.max(0, Math.floor(options?.stepEvery ?? 0));
+    const stepSize = Math.max(0, Math.floor(options?.stepSize ?? 0));
+    const growthChance = Math.min(Math.max(options?.growthChance ?? 0.18, 0), 1);
+    let lateralShift = 0;
+
+    for (let y = startY; y < startY + height; y++) {
+      if (!map[y]) continue;
+      const rowIndex = y - startY;
+
+      if (stepEvery > 0 && rowIndex > 0 && rowIndex % stepEvery === 0) {
+        const directionNoise = pseudoRandom(seed + rowIndex * 61) - 0.5;
+        lateralShift = clamp(
+          lateralShift + (directionNoise >= 0 ? 1 : -1) * stepSize,
+          -maxInset,
+          maxInset
+        );
+      }
+
+      for (let x = startX; x < startX + width; x++) {
+        const entry = map[y]?.[x];
+        if (!entry) continue;
+        if (entry.base !== tileKind) continue;
+
+        const distLeft = x - startX;
+        const distRight = startX + width - 1 - x;
+        const distTop = y - startY;
+        const distBottom = startY + height - 1 - y;
+        const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+
+        if (minDist >= maxInset) {
+          continue;
+        }
+
+        const normalized = (maxInset - minDist) / maxInset;
+        const noise = pseudoRandom(seed + x * 131 + y * 197);
+        const shouldCarve = noise > 0.6 - normalized * 0.35;
+
+        if (
+          shouldCarve ||
+          (stepEvery > 0 &&
+            ((x - startX + lateralShift) % (stepEvery + 1) === 0 &&
+              noise > 0.45 + normalized * 0.1))
+        ) {
+          entry.base = TILE_KIND.GRASS;
+          if (entry.overlay === tileKind) {
+            delete entry.overlay;
+          }
+          continue;
+        }
+
+        if (noise < growthChance && minDist >= maxInset - 1) {
+          const smallestEdge = Math.min(
+            distLeft,
+            distRight,
+            distTop,
+            distBottom
+          );
+          const candidates: Array<[number, number]> = [];
+          if (distLeft === smallestEdge) candidates.push([-1, 0]);
+          if (distRight === smallestEdge) candidates.push([1, 0]);
+          if (distTop === smallestEdge) candidates.push([0, -1]);
+          if (distBottom === smallestEdge) candidates.push([0, 1]);
+
+          for (const [dx, dy] of candidates) {
+            const nx = x + dx;
+            const ny = y + dy;
+            const neighbor = map[ny]?.[nx];
+            if (
+              !neighbor ||
+              neighbor.base !== TILE_KIND.GRASS ||
+              neighbor.overlay !== undefined
+            ) {
+              continue;
+            }
+            neighbor.base = tileKind;
+          }
+        }
+      }
     }
   };
 
@@ -1064,12 +1239,14 @@ function generateWorld(): TerrainTile[][] {
   outlineRect(41, 29, 12, 8, TILE_KIND.SAND);
   outlineRect(41, 29, 12, 8, TILE_KIND.SAND, true);
 
-  // Farmland belt in the south-west
-  fillOrganicRect(6, 34, 12, 6, TILE_KIND.FIELD, {
-    maxOffset: 3,
+  // Farmland belt in the south-west avec bords irréguliers
+  fillRect(6, 34, 12, 6, TILE_KIND.FIELD);
+  sculptRectWithNoise(6, 34, 12, 6, TILE_KIND.FIELD, {
     seed: 128,
+    maxInset: 3,
     stepEvery: 2,
     stepSize: 1,
+    growthChance: 0.22,
   });
   scatterTrees([
     [5, 33],
@@ -1115,58 +1292,83 @@ function generateWorld(): TerrainTile[][] {
   ]);
 
   // Path network - réseau unifié centré sur la mairie (30,22)
-  // Épine dorsale principale horizontale avec légères ondulations
-  drawSmartPath(12, 22, 48, 22, {
-    waypoints: [
+  // Épine dorsale principale horizontale avec courbes maîtrisées
+  drawCurvedAxis(12, 22, 48, 22, {
+    seed: 401,
+    jitter: 2.5,
+    axisJitter: 1,
+    segmentLength: 6,
+    stepEvery: 2,
+    stepSize: 1,
+    switchChance: 0.25,
+    extraWaypoints: [
       [18, 21],
       [24, 23],
       [30, 22],
       [36, 21],
       [42, 24],
     ],
-    seed: 401,
-    switchChance: 0.25,
   });
 
   // Connexions vers les quartiers depuis la ligne principale
   // Clarté (14,12) - Nord-Ouest depuis (14,22)
-  drawSmartPath(14, 22, 14, 12, {
-    waypoints: [
+  drawCurvedAxis(14, 22, 14, 12, {
+    seed: 402,
+    jitter: 1.6,
+    axisJitter: 0.5,
+    segmentLength: 3,
+    stepEvery: 2,
+    stepSize: 1,
+    extraWaypoints: [
       [13, 20],
       [15, 18],
       [13, 15],
     ],
-    seed: 402,
   });
 
   // Création (44,12) - Nord-Est depuis (44,22)
-  drawSmartPath(44, 22, 44, 12, {
-    waypoints: [
+  drawCurvedAxis(44, 22, 44, 12, {
+    seed: 403,
+    jitter: 1.6,
+    axisJitter: 0.5,
+    segmentLength: 3,
+    stepEvery: 2,
+    stepSize: 1,
+    extraWaypoints: [
       [45, 20],
       [43, 18],
       [45, 15],
     ],
-    seed: 403,
   });
 
   // Décision (14,32) - Sud-Ouest depuis (14,22)
-  drawSmartPath(14, 22, 14, 32, {
-    waypoints: [
+  drawCurvedAxis(14, 22, 14, 32, {
+    seed: 404,
+    jitter: 1.8,
+    axisJitter: 0.5,
+    segmentLength: 3,
+    stepEvery: 2,
+    stepSize: 1,
+    extraWaypoints: [
       [13, 24],
       [15, 27],
       [13, 30],
     ],
-    seed: 404,
   });
 
   // Éthique (44,32) - Sud-Est depuis (44,22)
-  drawSmartPath(44, 22, 44, 32, {
-    waypoints: [
+  drawCurvedAxis(44, 22, 44, 32, {
+    seed: 405,
+    jitter: 1.8,
+    axisJitter: 0.5,
+    segmentLength: 3,
+    stepEvery: 2,
+    stepSize: 1,
+    extraWaypoints: [
       [45, 24],
       [43, 27],
       [45, 30],
     ],
-    seed: 405,
   });
 
   // Decorative trees framing the plazas
