@@ -89,6 +89,8 @@ const DEFAULT_TILE_SIZE = 64;
 
 const MAP_PACK_ATLAS = parseAtlasDescription(mapPackAtlasDescription);
 
+const TILE_CONNECTION_CACHE = new Map<string, string[]>();
+
 function atlas(name: string): TileCoord {
   const entry = MAP_PACK_ATLAS.get(name);
   if (!entry) {
@@ -150,13 +152,80 @@ const TILE_KIND = {
   FIELD: 6,
 } as const;
 
+type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
+
+const LOWER_TERRAIN_TYPES = new Set<TileKind>([
+  TILE_KIND.WATER,
+  TILE_KIND.SAND,
+  TILE_KIND.FIELD,
+]);
+
+const DIAGONAL_CONNECTIONS = new Set<string>([
+  "northeast",
+  "northwest",
+  "southeast",
+  "southwest",
+]);
+
+const GRASS_VARIANT_SELECTION_ORDER: GrassVariantKey[] = [
+  "northwest",
+  "northeast",
+  "north",
+  "west",
+  "east",
+  "southwest",
+  "southeast",
+  "south",
+  "center",
+];
+
+function isLowerTerrainKind(kind: TileKind | null | undefined): boolean {
+  return kind !== null && kind !== undefined && LOWER_TERRAIN_TYPES.has(kind);
+}
+
 // Types pour la superposition de tuiles
 type TerrainTile = {
   base: TileKind;
   overlay?: TileKind;
+  cliffConnections?: string[];
 };
 
-type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
+function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
+  if (!tile) return false;
+  if (tile.overlay !== undefined && isLowerTerrainKind(tile.overlay)) {
+    return true;
+  }
+  return isLowerTerrainKind(tile.base);
+}
+
+function computeCliffConnections(
+  x: number,
+  y: number,
+  hasLower: (x: number, y: number) => boolean
+): Set<string> {
+  const connections = new Set<string>();
+
+  const northLower = hasLower(x, y - 1);
+  const southLower = hasLower(x, y + 1);
+  const eastLower = hasLower(x + 1, y);
+  const westLower = hasLower(x - 1, y);
+
+  const northeastLower = hasLower(x + 1, y - 1) || (northLower && eastLower);
+  const northwestLower = hasLower(x - 1, y - 1) || (northLower && westLower);
+  const southeastLower = hasLower(x + 1, y + 1) || (southLower && eastLower);
+  const southwestLower = hasLower(x - 1, y + 1) || (southLower && westLower);
+
+  if (northLower) connections.add("north");
+  if (southLower) connections.add("south");
+  if (eastLower) connections.add("east");
+  if (westLower) connections.add("west");
+  if (northeastLower) connections.add("northeast");
+  if (northwestLower) connections.add("northwest");
+  if (southeastLower) connections.add("southeast");
+  if (southwestLower) connections.add("southwest");
+
+  return connections;
+}
 
 const HIGHLIGHT_TILES = new Set<TileKind>([TILE_KIND.PATH]);
 
@@ -164,12 +233,29 @@ type TilesetMode = "builtin" | "atlas";
 
 type TileCoord = [number, number] | [number, number, number, number];
 
+const GRASS_VARIANT_KEYS = [
+  "center",
+  "north",
+  "south",
+  "east",
+  "west",
+  "northeast",
+  "northwest",
+  "southeast",
+  "southwest",
+] as const;
+
+type GrassVariantKey = (typeof GRASS_VARIANT_KEYS)[number];
+type GrassDirection = Exclude<GrassVariantKey, "center">;
+
+type GrassTiles = { center: TileCoord } & Partial<Record<GrassDirection, TileCoord>>;
+
 type Tileset = {
   mode: TilesetMode;
   url?: string;
   size: number;
   map: {
-    grass: TileCoord;
+    grass: GrassTiles;
     path: TileCoord;
     farmland: TileCoord;
     sand: {
@@ -207,7 +293,14 @@ const DEFAULT_ATLAS: Tileset = {
   url: mapPackAtlas,
   size: DEFAULT_TILE_SIZE,
   map: {
-    grass: atlas("mapTile_022.png"),
+    grass: {
+      center: atlas("mapTile_022.png"),
+      northwest: atlas("mapTile_006.png"),
+      north: atlas("mapTile_007.png"),
+      northeast: atlas("mapTile_008.png"),
+      west: atlas("mapTile_021.png"),
+      east: atlas("mapTile_023.png"),
+    },
     path: atlas("mapTile_128.png"),
     farmland: atlas("mapTile_087.png"),
     sand: {
@@ -244,7 +337,20 @@ function cloneTileset(source: Tileset): Tileset {
   return {
     ...source,
     map: {
-      grass: [...source.map.grass] as TileCoord,
+      grass: (() => {
+        const grassClone: GrassTiles = {
+          center: [...source.map.grass.center] as TileCoord,
+        };
+        for (const key of GRASS_VARIANT_KEYS) {
+          if (key === "center") continue;
+          const direction = key as GrassDirection;
+          const coord = source.map.grass[direction];
+          if (coord) {
+            grassClone[direction] = [...coord] as TileCoord;
+          }
+        }
+        return grassClone;
+      })(),
       path: [...source.map.path] as TileCoord,
       farmland: [...source.map.farmland] as TileCoord,
       sand: {
@@ -300,6 +406,30 @@ function normalizeCoord(
   return [x, y, width, height] as TileCoord;
 }
 
+function mergeGrassTiles(
+  partial: Partial<GrassTiles> | undefined,
+  base: GrassTiles
+): GrassTiles {
+  const mergedCenter = normalizeCoord(partial?.center as TileCoord | undefined, base.center);
+  const merged: GrassTiles = { center: mergedCenter };
+
+  for (const key of GRASS_VARIANT_KEYS) {
+    if (key === "center") continue;
+    const direction = key as GrassDirection;
+    const partialCoord = partial?.[direction] as TileCoord | undefined;
+    if (partialCoord) {
+      merged[direction] = normalizeCoord(
+        partialCoord,
+        base[direction] ?? mergedCenter
+      );
+    } else if (base[direction]) {
+      merged[direction] = [...base[direction]!] as TileCoord;
+    }
+  }
+
+  return merged;
+}
+
 function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
   const base = cloneTileset(DEFAULT_ATLAS);
   if (!partial || typeof partial !== "object") {
@@ -311,7 +441,7 @@ function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
     url: partial.url ?? base.url,
     size: partial.size ?? base.size,
     map: {
-      grass: normalizeCoord(map.grass as TileCoord | undefined, base.map.grass),
+      grass: mergeGrassTiles(map.grass as Partial<GrassTiles> | undefined, base.map.grass),
       path: normalizeCoord(map.path as TileCoord | undefined, base.map.path),
       farmland: normalizeCoord(
         map.farmland as TileCoord | undefined,
@@ -771,6 +901,34 @@ function generateWorld(): TerrainTile[][] {
     }
   };
 
+  const updateGrassCliffs = () => {
+    const hasLowerAt = (x: number, y: number) => {
+      if (y < 0 || y >= WORLD_HEIGHT || x < 0 || x >= WORLD_WIDTH) {
+        return false;
+      }
+      return tileHasLowerTerrain(map[y]?.[x]);
+    };
+
+    for (let y = 0; y < WORLD_HEIGHT; y++) {
+      for (let x = 0; x < WORLD_WIDTH; x++) {
+        const tile = map[y][x];
+        if (!tile) continue;
+
+        if (tile.base !== TILE_KIND.GRASS) {
+          tile.cliffConnections = undefined;
+          continue;
+        }
+
+        const connections = computeCliffConnections(x, y, hasLowerAt);
+        if (connections.size > 0) {
+          tile.cliffConnections = Array.from(connections);
+        } else {
+          delete tile.cliffConnections;
+        }
+      }
+    }
+  };
+
   // Coastline
   for (let x = 0; x < WORLD_WIDTH; x++) {
     map[0][x].base = TILE_KIND.WATER;
@@ -923,6 +1081,8 @@ function generateWorld(): TerrainTile[][] {
 
   // Nettoyer les chemins isolés et mal connectés
   validateAndFixPathEnds();
+
+  updateGrassCliffs();
 
   return map;
 }
@@ -1153,6 +1313,77 @@ function tileAt(x: number, y: number): TileKind | null {
   return overlay ?? base;
 }
 
+function hasLowerTerrainAtWorld(x: number, y: number): boolean {
+  const { base, overlay } = tileLayersAt(x, y);
+  return isLowerTerrainKind(overlay) || isLowerTerrainKind(base);
+}
+
+function getConnectionsForCoord(coord: TileCoord): string[] {
+  const key = coord.join(",");
+  const cached = TILE_CONNECTION_CACHE.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const tileName = getTileNameFromCoord(coord);
+  if (!tileName) {
+    TILE_CONNECTION_CACHE.set(key, []);
+    return [];
+  }
+
+  const entry = MAP_PACK_ATLAS.get(tileName);
+  const connections = entry?.connections
+    ? entry.connections
+        .split(",")
+        .map((dir) => dir.trim())
+        .filter(Boolean)
+    : [];
+
+  TILE_CONNECTION_CACHE.set(key, connections);
+  return connections;
+}
+
+function getGrassTileCoord(x: number, y: number, ts: Tileset): TileCoord {
+  const grassTiles = ts.map.grass;
+  const fallback = grassTiles.center;
+  const tile = world[y]?.[x];
+
+  const adjacency = tile?.cliffConnections?.length
+    ? new Set(tile.cliffConnections)
+    : computeCliffConnections(x, y, hasLowerTerrainAtWorld);
+
+  if (adjacency.size === 0) {
+    return fallback;
+  }
+
+  let bestCoord = fallback;
+  let bestScore = -1;
+
+  for (const key of GRASS_VARIANT_SELECTION_ORDER) {
+    if (key === "center") continue;
+    const direction = key as GrassDirection;
+    const coord = grassTiles[direction];
+    if (!coord) continue;
+
+    const atlasConnections = getConnectionsForCoord(coord);
+    const requiredConnections =
+      atlasConnections.length > 0 ? atlasConnections : [direction];
+
+    if (requiredConnections.every((conn) => adjacency.has(conn))) {
+      const score = requiredConnections.reduce(
+        (acc, conn) => acc + (DIAGONAL_CONNECTIONS.has(conn) ? 2 : 1),
+        0
+      );
+      if (score > bestScore) {
+        bestScore = score;
+        bestCoord = coord;
+      }
+    }
+  }
+
+  return bestCoord;
+}
+
 function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
   const northWater = tileLayersAt(x, y - 1).base === TILE_KIND.WATER;
   const southWater = tileLayersAt(x, y + 1).base === TILE_KIND.WATER;
@@ -1279,7 +1510,7 @@ function getAtlasTile(
 ): TileCoord | null {
   switch (tileKind) {
     case TILE_KIND.GRASS:
-      return ts.map.grass;
+      return getGrassTileCoord(x, y, ts);
     case TILE_KIND.PATH:
       return getPathTileCoord(x, y);
     case TILE_KIND.WATER:
@@ -1293,7 +1524,7 @@ function getAtlasTile(
     case TILE_KIND.FLOWER:
       return getRandomTileByType("object", "flower", x * 2000 + y) || ts.map.details.flower;
     default:
-      return ts.map.grass;
+      return ts.map.grass.center;
   }
 }
 
