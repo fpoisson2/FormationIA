@@ -712,6 +712,76 @@ function generateWorld(): TerrainTile[][] {
     }
   };
 
+  const pseudoRandom = (seed: number) => {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+  };
+
+  const fillOrganicRect = (
+    startX: number,
+    startY: number,
+    width: number,
+    height: number,
+    tile: TileKind,
+    options?: {
+      asOverlay?: boolean;
+      maxOffset?: number;
+      seed?: number;
+      stepEvery?: number;
+      stepSize?: number;
+    }
+  ) => {
+    const maxOffset = options?.maxOffset ?? 2;
+    const seed = options?.seed ?? startX * 31 + startY * 17 + width * 13 + height * 7;
+    const stepEvery = options?.stepEvery ?? 0;
+    const stepSize = options?.stepSize ?? 0;
+    for (let row = 0; row < height; row++) {
+      const y = startY + row;
+      if (!map[y]) continue;
+      const leftVariation = Math.round(
+        (pseudoRandom(seed + row) - 0.5) * 2 * maxOffset
+      );
+      const rightVariation = Math.round(
+        (pseudoRandom(seed + row + 97) - 0.5) * 2 * maxOffset
+      );
+
+      const steppedOffset =
+        stepEvery > 0 && row % stepEvery === 0 ? stepSize : 0;
+
+      const leftShift = clamp(
+        leftVariation - steppedOffset,
+        -maxOffset * 2,
+        maxOffset * 2
+      );
+      const rightShift = clamp(
+        rightVariation + steppedOffset,
+        -maxOffset * 2,
+        maxOffset * 2
+      );
+
+      const rowStart = clamp(startX + leftShift, 0, WORLD_WIDTH - 1);
+      const rowEnd = clamp(
+        startX + width - 1 + rightShift,
+        0,
+        WORLD_WIDTH - 1
+      );
+
+      if (rowEnd < rowStart) {
+        continue;
+      }
+
+      for (let x = rowStart; x <= rowEnd; x++) {
+        const tileEntry = map[y]?.[x];
+        if (!tileEntry) continue;
+        if (options?.asOverlay) {
+          tileEntry.overlay = tile;
+        } else {
+          tileEntry.base = tile;
+        }
+      }
+    }
+  };
+
   const outlineRect = (
     startX: number,
     startY: number,
@@ -783,56 +853,80 @@ function generateWorld(): TerrainTile[][] {
   };
 
   // Chemin organique avec courbes mais connexions garanties
+  type SmartPathOptions = {
+    waypoints?: Array<[number, number]>;
+    seed?: number;
+    switchChance?: number;
+  };
+
   const drawSmartPath = (
     startX: number,
     startY: number,
     endX: number,
-    endY: number
+    endY: number,
+    options?: SmartPathOptions
   ) => {
-    // Tracer un chemin avec variation mais connexions garanties
+    const points: Array<[number, number]> = [
+      [startX, startY],
+      ...(options?.waypoints ?? []),
+      [endX, endY],
+    ];
+
     let currentX = startX;
     let currentY = startY;
+    let stepIndex = 0;
+    const baseSeed =
+      options?.seed ??
+      startX * 101 +
+        startY * 233 +
+        endX * 379 +
+        endY * 557 +
+        (options?.waypoints?.length ?? 0) * 89;
 
-    // Placer le point de départ
-    if (map[currentY]?.[currentX] !== undefined) {
-      map[currentY][currentX].base = TILE_KIND.GRASS;
-      map[currentY][currentX].overlay = TILE_KIND.PATH;
-    }
+    const randomAtStep = () => pseudoRandom(baseSeed + stepIndex++);
 
-    // Alterner entre horizontal et vertical pour créer des angles naturels
-    let preferHorizontal = Math.abs(endX - startX) > Math.abs(endY - startY);
-
-    while (currentX !== endX || currentY !== endY) {
-      const needsHorizontal = currentX !== endX;
-      const needsVertical = currentY !== endY;
-
-      // Changer de direction parfois pour créer des angles et jonctions
-      if (needsHorizontal && needsVertical) {
-        // Créer des T naturels en alternant la priorité
-        if (preferHorizontal && needsHorizontal) {
-          if (currentX < endX) currentX++;
-          else currentX--;
-        } else if (needsVertical) {
-          if (currentY < endY) currentY++;
-          else currentY--;
-        }
-
-        // Changer de priorité de temps en temps pour créer des angles
-        if (Math.random() < 0.3) {
-          preferHorizontal = !preferHorizontal;
-        }
-      } else if (needsHorizontal) {
-        if (currentX < endX) currentX++;
-        else currentX--;
-      } else if (needsVertical) {
-        if (currentY < endY) currentY++;
-        else currentY--;
+    const placePath = (x: number, y: number) => {
+      if (map[y]?.[x] !== undefined) {
+        map[y][x].base = TILE_KIND.GRASS;
+        map[y][x].overlay = TILE_KIND.PATH;
       }
+    };
 
-      // Placer le chemin à cette position
-      if (map[currentY]?.[currentX] !== undefined) {
-        map[currentY][currentX].base = TILE_KIND.GRASS;
-        map[currentY][currentX].overlay = TILE_KIND.PATH;
+    placePath(currentX, currentY);
+
+    for (let index = 1; index < points.length; index++) {
+      const [targetX, targetY] = points[index];
+      let preferHorizontal =
+        Math.abs(targetX - currentX) >= Math.abs(targetY - currentY);
+
+      let safety = 0;
+      while ((currentX !== targetX || currentY !== targetY) && safety < 512) {
+        safety++;
+        const dx = targetX - currentX;
+        const dy = targetY - currentY;
+        const needsHorizontal = dx !== 0;
+        const needsVertical = dy !== 0;
+
+        const horizontalStep = dx === 0 ? 0 : dx > 0 ? 1 : -1;
+        const verticalStep = dy === 0 ? 0 : dy > 0 ? 1 : -1;
+
+        if (needsHorizontal && needsVertical) {
+          if (preferHorizontal) {
+            currentX += horizontalStep;
+          } else {
+            currentY += verticalStep;
+          }
+
+          if (randomAtStep() < (options?.switchChance ?? 0.35)) {
+            preferHorizontal = !preferHorizontal;
+          }
+        } else if (needsHorizontal) {
+          currentX += horizontalStep;
+        } else if (needsVertical) {
+          currentY += verticalStep;
+        }
+
+        placePath(currentX, currentY);
       }
     }
   };
@@ -952,18 +1046,31 @@ function generateWorld(): TerrainTile[][] {
   }
 
   // Ponds and beaches
-  fillRect(6, 5, 10, 4, TILE_KIND.WATER);
+  fillOrganicRect(6, 5, 10, 4, TILE_KIND.WATER, {
+    maxOffset: 1,
+    seed: 42,
+  });
   // Bordure de sable en base pour éviter que le décor repose sur du gazon
   outlineRect(5, 4, 12, 6, TILE_KIND.SAND);
   // Conserver une transition douce éventuellement utilisée par le rendu
   outlineRect(5, 4, 12, 6, TILE_KIND.SAND, true);
 
-  fillRect(42, 30, 10, 6, TILE_KIND.WATER);
+  fillOrganicRect(42, 30, 10, 6, TILE_KIND.WATER, {
+    maxOffset: 2,
+    seed: 84,
+    stepEvery: 2,
+    stepSize: 1,
+  });
   outlineRect(41, 29, 12, 8, TILE_KIND.SAND);
   outlineRect(41, 29, 12, 8, TILE_KIND.SAND, true);
 
   // Farmland belt in the south-west
-  fillRect(6, 34, 12, 6, TILE_KIND.FIELD);
+  fillOrganicRect(6, 34, 12, 6, TILE_KIND.FIELD, {
+    maxOffset: 3,
+    seed: 128,
+    stepEvery: 2,
+    stepSize: 1,
+  });
   scatterTrees([
     [5, 33],
     [18, 33],
@@ -972,8 +1079,14 @@ function generateWorld(): TerrainTile[][] {
   ]);
 
   // Flower meadows near the creative quarter
-  fillRect(38, 16, 6, 4, TILE_KIND.FLOWER);
-  fillRect(38, 28, 6, 4, TILE_KIND.FLOWER);
+  fillOrganicRect(38, 16, 6, 4, TILE_KIND.FLOWER, {
+    maxOffset: 2,
+    seed: 211,
+  });
+  fillOrganicRect(38, 28, 6, 4, TILE_KIND.FLOWER, {
+    maxOffset: 2,
+    seed: 213,
+  });
   scatterFlowers([
     [32, 14],
     [46, 18],
@@ -1002,21 +1115,59 @@ function generateWorld(): TerrainTile[][] {
   ]);
 
   // Path network - réseau unifié centré sur la mairie (30,22)
-  // Épine dorsale principale horizontale passant par la mairie
-  drawHorizontal(12, 48, 22);
+  // Épine dorsale principale horizontale avec légères ondulations
+  drawSmartPath(12, 22, 48, 22, {
+    waypoints: [
+      [18, 21],
+      [24, 23],
+      [30, 22],
+      [36, 21],
+      [42, 24],
+    ],
+    seed: 401,
+    switchChance: 0.25,
+  });
 
   // Connexions vers les quartiers depuis la ligne principale
   // Clarté (14,12) - Nord-Ouest depuis (14,22)
-  drawVertical(12, 22, 14);
+  drawSmartPath(14, 22, 14, 12, {
+    waypoints: [
+      [13, 20],
+      [15, 18],
+      [13, 15],
+    ],
+    seed: 402,
+  });
 
   // Création (44,12) - Nord-Est depuis (44,22)
-  drawVertical(12, 22, 44);
+  drawSmartPath(44, 22, 44, 12, {
+    waypoints: [
+      [45, 20],
+      [43, 18],
+      [45, 15],
+    ],
+    seed: 403,
+  });
 
   // Décision (14,32) - Sud-Ouest depuis (14,22)
-  drawVertical(22, 32, 14);
+  drawSmartPath(14, 22, 14, 32, {
+    waypoints: [
+      [13, 24],
+      [15, 27],
+      [13, 30],
+    ],
+    seed: 404,
+  });
 
   // Éthique (44,32) - Sud-Est depuis (44,22)
-  drawVertical(22, 32, 44);
+  drawSmartPath(44, 22, 44, 32, {
+    waypoints: [
+      [45, 24],
+      [43, 27],
+      [45, 30],
+    ],
+    seed: 405,
+  });
 
   // Decorative trees framing the plazas
   scatterTrees([
