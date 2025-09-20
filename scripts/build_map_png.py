@@ -79,6 +79,15 @@ class Texture:
     description: str | None
 
 
+@dataclass(frozen=True)
+class EdgePlacement:
+    """Décrit l'application d'une tuile de bordure sur l'île."""
+
+    tile: str
+    position: tuple[int, int]
+    touches_outside: bool
+
+
 def parse_connections(raw: str | None) -> Tuple[str, ...]:
     """Transforme la chaîne de directions en tuple trié."""
 
@@ -648,7 +657,7 @@ def compute_island_edges(
     falaise_tiles: Dict[str | None, Dict[Tuple[str, ...], Dict[str, str]]],
     width: int,
     height: int,
-) -> List[tuple[str, tuple[int, int]]]:
+) -> List[EdgePlacement]:
     """Calcule les tuiles de contour à superposer sur l'île."""
 
     orientation_to_delta: Dict[str, tuple[int, int]] = {
@@ -711,7 +720,7 @@ def compute_island_edges(
         priorities[target] = current_priority
         by_island_cell[target] = (orientation, orientation_type, is_outside)
 
-    overlays: List[tuple[str, tuple[int, int]]] = []
+    placements: List[EdgePlacement] = []
     for (x, y) in sorted(by_island_cell, key=lambda item: (item[1], item[0])):
         orientation, orientation_type, is_outside = by_island_cell[(x, y)]
         effective_style = (
@@ -729,9 +738,11 @@ def compute_island_edges(
             falaise_tiles,
         )
         if tile:
-            overlays.append((tile, (x, y)))
+            placements.append(
+                EdgePlacement(tile=tile, position=(x, y), touches_outside=is_outside)
+            )
 
-    return overlays
+    return placements
 
 
 def assemble_map(
@@ -776,6 +787,16 @@ def assemble_map(
     island_cells = generate_island(width, height, rng)
     fill_small_lakes(island_cells, width, height)
 
+    edge_placements = compute_island_edges(
+        island_cells,
+        chosen_material,
+        edge_style,
+        bordure_tiles,
+        falaise_tiles,
+        width,
+        height,
+    )
+
     tile_size = background.width
     path_index = build_path_index(textures, path_style)
     library = TileLibrary(PNG_DIR)
@@ -792,18 +813,17 @@ def assemble_map(
     for (x, y) in island_cells:
         canvas.paste(material_image, (x * tile_size, y * tile_size))
 
-    # Ajoute le contour (falaise ou bordure).
-    edge_overlays = compute_island_edges(
-        island_cells,
-        chosen_material,
-        edge_style,
-        bordure_tiles,
-        falaise_tiles,
-        width,
-        height,
-    )
-    for tile_name, (x, y) in edge_overlays:
-        tile_image = library.get(tile_name)
+    # Prépare les cellules de contour exposées à l'eau extérieure.
+    for placement in edge_placements:
+        if not placement.touches_outside:
+            continue
+        x, y = placement.position
+        canvas.paste(background_image, (x * tile_size, y * tile_size))
+
+    # Ajoute le contour (falaise ou bordure) avec transparence.
+    for placement in edge_placements:
+        tile_image = library.get(placement.tile)
+        x, y = placement.position
         canvas.paste(tile_image, (x * tile_size, y * tile_size), tile_image)
 
     # Génère un trajet continu à l'intérieur de l'île.
