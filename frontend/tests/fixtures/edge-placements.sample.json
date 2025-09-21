@@ -1,0 +1,56 @@
+{
+  "width": 10,
+  "height": 10,
+  "island": [
+    [3, 3],
+    [4, 3],
+    [5, 3],
+    [3, 4],
+    [5, 4],
+    [3, 5],
+    [4, 5],
+    [5, 5]
+  ],
+  "placements": {
+    "3,3": {
+      "orientation": ["southeast"],
+      "variant": "interior",
+      "touchesOutside": false
+    },
+    "3,4": {
+      "orientation": ["west"],
+      "variant": "exterior",
+      "touchesOutside": true
+    },
+    "3,5": {
+      "orientation": ["northeast"],
+      "variant": "interior",
+      "touchesOutside": false
+    },
+    "4,3": {
+      "orientation": ["north"],
+      "variant": "exterior",
+      "touchesOutside": true
+    },
+    "4,5": {
+      "orientation": ["north"],
+      "variant": "exterior",
+      "touchesOutside": false
+    },
+    "5,3": {
+      "orientation": ["southwest"],
+      "variant": "interior",
+      "touchesOutside": false
+    },
+    "5,4": {
+      "orientation": ["west"],
+      "variant": "exterior",
+      "touchesOutside": false
+    },
+    "5,5": {
+      "orientation": ["northwest"],
+      "variant": "interior",
+      "touchesOutside": false
+    }
+  }
+}

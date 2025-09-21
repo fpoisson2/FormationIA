@@ -191,55 +191,121 @@ function atlas(name: string): TileCoord {
 
 const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
 
-const FALLBACK_SAND_TILES = {
-  center: atlas("mapTile_017.png"),
-  north: atlas("mapTile_002.png"),
-  south: atlas("mapTile_047.png"),
-  east: atlas("mapTile_018.png"),
-  west: atlas("mapTile_016.png"),
-  northeast: atlas("mapTile_003.png"),
-  northwest: atlas("mapTile_001.png"),
-  southeast: atlas("mapTile_033.png"),
-  southwest: atlas("mapTile_046.png"),
-} as const;
+const EDGE_DIRECTIONS = [
+  "north",
+  "south",
+  "east",
+  "west",
+  "northeast",
+  "northwest",
+  "southeast",
+  "southwest",
+] as const;
 
-function deriveSandTilesFromAtlas() {
+type EdgeDirection = (typeof EDGE_DIRECTIONS)[number];
+
+type EdgeVariantType = "interior" | "exterior";
+
+type SandEdgeVariant = {
+  exterior: TileCoord;
+  interior?: TileCoord;
+};
+
+type SandTiles = {
+  center: TileCoord;
+  edges: Record<EdgeDirection, SandEdgeVariant>;
+};
+
+const EDGE_DIRECTION_SET = new Set<EdgeDirection>(EDGE_DIRECTIONS);
+
+type EdgeOrientation = readonly string[];
+
+export type IslandEdgePlacement = {
+  orientation: EdgeOrientation;
+  variant: EdgeVariantType;
+  touchesOutside: boolean;
+};
+
+const FALLBACK_SAND_TILES: SandTiles = {
+  center: atlas("mapTile_017.png"),
+  edges: {
+    north: { exterior: atlas("mapTile_002.png") },
+    south: { exterior: atlas("mapTile_047.png") },
+    east: { exterior: atlas("mapTile_018.png") },
+    west: { exterior: atlas("mapTile_016.png") },
+    northeast: {
+      exterior: atlas("mapTile_003.png"),
+      interior: atlas("mapTile_019.png"),
+    },
+    northwest: {
+      exterior: atlas("mapTile_001.png"),
+      interior: atlas("mapTile_020.png"),
+    },
+    southeast: {
+      exterior: atlas("mapTile_033.png"),
+      interior: atlas("mapTile_004.png"),
+    },
+    southwest: {
+      exterior: atlas("mapTile_046.png"),
+      interior: atlas("mapTile_005.png"),
+    },
+  },
+};
+
+function deriveSandTilesFromAtlas(): SandTiles {
   const sandEntries = Array.from(MAP_PACK_ATLAS.values()).filter(
     (entry) => entry.category === "terrain" && entry.subtype === "sand"
   );
 
-  const pick = (
-    predicate: (entry: AtlasEntry) => boolean,
-    fallbackKey: keyof typeof FALLBACK_SAND_TILES
-  ): TileCoord => {
-    const match = sandEntries.find(predicate);
-    return match ? atlas(match.name) : FALLBACK_SAND_TILES[fallbackKey];
+  const derived: SandTiles = {
+    center: [...FALLBACK_SAND_TILES.center] as TileCoord,
+    edges: EDGE_DIRECTIONS.reduce((acc, direction) => {
+      const fallback = FALLBACK_SAND_TILES.edges[direction];
+      acc[direction] = {
+        exterior: [...fallback.exterior] as TileCoord,
+        ...(fallback.interior
+          ? { interior: [...fallback.interior] as TileCoord }
+          : {}),
+      };
+      return acc;
+    }, {} as Record<EdgeDirection, SandEdgeVariant>),
   };
 
-  const pickByConnection = (
-    connection: string,
-    fallbackKey: keyof typeof FALLBACK_SAND_TILES
-  ) =>
-    pick(
-      (entry) =>
-        entry.connections.includes(connection) &&
-        (entry.tags.includes("bordure") ||
-          entry.tags.includes("falaise") ||
-          entry.tags.includes("coin_interieur")),
-      fallbackKey
-    );
+  for (const entry of sandEntries) {
+    if (entry.tags.includes("material")) {
+      derived.center = atlas(entry.name);
+      continue;
+    }
 
-  return {
-    center: pick((entry) => entry.tags.includes("material"), "center"),
-    north: pickByConnection("north", "north"),
-    south: pickByConnection("south", "south"),
-    east: pickByConnection("east", "east"),
-    west: pickByConnection("west", "west"),
-    northeast: pickByConnection("northeast", "northeast"),
-    northwest: pickByConnection("northwest", "northwest"),
-    southeast: pickByConnection("southeast", "southeast"),
-    southwest: pickByConnection("southwest", "southwest"),
-  } as const;
+    if (!entry.connections.length) {
+      continue;
+    }
+
+    const orientationKey = [...entry.connections].sort().join("+");
+    if (!EDGE_DIRECTION_SET.has(orientationKey as EdgeDirection)) {
+      continue;
+    }
+
+    const bucket = derived.edges[orientationKey as EdgeDirection];
+    if (!bucket) {
+      continue;
+    }
+
+    const isInterior = entry.tags.includes("coin_interieur");
+    const isEdgeCandidate =
+      isInterior || entry.tags.includes("bordure") || entry.tags.includes("falaise");
+    if (!isEdgeCandidate) {
+      continue;
+    }
+
+    if (isInterior) {
+      bucket.interior = atlas(entry.name);
+    } else {
+      bucket.exterior = atlas(entry.name);
+    }
+  }
+
+  return derived;
 }
 
 // Fonctions utilitaires pour rechercher les tuiles par métadonnées
@@ -329,6 +395,7 @@ type TerrainTile = {
   base: TileKind;
   overlay?: TileKind;
   cliffConnections?: string[];
+  edge?: IslandEdgePlacement;
 };
 
 function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
@@ -391,6 +458,13 @@ type GrassDirection = Exclude<GrassVariantKey, "center">;
 
 type GrassTiles = { center: TileCoord } & Partial<Record<GrassDirection, TileCoord>>;
 
+type PartialSandEdgeVariant = Partial<Record<"exterior" | "interior", TileCoord>>;
+
+type PartialSandTiles = {
+  center?: TileCoord;
+  edges?: Partial<Record<EdgeDirection, PartialSandEdgeVariant>>;
+};
+
 type Tileset = {
   mode: TilesetMode;
   url?: string;
@@ -399,17 +473,7 @@ type Tileset = {
     grass: GrassTiles;
     path: TileCoord;
     farmland: TileCoord;
-    sand: {
-      center: TileCoord;
-      north: TileCoord;
-      south: TileCoord;
-      east: TileCoord;
-      west: TileCoord;
-      northeast: TileCoord;
-      northwest: TileCoord;
-      southeast: TileCoord;
-      southwest: TileCoord;
-    };
+    sand: SandTiles;
     water: {
       deep: TileCoord;
       shore: TileCoord;
@@ -431,6 +495,24 @@ type Tileset = {
 
 const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
 
+function cloneSandTiles(source: SandTiles): SandTiles {
+  const clonedEdges = EDGE_DIRECTIONS.reduce((acc, direction) => {
+    const variant = source.edges[direction];
+    acc[direction] = {
+      exterior: [...variant.exterior] as TileCoord,
+      ...(variant.interior
+        ? { interior: [...variant.interior] as TileCoord }
+        : {}),
+    };
+    return acc;
+  }, {} as Record<EdgeDirection, SandEdgeVariant>);
+
+  return {
+    center: [...source.center] as TileCoord,
+    edges: clonedEdges,
+  };
+}
+
 const DEFAULT_ATLAS: Tileset = {
   mode: "atlas",
   url: mapPackAtlas,
@@ -446,7 +528,7 @@ const DEFAULT_ATLAS: Tileset = {
     },
     path: atlas("mapTile_128.png"),
     farmland: atlas("mapTile_087.png"),
-    sand: { ...DERIVED_SAND_TILES },
+    sand: cloneSandTiles(DERIVED_SAND_TILES),
     water: {
       deep: atlas("mapTile_188.png"),
       shore: atlas("mapTile_171.png"),
@@ -486,17 +568,7 @@ function cloneTileset(source: Tileset): Tileset {
       })(),
       path: [...source.map.path] as TileCoord,
       farmland: [...source.map.farmland] as TileCoord,
-      sand: {
-        center: [...source.map.sand.center] as TileCoord,
-        north: [...source.map.sand.north] as TileCoord,
-        south: [...source.map.sand.south] as TileCoord,
-        east: [...source.map.sand.east] as TileCoord,
-        west: [...source.map.sand.west] as TileCoord,
-        northeast: [...source.map.sand.northeast] as TileCoord,
-        northwest: [...source.map.sand.northwest] as TileCoord,
-        southeast: [...source.map.sand.southeast] as TileCoord,
-        southwest: [...source.map.sand.southwest] as TileCoord,
-      },
+      sand: cloneSandTiles(source.map.sand),
       water: {
         deep: [...source.map.water.deep] as TileCoord,
         shore: [...source.map.water.shore] as TileCoord,
@@ -563,6 +635,39 @@ function mergeGrassTiles(
   return merged;
 }
 
+function mergeSandTiles(partial: PartialSandTiles | undefined, base: SandTiles): SandTiles {
+  const mergedCenter = normalizeCoord(partial?.center as TileCoord | undefined, base.center);
+
+  const mergedEdges = EDGE_DIRECTIONS.reduce((acc, direction) => {
+    const baseVariant = base.edges[direction];
+    const partialVariant = partial?.edges?.[direction];
+
+    const exterior = normalizeCoord(
+      partialVariant?.exterior as TileCoord | undefined,
+      baseVariant.exterior
+    );
+
+    const mergedVariant: SandEdgeVariant = { exterior };
+
+    if (partialVariant?.interior) {
+      mergedVariant.interior = normalizeCoord(
+        partialVariant.interior as TileCoord,
+        baseVariant.interior ?? exterior
+      );
+    } else if (baseVariant.interior) {
+      mergedVariant.interior = [...baseVariant.interior] as TileCoord;
+    }
+
+    acc[direction] = mergedVariant;
+    return acc;
+  }, {} as Record<EdgeDirection, SandEdgeVariant>);
+
+  return {
+    center: mergedCenter,
+    edges: mergedEdges,
+  };
+}
+
 function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
   const base = cloneTileset(DEFAULT_ATLAS);
   if (!partial || typeof partial !== "object") {
@@ -580,44 +685,7 @@ function mergeWithDefault(partial?: Partial<Tileset>): Tileset {
         map.farmland as TileCoord | undefined,
         base.map.farmland
       ),
-      sand: {
-        center: normalizeCoord(
-          map.sand?.center as TileCoord | undefined,
-          base.map.sand.center
-        ),
-        north: normalizeCoord(
-          map.sand?.north as TileCoord | undefined,
-          base.map.sand.north
-        ),
-        south: normalizeCoord(
-          map.sand?.south as TileCoord | undefined,
-          base.map.sand.south
-        ),
-        east: normalizeCoord(
-          map.sand?.east as TileCoord | undefined,
-          base.map.sand.east
-        ),
-        west: normalizeCoord(
-          map.sand?.west as TileCoord | undefined,
-          base.map.sand.west
-        ),
-        northeast: normalizeCoord(
-          map.sand?.northeast as TileCoord | undefined,
-          base.map.sand.northeast
-        ),
-        northwest: normalizeCoord(
-          map.sand?.northwest as TileCoord | undefined,
-          base.map.sand.northwest
-        ),
-        southeast: normalizeCoord(
-          map.sand?.southeast as TileCoord | undefined,
-          base.map.sand.southeast
-        ),
-        southwest: normalizeCoord(
-          map.sand?.southwest as TileCoord | undefined,
-          base.map.sand.southwest
-        ),
-      },
+      sand: mergeSandTiles(map.sand as PartialSandTiles | undefined, base.map.sand),
       water: {
         deep: normalizeCoord(
           map.water?.deep as TileCoord | undefined,
@@ -1080,6 +1148,233 @@ function fillSmallLakesInIsland(
   }
 }
 
+type EdgeClassification = {
+  orientation: EdgeOrientation;
+  orientationType: EdgeVariantType;
+  target: CoordKey;
+};
+
+function classifyEdgeCellForIsland(
+  cell: Coord,
+  island: Set<CoordKey>,
+  isOutside: boolean
+): EdgeClassification[] {
+  const [x, y] = cell;
+  const north = island.has(coordKey(x, y - 1));
+  const south = island.has(coordKey(x, y + 1));
+  const east = island.has(coordKey(x + 1, y));
+  const west = island.has(coordKey(x - 1, y));
+  const northeast = island.has(coordKey(x + 1, y - 1));
+  const northwest = island.has(coordKey(x - 1, y - 1));
+  const southeast = island.has(coordKey(x + 1, y + 1));
+  const southwest = island.has(coordKey(x - 1, y + 1));
+
+  if (
+    !north &&
+    !south &&
+    !east &&
+    !west &&
+    !northeast &&
+    !northwest &&
+    !southeast &&
+    !southwest
+  ) {
+    return [];
+  }
+
+  const placements: EdgeClassification[] = [];
+
+  const addCandidate = (
+    orientation: EdgeOrientation,
+    orientationType: EdgeVariantType,
+    targetX: number,
+    targetY: number
+  ) => {
+    const key = coordKey(targetX, targetY);
+    if (island.has(key)) {
+      placements.push({ orientation, orientationType, target: key });
+    }
+  };
+
+  if (south) {
+    addCandidate(["north"], "exterior", x, y + 1);
+  }
+  if (north) {
+    addCandidate(["south"], "exterior", x, y - 1);
+  }
+  if (east) {
+    addCandidate(["west"], "exterior", x + 1, y);
+  }
+  if (west) {
+    addCandidate(["east"], "exterior", x - 1, y);
+  }
+
+  if (north && west && !south && !east) {
+    addCandidate(["southeast"], isOutside ? "exterior" : "interior", x - 1, y - 1);
+  }
+  if (north && east && !south && !west) {
+    addCandidate(["southwest"], isOutside ? "exterior" : "interior", x + 1, y - 1);
+  }
+  if (south && west && !north && !east) {
+    addCandidate(["northeast"], isOutside ? "exterior" : "interior", x - 1, y + 1);
+  }
+  if (south && east && !north && !west) {
+    addCandidate(["northwest"], isOutside ? "exterior" : "interior", x + 1, y + 1);
+  }
+
+  if (southwest) {
+    addCandidate(["northeast"], "exterior", x - 1, y + 1);
+  }
+  if (southeast) {
+    addCandidate(["northwest"], "exterior", x + 1, y + 1);
+  }
+  if (northwest) {
+    addCandidate(["southeast"], "exterior", x - 1, y - 1);
+  }
+  if (northeast) {
+    addCandidate(["southwest"], "exterior", x + 1, y - 1);
+  }
+
+  return placements;
+}
+
+export function computeIslandEdgePlacements(
+  island: Set<CoordKey>,
+  width: number,
+  height: number
+): Map<CoordKey, IslandEdgePlacement> {
+  const cardinalOffsets: Record<string, Coord> = {
+    north: [0, -1],
+    south: [0, 1],
+    east: [1, 0],
+    west: [-1, 0],
+  };
+
+  const cornerCardinals: Record<string, [string, string]> = {
+    northeast: ["north", "east"],
+    northwest: ["north", "west"],
+    southeast: ["south", "east"],
+    southwest: ["south", "west"],
+  };
+
+  const outsideWater = findOutsideWaterCells(island, width, height);
+  const candidates = new Map<CoordKey, boolean>();
+
+  for (const cellKey of island) {
+    const [x, y] = coordFromKey(cellKey);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) {
+          continue;
+        }
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+          continue;
+        }
+        const neighborKey = coordKey(nx, ny);
+        if (island.has(neighborKey)) {
+          continue;
+        }
+        const isOutside = outsideWater.has(neighborKey);
+        const previous = candidates.get(neighborKey);
+        if (previous === undefined || (!previous && isOutside)) {
+          candidates.set(neighborKey, isOutside);
+        }
+      }
+    }
+  }
+
+  const priority = (
+    orientation: EdgeOrientation,
+    orientationType: EdgeVariantType,
+    targetKey: CoordKey
+  ): [number, number] => {
+    const direction = orientation[0] ?? "";
+    if (direction in cornerCardinals) {
+      const neighbors = cornerCardinals[direction];
+      let outsideTouch = 0;
+      const [tx, ty] = coordFromKey(targetKey);
+      for (const card of neighbors) {
+        const [ox, oy] = cardinalOffsets[card];
+        const nx = tx + ox;
+        const ny = ty + oy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+          outsideTouch += 1;
+          continue;
+        }
+        const neighborKey = coordKey(nx, ny);
+        if (island.has(neighborKey)) {
+          continue;
+        }
+        if (outsideWater.has(neighborKey)) {
+          outsideTouch += 1;
+        }
+      }
+      const isTrueCorner = outsideTouch === 2 || orientationType === "interior";
+      const diagonalRank = isTrueCorner ? 0 : 2;
+      const interiorRank = orientationType === "interior" ? 0 : 1;
+      return [diagonalRank, interiorRank];
+    }
+
+    return [1, orientationType === "interior" ? 0 : 1];
+  };
+
+  const placements = new Map<CoordKey, IslandEdgePlacement>();
+  const priorities = new Map<CoordKey, [number, number]>();
+
+  for (const [candidateKey, isOutside] of Array.from(candidates.entries()).sort(
+    (a, b) => {
+      const [ax, ay] = coordFromKey(a[0]);
+      const [bx, by] = coordFromKey(b[0]);
+      return ay === by ? ax - bx : ay - by;
+    }
+  )) {
+    const candidateCoord = coordFromKey(candidateKey);
+    const classifications = classifyEdgeCellForIsland(
+      candidateCoord,
+      island,
+      isOutside
+    );
+
+    for (const { orientation, orientationType, target } of classifications) {
+      if (!orientation.length) {
+        continue;
+      }
+
+      const direction = orientation[0];
+      let effectiveType = orientationType;
+      if (effectiveType === "exterior" && direction in cornerCardinals) {
+        const neighbors = cornerCardinals[direction];
+        const [tx, ty] = coordFromKey(target);
+        if (
+          neighbors.every((card) => {
+            const [ox, oy] = cardinalOffsets[card];
+            return island.has(coordKey(tx + ox, ty + oy));
+          })
+        ) {
+          effectiveType = "interior";
+        }
+      }
+
+      const placementPriority = priority(orientation, effectiveType, target);
+      const previousPriority = priorities.get(target);
+      if (previousPriority && previousPriority <= placementPriority) {
+        continue;
+      }
+
+      priorities.set(target, placementPriority);
+      placements.set(target, {
+        orientation,
+        variant: effectiveType,
+        touchesOutside: isOutside,
+      });
+    }
+  }
+
+  return placements;
+}
+
 function smoothIslandShape(island: Set<CoordKey>, passes = 2) {
   if (island.size === 0 || passes <= 0) {
     return;
@@ -1304,6 +1599,21 @@ function generateWorld(): GeneratedWorld {
     row[x].base = TILE_KIND.SAND;
     delete row[x].overlay;
     row[x].cliffConnections = undefined;
+    row[x].edge = undefined;
+  }
+
+  const edgePlacements = computeIslandEdgePlacements(island, WORLD_WIDTH, WORLD_HEIGHT);
+  for (const [key, placement] of edgePlacements) {
+    const [x, y] = coordFromKey(key);
+    const tile = tiles[y]?.[x];
+    if (!tile) {
+      continue;
+    }
+    tile.edge = {
+      orientation: placement.orientation.slice() as EdgeOrientation,
+      variant: placement.variant,
+      touchesOutside: placement.touchesOutside,
+    };
   }
 
   const desiredPathLength = Math.max(
@@ -1654,20 +1964,86 @@ function getGrassTileCoord(x: number, y: number, ts: Tileset): TileCoord {
   return bestCoord;
 }
 
+function resolveEdgeDirection(orientation: EdgeOrientation): EdgeDirection | null {
+  if (orientation.length === 0) {
+    return null;
+  }
+  if (orientation.length === 1) {
+    const direction = orientation[0] as EdgeDirection;
+    return EDGE_DIRECTION_SET.has(direction) ? direction : null;
+  }
+  const key = [...orientation].sort().join("+") as EdgeDirection;
+  return EDGE_DIRECTION_SET.has(key) ? key : null;
+}
+
+function getSandEdgeVariantCoord(
+  ts: Tileset,
+  orientation: EdgeOrientation,
+  variant: EdgeVariantType
+): TileCoord | null {
+  const direction = resolveEdgeDirection(orientation);
+  if (!direction) {
+    return null;
+  }
+  const bucket = ts.map.sand.edges[direction];
+  if (!bucket) {
+    return null;
+  }
+  const preferred = variant === "interior" ? bucket.interior : bucket.exterior;
+  return preferred ?? bucket.exterior ?? bucket.interior ?? null;
+}
+
 function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
+  const tile = world[y]?.[x];
+  if (tile?.edge && !tile.edge.touchesOutside) {
+    const oriented = getSandEdgeVariantCoord(
+      ts,
+      tile.edge.orientation,
+      tile.edge.variant
+    );
+    if (oriented) {
+      return oriented;
+    }
+  }
+
   const northWater = tileLayersAt(x, y - 1).base === TILE_KIND.WATER;
   const southWater = tileLayersAt(x, y + 1).base === TILE_KIND.WATER;
   const westWater = tileLayersAt(x - 1, y).base === TILE_KIND.WATER;
   const eastWater = tileLayersAt(x + 1, y).base === TILE_KIND.WATER;
 
-  if (northWater && eastWater) return ts.map.sand.northeast;
-  if (southWater && eastWater) return ts.map.sand.southeast;
-  if (northWater && westWater) return ts.map.sand.northwest;
-  if (southWater && westWater) return ts.map.sand.southwest;
-  if (northWater) return ts.map.sand.north;
-  if (southWater) return ts.map.sand.south;
-  if (eastWater) return ts.map.sand.east;
-  if (westWater) return ts.map.sand.west;
+  const pickFallback = (direction: EdgeDirection): TileCoord | null => {
+    const variant = ts.map.sand.edges[direction];
+    if (!variant) {
+      return null;
+    }
+    return variant.exterior ?? variant.interior ?? null;
+  };
+
+  if (northWater && eastWater) {
+    return pickFallback("northeast") ?? ts.map.sand.center;
+  }
+  if (southWater && eastWater) {
+    return pickFallback("southeast") ?? ts.map.sand.center;
+  }
+  if (northWater && westWater) {
+    return pickFallback("northwest") ?? ts.map.sand.center;
+  }
+  if (southWater && westWater) {
+    return pickFallback("southwest") ?? ts.map.sand.center;
+  }
+  if (northWater) {
+    return pickFallback("north") ?? ts.map.sand.center;
+  }
+  if (southWater) {
+    return pickFallback("south") ?? ts.map.sand.center;
+  }
+  if (eastWater) {
+    return pickFallback("east") ?? ts.map.sand.center;
+  }
+  if (westWater) {
+    return pickFallback("west") ?? ts.map.sand.center;
+  }
+
   return ts.map.sand.center;
 }
 
@@ -1820,25 +2196,39 @@ function TileWithTs({
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
 
-  // Rendu simple : base + overlay si existe
-  const baseCoord = getAtlasTile(terrain.base, activeTileset, x, y);
+  const edgePlacement = terrain.edge;
+  const shouldUseWaterBase = edgePlacement?.touchesOutside ?? false;
+
+  const baseCoord = shouldUseWaterBase
+    ? getWaterTileCoord(x, y, activeTileset)
+    : getAtlasTile(terrain.base, activeTileset, x, y);
+
   const overlayCoord = terrain.overlay
     ? getAtlasTile(terrain.overlay, activeTileset, x, y)
     : null;
 
+  const edgeOverlayCoord = edgePlacement?.touchesOutside
+    ? getSandEdgeVariantCoord(
+        activeTileset,
+        edgePlacement.orientation,
+        edgePlacement.variant
+      )
+    : null;
+
+  const overlays = [edgeOverlayCoord, overlayCoord].filter(
+    (coord): coord is TileCoord => Array.isArray(coord)
+  );
+
   return (
     <div className="relative">
-      {/* Couche de base */}
       {baseCoord && (
         <SpriteFromAtlas ts={activeTileset} coord={baseCoord} scale={tileSize} />
       )}
-
-      {/* Couche overlay par-dessus */}
-      {overlayCoord && (
-        <div className="absolute inset-0">
-          <SpriteFromAtlas ts={activeTileset} coord={overlayCoord} scale={tileSize} />
+      {overlays.map((coord, index) => (
+        <div key={index} className="absolute inset-0">
+          <SpriteFromAtlas ts={activeTileset} coord={coord} scale={tileSize} />
         </div>
-      )}
+      ))}
     </div>
   );
 }
