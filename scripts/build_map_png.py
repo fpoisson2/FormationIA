@@ -23,15 +23,18 @@ from pathlib import Path
 import random
 import re
 import sys
-from typing import Dict, Iterable, Iterator, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Tuple, TYPE_CHECKING
 import xml.etree.ElementTree as ET
 
-try:
-    from PIL import Image
-except ImportError as exc:  # pragma: no cover - dépend de l'environnement d'exécution
-    raise SystemExit(
-        "Pillow doit être installé pour exécuter ce script (pip install Pillow)."
-    ) from exc
+try:  # pragma: no cover - dépend de l'environnement d'exécution
+    from PIL import Image  # type: ignore
+except ImportError:  # pragma: no cover - dépend de l'environnement d'exécution
+    Image = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:
+    from PIL.Image import Image as PILImage
+else:  # pragma: no cover - utilisé uniquement à l'exécution
+    PILImage = Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -252,9 +255,13 @@ class TileLibrary:
 
     def __init__(self, directory: Path) -> None:
         self._directory = directory
-        self._cache: Dict[str, Image.Image] = {}
+        self._cache: Dict[str, PILImage] = {}
 
-    def get(self, name: str) -> Image.Image:
+    def get(self, name: str) -> PILImage:
+        if Image is None:  # pragma: no cover - dépend des options d'installation
+            raise SystemExit(
+                "Pillow doit être installé pour charger des tuiles PNG (pip install Pillow)."
+            )
         if name not in self._cache:
             path = self._directory / name
             if not path.exists():
@@ -848,6 +855,11 @@ def assemble_map(
 
     if width <= 0 or height <= 0:
         raise ValueError("La taille doit être strictement positive.")
+
+    if Image is None:  # pragma: no cover - dépend des options d'installation
+        raise SystemExit(
+            "Pillow doit être installé pour générer une carte PNG (pip install Pillow)."
+        )
 
     if background_tile not in textures:
         raise KeyError(f"Tuile d'arrière-plan inconnue : {background_tile}")
