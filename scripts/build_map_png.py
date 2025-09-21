@@ -592,8 +592,8 @@ def classify_edge_cell(
     cell: tuple[int, int],
     island: set[tuple[int, int]],
     is_outside: bool,
-) -> tuple[Tuple[str, ...], str] | None:
-    """Détermine la tuile de contour à utiliser pour une case d'eau donnée."""
+) -> List[tuple[Tuple[str, ...], str, tuple[int, int]]]:
+    """Détermine les tuiles de contour à considérer autour d'une case d'eau."""
 
     x, y = cell
     north = (x, y - 1) in island
@@ -605,40 +605,65 @@ def classify_edge_cell(
     southeast = (x + 1, y + 1) in island
     southwest = (x - 1, y + 1) in island
 
-    if not (north or south or east or west or northeast or northwest or southeast or southwest):
-        return None
+    if not (
+        north
+        or south
+        or east
+        or west
+        or northeast
+        or northwest
+        or southeast
+        or southwest
+    ):
+        return []
 
-    # Coins intérieurs : la case touche l'île sur deux axes adjacents.
-    if north and west and not south and not east:
-        return (("southeast",), "exterior" if is_outside else "interior")
-    if north and east and not south and not west:
-        return (("southwest",), "exterior" if is_outside else "interior")
-    if south and west and not north and not east:
-        return (("northeast",), "exterior" if is_outside else "interior")
-    if south and east and not north and not west:
-        return (("northwest",), "exterior" if is_outside else "interior")
+    placements: List[tuple[Tuple[str, ...], str, tuple[int, int]]] = []
 
-    # Bords droits (cases adjacentes sur un seul axe cardinal).
+    def add_candidate(
+        orientation: Tuple[str, ...], orientation_type: str, target: tuple[int, int]
+    ) -> None:
+        if target in island:
+            placements.append((orientation, orientation_type, target))
+
+    # Bords droits (adjacence sur un axe cardinal).
     if south:
-        return (("north",), "exterior")
+        add_candidate(("north",), "exterior", (x, y + 1))
     if north:
-        return (("south",), "exterior")
+        add_candidate(("south",), "exterior", (x, y - 1))
     if east:
-        return (("west",), "exterior")
+        add_candidate(("west",), "exterior", (x + 1, y))
     if west:
-        return (("east",), "exterior")
+        add_candidate(("east",), "exterior", (x - 1, y))
 
-    # Coins extérieurs (uniquement la diagonale touche l'île).
+    # Coins intérieurs : deux axes adjacents de terrain entourent l'eau.
+    if north and west and not south and not east:
+        add_candidate(
+            ("southeast",), "exterior" if is_outside else "interior", (x - 1, y - 1)
+        )
+    if north and east and not south and not west:
+        add_candidate(
+            ("southwest",), "exterior" if is_outside else "interior", (x + 1, y - 1)
+        )
+    if south and west and not north and not east:
+        add_candidate(
+            ("northeast",), "exterior" if is_outside else "interior", (x - 1, y + 1)
+        )
+    if south and east and not north and not west:
+        add_candidate(
+            ("northwest",), "exterior" if is_outside else "interior", (x + 1, y + 1)
+        )
+
+    # Coins extérieurs : seule la diagonale touche l'île.
     if southwest:
-        return (("northeast",), "exterior")
+        add_candidate(("northeast",), "exterior", (x - 1, y + 1))
     if southeast:
-        return (("northwest",), "exterior")
+        add_candidate(("northwest",), "exterior", (x + 1, y + 1))
     if northwest:
-        return (("southeast",), "exterior")
+        add_candidate(("southeast",), "exterior", (x - 1, y - 1))
     if northeast:
-        return (("southwest",), "exterior")
+        add_candidate(("southwest",), "exterior", (x + 1, y - 1))
 
-    return None
+    return placements
 
 
 def choose_edge_tile(
@@ -688,16 +713,6 @@ def compute_island_edges(
 ) -> List[EdgePlacement]:
     """Calcule les tuiles de contour à superposer sur l'île."""
 
-    orientation_to_delta: Dict[str, tuple[int, int]] = {
-        "north": (0, 1),
-        "south": (0, -1),
-        "east": (-1, 0),
-        "west": (1, 0),
-        "northeast": (-1, 1),
-        "northwest": (1, 1),
-        "southeast": (-1, -1),
-        "southwest": (1, -1),
-    }
     cardinal_offsets: Dict[str, tuple[int, int]] = {
         "north": (0, -1),
         "south": (0, 1),
@@ -711,11 +726,29 @@ def compute_island_edges(
         "southwest": ("south", "west"),
     }
 
-    def priority(orientation: Tuple[str, ...], orientation_type: str) -> tuple[int, int]:
+    def priority(
+        orientation: Tuple[str, ...],
+        orientation_type: str,
+        target: tuple[int, int],
+    ) -> tuple[int, int]:
         direction = orientation[0] if orientation else ""
-        is_diagonal = direction in {"northeast", "northwest", "southeast", "southwest"}
+        if direction in corner_cardinals:
+            neighbors = corner_cardinals[direction]
+            outside_touch = 0
+            for card in neighbors:
+                nx = target[0] + cardinal_offsets[card][0]
+                ny = target[1] + cardinal_offsets[card][1]
+                if (nx, ny) in island:
+                    continue
+                if not (0 <= nx < width and 0 <= ny < height):
+                    outside_touch += 1
+                elif (nx, ny) in outside_water:
+                    outside_touch += 1
+            is_true_corner = outside_touch == 2 or orientation_type == "interior"
+            diagonal_rank = 0 if is_true_corner else 2
+        else:
+            diagonal_rank = 1
         # Les coins (diagonaux) priment sur les bords, et les variantes interior sur exterior.
-        diagonal_rank = 0 if is_diagonal else 1
         interior_rank = 0 if orientation_type == "interior" else 1
         return (diagonal_rank, interior_rank)
 
@@ -745,42 +778,33 @@ def compute_island_edges(
     for (x, y), is_outside in sorted(
         candidates.items(), key=lambda item: (item[0][1], item[0][0])
     ):
-        classification = classify_edge_cell((x, y), island, is_outside)
-        if not classification:
-            continue
+        for orientation, orientation_type, target in classify_edge_cell(
+            (x, y), island, is_outside
+        ):
+            if not orientation or target not in island:
+                continue
 
-        orientation, orientation_type = classification
-        if not orientation:
-            continue
+            direction = orientation[0]
+            effective_type = orientation_type
+            if effective_type == "exterior" and direction in corner_cardinals:
+                neighbors = corner_cardinals[direction]
+                if all(
+                    (
+                        target[0] + cardinal_offsets[card][0],
+                        target[1] + cardinal_offsets[card][1],
+                    )
+                    in island
+                    for card in neighbors
+                ):
+                    effective_type = "interior"
 
-        direction = orientation[0]
-        delta = orientation_to_delta.get(direction)
-        if delta is None:
-            continue
+            current_priority = priority(orientation, effective_type, target)
+            previous_priority = priorities.get(target)
+            if previous_priority is not None and previous_priority <= current_priority:
+                continue
 
-        target = (x + delta[0], y + delta[1])
-        if target not in island:
-            continue
-
-        if orientation_type == "exterior" and direction in corner_cardinals:
-            neighbors = corner_cardinals[direction]
-            if all(
-                (
-                    target[0] + cardinal_offsets[card][0],
-                    target[1] + cardinal_offsets[card][1],
-                )
-                in island
-                for card in neighbors
-            ):
-                orientation_type = "interior"
-
-        current_priority = priority(orientation, orientation_type)
-        previous_priority = priorities.get(target)
-        if previous_priority is not None and previous_priority <= current_priority:
-            continue
-
-        priorities[target] = current_priority
-        by_island_cell[target] = (orientation, orientation_type, is_outside)
+            priorities[target] = current_priority
+            by_island_cell[target] = (orientation, effective_type, is_outside)
 
     placements: List[EdgePlacement] = []
     for (x, y) in sorted(by_island_cell, key=lambda item: (item[1], item[0])):
