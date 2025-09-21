@@ -1,4 +1,5 @@
 import React, {
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -15,7 +16,19 @@ import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
 import WorkshopExperience from "../pages/WorkshopExperience";
-import ExplorateurIA from "../pages/ExplorateurIA";
+const LazyExplorateurIA = lazy(() => import("../pages/ExplorateurIA"));
+
+const ExplorateurIALoader: ComponentType<ActivityProps> = (props) => (
+  <React.Suspense
+    fallback={
+      <div className="p-8 text-center text-sm text-slate-500">
+        Chargement de l'activité Explorateur IA…
+      </div>
+    }
+  >
+    <LazyExplorateurIA {...props} />
+  </React.Suspense>
+);
 
 export interface ActivityHeaderConfig {
   eyebrow: string;
@@ -70,7 +83,7 @@ export const COMPONENT_REGISTRY = {
   "prompt-dojo": PromptDojo,
   "clarity-path": ClarityPath,
   "clarte-dabord": ClarteDabord,
-  "explorateur-ia": ExplorateurIA,
+  "explorateur-ia": ExplorateurIALoader,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
 
 export type ActivityComponentKey = keyof typeof COMPONENT_REGISTRY;

@@ -29,11 +29,12 @@ type Progress = {
   visited: QuarterId[];
 };
 
-const TILE = 32;
+const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
-const CELL_SIZE = TILE + TILE_GAP;
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
+
+type AtlasCategory = "" | "terrain" | "path" | "object" | "character" | "ui";
 
 type AtlasEntry = {
   name: string;
@@ -42,46 +43,129 @@ type AtlasEntry = {
   width: number;
   height: number;
   description?: string;
-  type?: "terrain" | "path" | "object" | "character" | "ui";
+  category: AtlasCategory;
   subtype?: string;
-  connections?: string; // "north,south,east,west"
-  walkable?: boolean;
-  overlay?: boolean;
-  transparent_bg?: boolean; // true si le fond est transparent
+  tags: string[];
+  connections: string[];
+  walkable: boolean;
+  overlay: boolean;
+  transparent: boolean;
 };
+
+function parseBooleanAttribute(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+function parseListAttribute(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(/[;,]/)
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function parseTokenAttribute(value: string | null | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(/\s+/)
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 function parseAtlasDescription(xml: string): Map<string, AtlasEntry> {
   const entries = new Map<string, AtlasEntry>();
-  const textureRegex = /<SubTexture\s+([^>]+?)\s*\/>/g;
-  let match: RegExpExecArray | null;
-  while ((match = textureRegex.exec(xml)) !== null) {
-    const rawAttributes = match[1];
-    const attributeRegex = /(\w+)="([^"]*)"/g;
-    const attributes: Record<string, string> = {};
-    let attributeMatch: RegExpExecArray | null;
-    while ((attributeMatch = attributeRegex.exec(rawAttributes)) !== null) {
-      attributes[attributeMatch[1]] = attributeMatch[2];
-    }
+
+  const createEntry = (attributes: Record<string, string>): AtlasEntry | null => {
     const name = attributes.name;
     if (!name) {
-      continue;
+      return null;
     }
-    const entry: AtlasEntry = {
+    const category = (attributes.category ?? "") as AtlasCategory;
+    const tags = parseTokenAttribute(attributes.type);
+    const connections = parseListAttribute(attributes.connections);
+    const description = attributes.description ?? attributes.desc;
+    const width = Number(attributes.width ?? 0);
+    const height = Number(attributes.height ?? 0);
+    const overlay = parseBooleanAttribute(attributes.overlay);
+    const transparent = parseBooleanAttribute(
+      attributes.transparent_bg ?? attributes.transparent
+    );
+
+    return {
       name,
       x: Number(attributes.x ?? 0),
       y: Number(attributes.y ?? 0),
-      width: Number(attributes.width ?? 0),
-      height: Number(attributes.height ?? 0),
-      description: attributes.description ?? attributes.desc,
-      type: attributes.type as AtlasEntry["type"],
+      width: Number.isNaN(width) ? 0 : width,
+      height: Number.isNaN(height) ? 0 : height,
+      description,
+      category,
       subtype: attributes.subtype,
-      connections: attributes.connections,
-      walkable: attributes.walkable === "true",
-      overlay: attributes.overlay === "true",
-      transparent_bg: attributes.transparent_bg === "true",
+      tags,
+      connections,
+      walkable: parseBooleanAttribute(attributes.walkable),
+      overlay,
+      transparent,
     };
-    entries.set(name, entry);
+  };
+
+  const parseWithDom = () => {
+    if (typeof DOMParser === "undefined") {
+      return false;
+    }
+    try {
+      const parser = new DOMParser();
+      const xmlDocument = parser.parseFromString(xml, "application/xml");
+      if (xmlDocument.getElementsByTagName("parsererror").length > 0) {
+        return false;
+      }
+      const nodes = Array.from(xmlDocument.getElementsByTagName("SubTexture"));
+      for (const node of nodes) {
+        const attrs: Record<string, string> = {};
+        for (const attribute of Array.from(node.attributes)) {
+          attrs[attribute.name] = attribute.value;
+        }
+        const entry = createEntry(attrs);
+        if (entry) {
+          entries.set(entry.name, entry);
+        }
+      }
+      return entries.size > 0;
+    } catch (error) {
+      console.warn("[ExplorateurIA] Échec du parsing XML via DOMParser", error);
+      return false;
+    }
+  };
+
+  const parseWithRegexFallback = () => {
+    const textureRegex = /<SubTexture\s+([^>]+?)\s*\/>/g;
+    let match: RegExpExecArray | null;
+    while ((match = textureRegex.exec(xml)) !== null) {
+      const rawAttributes = match[1];
+      const attributeRegex = /(\w+)="([^"]*)"/g;
+      const attributes: Record<string, string> = {};
+      let attributeMatch: RegExpExecArray | null;
+      while ((attributeMatch = attributeRegex.exec(rawAttributes)) !== null) {
+        attributes[attributeMatch[1]] = attributeMatch[2];
+      }
+      const entry = createEntry(attributes);
+      if (entry) {
+        entries.set(entry.name, entry);
+      }
+    }
+  };
+
+  if (!parseWithDom()) {
+    parseWithRegexFallback();
   }
+
   return entries;
 }
 
@@ -106,31 +190,88 @@ function atlas(name: string): TileCoord {
 }
 
 const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
-const DEFAULT_POI_TILE = atlas("mapTile_179.png");
+
+const FALLBACK_SAND_TILES = {
+  center: atlas("mapTile_017.png"),
+  north: atlas("mapTile_002.png"),
+  south: atlas("mapTile_047.png"),
+  east: atlas("mapTile_018.png"),
+  west: atlas("mapTile_016.png"),
+  northeast: atlas("mapTile_003.png"),
+  northwest: atlas("mapTile_001.png"),
+  southeast: atlas("mapTile_033.png"),
+  southwest: atlas("mapTile_046.png"),
+} as const;
+
+function deriveSandTilesFromAtlas() {
+  const sandEntries = Array.from(MAP_PACK_ATLAS.values()).filter(
+    (entry) => entry.category === "terrain" && entry.subtype === "sand"
+  );
+
+  const pick = (
+    predicate: (entry: AtlasEntry) => boolean,
+    fallbackKey: keyof typeof FALLBACK_SAND_TILES
+  ): TileCoord => {
+    const match = sandEntries.find(predicate);
+    return match ? atlas(match.name) : FALLBACK_SAND_TILES[fallbackKey];
+  };
+
+  const pickByConnection = (
+    connection: string,
+    fallbackKey: keyof typeof FALLBACK_SAND_TILES
+  ) =>
+    pick(
+      (entry) =>
+        entry.connections.includes(connection) &&
+        (entry.tags.includes("bordure") ||
+          entry.tags.includes("falaise") ||
+          entry.tags.includes("coin_interieur")),
+      fallbackKey
+    );
+
+  return {
+    center: pick((entry) => entry.tags.includes("material"), "center"),
+    north: pickByConnection("north", "north"),
+    south: pickByConnection("south", "south"),
+    east: pickByConnection("east", "east"),
+    west: pickByConnection("west", "west"),
+    northeast: pickByConnection("northeast", "northeast"),
+    northwest: pickByConnection("northwest", "northwest"),
+    southeast: pickByConnection("southeast", "southeast"),
+    southwest: pickByConnection("southwest", "southwest"),
+  } as const;
+}
 
 // Fonctions utilitaires pour rechercher les tuiles par métadonnées
-function getTilesByType(type: AtlasEntry["type"], subtype?: string): AtlasEntry[] {
+function getTilesByCategory(category: AtlasCategory, subtype?: string): AtlasEntry[] {
   const results: AtlasEntry[] = [];
   for (const entry of MAP_PACK_ATLAS.values()) {
-    if (entry.type === type && (!subtype || entry.subtype === subtype)) {
-      // Exclure les sprites avec fond blanc pour les overlays
-      if (entry.overlay && entry.transparent_bg === false) {
-        continue; // Passer ce sprite
-      }
-      if (type === "object" && subtype === "tree") {
-        const description = entry.description?.toLowerCase() ?? "";
-        if (description.includes("neige") || description.includes("mort")) {
-          continue;
-        }
-      }
-      results.push(entry);
+    if (entry.category !== category) {
+      continue;
     }
+    if (subtype && entry.subtype !== subtype) {
+      continue;
+    }
+    if (entry.overlay && entry.transparent === false) {
+      continue;
+    }
+    if (category === "object" && subtype === "tree") {
+      const description = entry.description?.toLowerCase() ?? "";
+      if (description.includes("neige") || description.includes("mort")) {
+        continue;
+      }
+    }
+    results.push(entry);
   }
   return results;
 }
 
-function getRandomTileByType(type: AtlasEntry["type"], subtype?: string, seed?: number): TileCoord | null {
-  const candidates = getTilesByType(type, subtype);
+function getRandomTileByCategory(
+  category: AtlasCategory,
+  subtype?: string,
+  seed?: number
+): TileCoord | null {
+  const candidates = getTilesByCategory(category, subtype);
   if (candidates.length === 0) return null;
 
   // Utiliser une seed déterministe au lieu de Math.random()
@@ -288,6 +429,8 @@ type Tileset = {
   };
 };
 
+const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
+
 const DEFAULT_ATLAS: Tileset = {
   mode: "atlas",
   url: mapPackAtlas,
@@ -303,17 +446,7 @@ const DEFAULT_ATLAS: Tileset = {
     },
     path: atlas("mapTile_128.png"),
     farmland: atlas("mapTile_087.png"),
-    sand: {
-      center: atlas("mapTile_017.png"),
-      north: atlas("mapTile_002.png"),
-      south: atlas("mapTile_047.png"),
-      east: atlas("mapTile_018.png"),
-      west: atlas("mapTile_016.png"),
-      northeast: atlas("mapTile_003.png"),
-      northwest: atlas("mapTile_001.png"),
-      southeast: atlas("mapTile_033.png"),
-      southwest: atlas("mapTile_046.png"),
-    },
+    sand: { ...DERIVED_SAND_TILES },
     water: {
       deep: atlas("mapTile_188.png"),
       shore: atlas("mapTile_171.png"),
@@ -562,7 +695,7 @@ function useTileset(): [Tileset, (t: Tileset) => void] {
 function SpriteFromAtlas({
   ts,
   coord,
-  scale = TILE,
+  scale = BASE_TILE_SIZE,
 }: {
   ts: Tileset;
   coord: TileCoord;
@@ -683,775 +816,547 @@ function TilesetControls({
   );
 }
 
-const WORLD_WIDTH = 60;
-const WORLD_HEIGHT = 44;
+function useResponsiveTileSize(): number {
+  const [size, setSize] = useState(BASE_TILE_SIZE);
 
-function generateWorld(): TerrainTile[][] {
-  const map = Array.from({ length: WORLD_HEIGHT }, () =>
-    Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.GRASS }))
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const recompute = () => {
+      const width = window.innerWidth;
+      if (width < 480) {
+        setSize(24);
+      } else if (width < 768) {
+        setSize(28);
+      } else {
+        setSize(BASE_TILE_SIZE);
+      }
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    return () => window.removeEventListener("resize", recompute);
+  }, []);
+
+  return size;
+}
+
+type Coord = [number, number];
+type CoordKey = `${number},${number}`;
+
+function coordKey(x: number, y: number): CoordKey {
+  return `${x},${y}` as CoordKey;
+}
+
+function coordFromKey(key: CoordKey): Coord {
+  const [x, y] = key.split(",").map(Number);
+  return [x, y];
+}
+
+function createRng(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = Math.imul(state, 1664525) + 1013904223;
+    state >>>= 0;
+    return state / 0x100000000;
+  };
+}
+
+function randomInt(rng: () => number, min: number, max: number): number {
+  const low = Math.min(min, max);
+  const high = Math.max(min, max);
+  const span = high - low + 1;
+  if (span <= 0) {
+    return low;
+  }
+  const value = Math.floor(rng() * span);
+  return low + value;
+}
+
+function randomChoice<T>(rng: () => number, items: T[]): T {
+  return items[Math.floor(rng() * items.length)];
+}
+
+function shuffleInPlace<T>(rng: () => number, items: T[]): void {
+  for (let index = items.length - 1; index > 0; index--) {
+    const target = Math.floor(rng() * (index + 1));
+    const tmp = items[index];
+    items[index] = items[target];
+    items[target] = tmp;
+  }
+}
+
+function generateIslandCells(
+  width: number,
+  height: number,
+  rng: () => number,
+  targetRatio: [number, number] = [0.25, 0.4]
+): Set<CoordKey> {
+  if (width < 3 || height < 3) {
+    throw new Error("World is too small to host an island");
+  }
+
+  const minCells = Math.floor(width * height * targetRatio[0]);
+  const maxCells = Math.floor(width * height * targetRatio[1]);
+  let targetSize = Math.max(
+    4,
+    randomInt(rng, minCells, Math.max(maxCells, minCells + 1))
+  );
+  targetSize = Math.min(targetSize, width * height - 1);
+
+  const centerX = Math.floor(width / 2);
+  const centerY = Math.floor(height / 2);
+  const island = new Set<CoordKey>([coordKey(centerX, centerY)]);
+  const frontier = new Set<CoordKey>();
+
+  const addNeighbors = (x: number, y: number) => {
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 1 && nx < width - 1 && ny >= 1 && ny < height - 1) {
+        frontier.add(coordKey(nx, ny));
+      }
+    }
+  };
+
+  addNeighbors(centerX, centerY);
+
+  let attempts = 0;
+  while (island.size < targetSize && attempts < width * height * 10) {
+    if (frontier.size === 0) {
+      for (const cellKey of island) {
+        const [x, y] = coordFromKey(cellKey);
+        addNeighbors(x, y);
+      }
+      for (const cellKey of island) {
+        frontier.delete(cellKey);
+      }
+      if (frontier.size === 0) {
+        break;
+      }
+    }
+
+    const candidates = Array.from(frontier);
+    const candidateKey = randomChoice(rng, candidates);
+    frontier.delete(candidateKey);
+    const [cx, cy] = coordFromKey(candidateKey);
+
+    const distanceWeight =
+      Math.abs(cx - centerX) / Math.max(1, width) +
+      Math.abs(cy - centerY) / Math.max(1, height);
+    const acceptanceThreshold = Math.max(0.15, 1 - distanceWeight);
+
+    if (rng() < acceptanceThreshold) {
+      island.add(candidateKey);
+      addNeighbors(cx, cy);
+      for (const cellKey of island) {
+        frontier.delete(cellKey);
+      }
+    }
+
+    attempts += 1;
+  }
+
+  return island;
+}
+
+function findOutsideWaterCells(
+  island: Set<CoordKey>,
+  width: number,
+  height: number
+): Set<CoordKey> {
+  const outside = new Set<CoordKey>();
+  const visited = new Set<CoordKey>();
+  const queue: Coord[] = [];
+
+  const enqueue = (x: number, y: number) => {
+    const key = coordKey(x, y);
+    if (island.has(key) || visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+    queue.push([x, y]);
+  };
+
+  for (let x = 0; x < width; x++) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+
+  while (queue.length > 0) {
+    const [cx, cy] = queue.shift()!;
+    outside.add(coordKey(cx, cy));
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        enqueue(nx, ny);
+      }
+    }
+  }
+
+  return outside;
+}
+
+function fillSmallLakesInIsland(
+  island: Set<CoordKey>,
+  width: number,
+  height: number,
+  minSpan = 3
+) {
+  if (minSpan <= 1) {
+    return;
+  }
+
+  const outside = findOutsideWaterCells(island, width, height);
+  const visited = new Set<CoordKey>(outside);
+
+  for (let x = 1; x < width - 1; x++) {
+    for (let y = 1; y < height - 1; y++) {
+      const startKey = coordKey(x, y);
+      if (island.has(startKey) || visited.has(startKey)) {
+        continue;
+      }
+
+      const queue: Coord[] = [[x, y]];
+      const component: CoordKey[] = [startKey];
+      visited.add(startKey);
+
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+
+      while (queue.length > 0) {
+        const [cx, cy] = queue.shift()!;
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            continue;
+          }
+          const key = coordKey(nx, ny);
+          if (island.has(key) || visited.has(key)) {
+            continue;
+          }
+          visited.add(key);
+          queue.push([nx, ny]);
+          component.push(key);
+
+          if (nx < minX) minX = nx;
+          if (nx > maxX) maxX = nx;
+          if (ny < minY) minY = ny;
+          if (ny > maxY) maxY = ny;
+        }
+      }
+
+      const spanX = maxX - minX + 1;
+      const spanY = maxY - minY + 1;
+      if (spanX < minSpan || spanY < minSpan) {
+        for (const key of component) {
+          island.add(key);
+        }
+      }
+    }
+  }
+}
+
+function smoothIslandShape(island: Set<CoordKey>, passes = 2) {
+  if (island.size === 0 || passes <= 0) {
+    return;
+  }
+
+  for (let pass = 0; pass < passes; pass++) {
+    const toRemove: CoordKey[] = [];
+    for (const key of island) {
+      const [x, y] = coordFromKey(key);
+      let neighbors = 0;
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        if (island.has(coordKey(x + dx, y + dy))) {
+          neighbors += 1;
+        }
+      }
+      if (neighbors <= 1) {
+        toRemove.push(key);
+      }
+    }
+    if (toRemove.length === 0 || toRemove.length === island.size) {
+      break;
+    }
+    for (const key of toRemove) {
+      island.delete(key);
+    }
+  }
+}
+
+function buildNeighborMap(cells: Set<CoordKey>): Map<CoordKey, CoordKey[]> {
+  const neighborMap = new Map<CoordKey, CoordKey[]>();
+  for (const key of cells) {
+    const [x, y] = coordFromKey(key);
+    const neighbors: CoordKey[] = [];
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const candidate = coordKey(x + dx, y + dy);
+      if (cells.has(candidate)) {
+        neighbors.push(candidate);
+      }
+    }
+    if (neighbors.length > 0) {
+      neighborMap.set(key, neighbors);
+    }
+  }
+  return neighborMap;
+}
+
+function isTooCloseToPath(candidate: CoordKey, path: CoordKey[]): boolean {
+  if (path.length === 0) {
+    return false;
+  }
+
+  const allowed = new Set<CoordKey>([path[path.length - 1]]);
+  if (path.length >= 2) {
+    allowed.add(path[path.length - 2]);
+  }
+
+  const [cx, cy] = coordFromKey(candidate);
+  for (const key of path) {
+    if (allowed.has(key)) {
+      continue;
+    }
+    const [px, py] = coordFromKey(key);
+    if (Math.abs(cx - px) + Math.abs(cy - py) === 1) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function carvePathOnIsland(
+  island: Set<CoordKey>,
+  desiredLength: number,
+  rng: () => number
+): CoordKey[] {
+  const neighborMap = buildNeighborMap(island);
+  const cells = Array.from(neighborMap.keys());
+  if (cells.length === 0) {
+    return [];
+  }
+
+  const length = Math.min(desiredLength, cells.length);
+  const minLength = Math.max(1, Math.min(6, length));
+
+  for (let currentLength = length; currentLength >= minLength; currentLength--) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const start = randomChoice(rng, cells);
+      const visited = new Set<CoordKey>([start]);
+      const path: CoordKey[] = [start];
+      const stack: Array<[CoordKey, CoordKey[]]> = [[start, []]];
+
+      const prepareOptions = (key: CoordKey) => {
+        const options = [...(neighborMap.get(key) ?? [])];
+        shuffleInPlace(rng, options);
+        return options;
+      };
+
+      stack[0][1] = prepareOptions(start);
+
+      while (stack.length > 0) {
+        if (path.length >= currentLength) {
+          return path;
+        }
+
+        const top = stack[stack.length - 1];
+        const [node, options] = top;
+        let nextKey: CoordKey | null = null;
+
+        while (options.length > 0) {
+          const candidate = options.pop()!;
+          if (visited.has(candidate)) {
+            continue;
+          }
+          if (isTooCloseToPath(candidate, path)) {
+            continue;
+          }
+          nextKey = candidate;
+          break;
+        }
+
+        if (!nextKey) {
+          stack.pop();
+          path.pop();
+          continue;
+        }
+
+        visited.add(nextKey);
+        path.push(nextKey);
+        stack.push([nextKey, prepareOptions(nextKey)]);
+      }
+    }
+  }
+
+  return [cells[0]];
+}
+
+function distributeIndices(total: number, count: number): number[] {
+  if (count <= 0) {
+    return [];
+  }
+  if (count === 1 || total <= 1) {
+    return [0];
+  }
+  const step = (total - 1) / (count - 1);
+  return Array.from({ length: count }, (_, index) => Math.round(index * step));
+}
+
+const WORLD_WIDTH = 25;
+const WORLD_HEIGHT = 25;
+const WORLD_SEED = 1247;
+
+const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
+  mairie: { x: 12, y: 12 },
+  clarte: { x: 6, y: 6 },
+  creation: { x: 18, y: 6 },
+  decision: { x: 6, y: 18 },
+  ethique: { x: 18, y: 18 },
+};
+
+const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
+  "clarte",
+  "mairie",
+  "creation",
+  "decision",
+  "ethique",
+];
+
+type GeneratedWorld = {
+  tiles: TerrainTile[][];
+  path: Coord[];
+  landmarks: Record<QuarterId, { x: number; y: number }>;
+};
+
+function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; y: number }> {
+  const assignments: Record<QuarterId, { x: number; y: number }> = {
+    mairie: { ...FALLBACK_LANDMARKS.mairie },
+    clarte: { ...FALLBACK_LANDMARKS.clarte },
+    creation: { ...FALLBACK_LANDMARKS.creation },
+    decision: { ...FALLBACK_LANDMARKS.decision },
+    ethique: { ...FALLBACK_LANDMARKS.ethique },
+  };
+
+  if (path.length < LANDMARK_ASSIGNMENT_ORDER.length) {
+    return assignments;
+  }
+
+  const indices = distributeIndices(path.length, LANDMARK_ASSIGNMENT_ORDER.length);
+  LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
+    const [x, y] = path[indices[index]];
+    assignments[id] = { x, y };
+  });
+
+  return assignments;
+}
+
+function generateWorld(): GeneratedWorld {
+  const rng = createRng(WORLD_SEED);
+  const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
+    Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
   );
 
-  const fillRect = (
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
-    tile: TileKind,
-    asOverlay = false
-  ) => {
-    for (let y = startY; y < startY + height; y++) {
-      for (let x = startX; x < startX + width; x++) {
-        if (map[y]?.[x] !== undefined) {
-          if (asOverlay) {
-            map[y][x].overlay = tile;
-          } else {
-            map[y][x].base = tile;
-          }
-        }
-      }
+  const island = generateIslandCells(WORLD_WIDTH, WORLD_HEIGHT, rng);
+  fillSmallLakesInIsland(island, WORLD_WIDTH, WORLD_HEIGHT);
+  smoothIslandShape(island, 2);
+
+  for (const key of island) {
+    const [x, y] = coordFromKey(key as CoordKey);
+    const row = tiles[y];
+    if (!row) {
+      continue;
     }
-  };
-
-  const pseudoRandom = (seed: number) => {
-    const x = Math.sin(seed) * 10000;
-    return x - Math.floor(x);
-  };
-
-  const fillOrganicRect = (
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
-    tile: TileKind,
-    options?: {
-      asOverlay?: boolean;
-      maxOffset?: number;
-      seed?: number;
-      stepEvery?: number;
-      stepSize?: number;
-    }
-  ) => {
-    const maxOffset = options?.maxOffset ?? 2;
-    const seed = options?.seed ?? startX * 31 + startY * 17 + width * 13 + height * 7;
-    const stepEvery = options?.stepEvery ?? 0;
-    const stepSize = options?.stepSize ?? 0;
-    for (let row = 0; row < height; row++) {
-      const y = startY + row;
-      if (!map[y]) continue;
-      const leftVariation = Math.round(
-        (pseudoRandom(seed + row) - 0.5) * 2 * maxOffset
-      );
-      const rightVariation = Math.round(
-        (pseudoRandom(seed + row + 97) - 0.5) * 2 * maxOffset
-      );
-
-      const steppedOffset =
-        stepEvery > 0 && row % stepEvery === 0 ? stepSize : 0;
-
-      const leftShift = clamp(
-        leftVariation - steppedOffset,
-        -maxOffset * 2,
-        maxOffset * 2
-      );
-      const rightShift = clamp(
-        rightVariation + steppedOffset,
-        -maxOffset * 2,
-        maxOffset * 2
-      );
-
-      const rowStart = clamp(startX + leftShift, 0, WORLD_WIDTH - 1);
-      const rowEnd = clamp(
-        startX + width - 1 + rightShift,
-        0,
-        WORLD_WIDTH - 1
-      );
-
-      if (rowEnd < rowStart) {
-        continue;
-      }
-
-      for (let x = rowStart; x <= rowEnd; x++) {
-        const tileEntry = map[y]?.[x];
-        if (!tileEntry) continue;
-        if (options?.asOverlay) {
-          tileEntry.overlay = tile;
-        } else {
-          tileEntry.base = tile;
-        }
-      }
-    }
-  };
-
-  const outlineRect = (
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
-    tile: TileKind,
-    asOverlay = false
-  ) => {
-    for (let x = startX; x < startX + width; x++) {
-      if (map[startY]?.[x] !== undefined) {
-        if (asOverlay) {
-          map[startY][x].overlay = tile;
-        } else {
-          map[startY][x].base = tile;
-        }
-      }
-      if (map[startY + height - 1]?.[x] !== undefined) {
-        if (asOverlay) {
-          map[startY + height - 1][x].overlay = tile;
-        } else {
-          map[startY + height - 1][x].base = tile;
-        }
-      }
-    }
-    for (let y = startY; y < startY + height; y++) {
-      if (map[y]?.[startX] !== undefined) {
-        if (asOverlay) {
-          map[y][startX].overlay = tile;
-        } else {
-          map[y][startX].base = tile;
-        }
-      }
-      if (map[y]?.[startX + width - 1] !== undefined) {
-        if (asOverlay) {
-          map[y][startX + width - 1].overlay = tile;
-        } else {
-          map[y][startX + width - 1].base = tile;
-        }
-      }
-    }
-  };
-
-  // Chemin organique avec courbes mais connexions garanties
-  type SmartPathOptions = {
-    waypoints?: Array<[number, number]>;
-    seed?: number;
-    switchChance?: number;
-  };
-
-  const drawSmartPath = (
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    options?: SmartPathOptions
-  ) => {
-    const points: Array<[number, number]> = [
-      [startX, startY],
-      ...(options?.waypoints ?? []),
-      [endX, endY],
-    ];
-
-    let currentX = startX;
-    let currentY = startY;
-    let stepIndex = 0;
-    const baseSeed =
-      options?.seed ??
-      startX * 101 +
-        startY * 233 +
-        endX * 379 +
-        endY * 557 +
-        (options?.waypoints?.length ?? 0) * 89;
-
-    const randomAtStep = () => pseudoRandom(baseSeed + stepIndex++);
-
-    const placePath = (x: number, y: number) => {
-      if (map[y]?.[x] !== undefined) {
-        map[y][x].base = TILE_KIND.GRASS;
-        map[y][x].overlay = TILE_KIND.PATH;
-      }
-    };
-
-    placePath(currentX, currentY);
-
-    for (let index = 1; index < points.length; index++) {
-      const [targetX, targetY] = points[index];
-      let preferHorizontal =
-        Math.abs(targetX - currentX) >= Math.abs(targetY - currentY);
-
-      let safety = 0;
-      while ((currentX !== targetX || currentY !== targetY) && safety < 512) {
-        safety++;
-        const dx = targetX - currentX;
-        const dy = targetY - currentY;
-        const needsHorizontal = dx !== 0;
-        const needsVertical = dy !== 0;
-
-        const horizontalStep = dx === 0 ? 0 : dx > 0 ? 1 : -1;
-        const verticalStep = dy === 0 ? 0 : dy > 0 ? 1 : -1;
-
-        if (needsHorizontal && needsVertical) {
-          if (preferHorizontal) {
-            currentX += horizontalStep;
-          } else {
-            currentY += verticalStep;
-          }
-
-          if (randomAtStep() < (options?.switchChance ?? 0.35)) {
-            preferHorizontal = !preferHorizontal;
-          }
-        } else if (needsHorizontal) {
-          currentX += horizontalStep;
-        } else if (needsVertical) {
-          currentY += verticalStep;
-        }
-
-        placePath(currentX, currentY);
-      }
-    }
-  };
-
-  type SmartAxisOptions = Omit<SmartPathOptions, "waypoints"> & {
-    jitter?: number;
-    segmentLength?: number;
-    stepEvery?: number;
-    stepSize?: number;
-    axisJitter?: number;
-    extraWaypoints?: Array<[number, number]>;
-  };
-
-  const drawCurvedAxis = (
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    options?: SmartAxisOptions
-  ) => {
-    const horizontal = Math.abs(endX - startX) >= Math.abs(endY - startY);
-    const axisLength = horizontal
-      ? Math.abs(endX - startX)
-      : Math.abs(endY - startY);
-    const seed =
-      options?.seed ??
-      startX * 673 +
-        startY * 1013 +
-        endX * 1429 +
-        endY * 1789;
-    const jitterAmplitude = options?.jitter ?? 2;
-    const axisJitter = options?.axisJitter ?? 1;
-    const segmentLength = Math.max(2, Math.round(options?.segmentLength ?? 5));
-    const segmentCount = Math.max(1, Math.floor(axisLength / segmentLength));
-    const generatedWaypoints: Array<[number, number]> = [];
-    let steppedOffset = 0;
-
-    for (let index = 1; index <= segmentCount; index++) {
-      const ratio = index / (segmentCount + 1);
-      const baseX = Math.round(startX + (endX - startX) * ratio);
-      const baseY = Math.round(startY + (endY - startY) * ratio);
-      const noise = pseudoRandom(seed + index * 37) * 2 - 1;
-      const axisNoise = pseudoRandom(seed + index * 53) * 2 - 1;
-
-      if (options?.stepEvery && index % options.stepEvery === 0) {
-        const stepDirection = axisNoise >= 0 ? 1 : -1;
-        steppedOffset = clamp(
-          steppedOffset + stepDirection * (options.stepSize ?? 1),
-          -jitterAmplitude,
-          jitterAmplitude
-        );
-      }
-
-      let offsetX = 0;
-      let offsetY = 0;
-
-      if (horizontal) {
-        offsetY = Math.round(noise * jitterAmplitude) + steppedOffset;
-        offsetX = Math.round(axisNoise * axisJitter);
-      } else {
-        offsetX = Math.round(noise * jitterAmplitude) + steppedOffset;
-        offsetY = Math.round(axisNoise * axisJitter);
-      }
-
-      const waypointX = clamp(baseX + offsetX, 1, WORLD_WIDTH - 2);
-      const waypointY = clamp(baseY + offsetY, 1, WORLD_HEIGHT - 2);
-      generatedWaypoints.push([waypointX, waypointY]);
-    }
-
-    const combined = [
-      ...generatedWaypoints,
-      ...(options?.extraWaypoints ?? []),
-    ];
-    const seen = new Set<string>();
-    const uniqueWaypoints: Array<[number, number]> = [];
-
-    for (const [x, y] of combined) {
-      if ((x === startX && y === startY) || (x === endX && y === endY)) {
-        continue;
-      }
-      const key = `${x},${y}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      uniqueWaypoints.push([x, y]);
-    }
-
-    const axisDelta = horizontal ? endX - startX : endY - startY;
-    const axisDirection = axisDelta >= 0 ? 1 : -1;
-
-    uniqueWaypoints.sort((a, b) =>
-      horizontal
-        ? (a[0] - b[0]) * axisDirection
-        : (a[1] - b[1]) * axisDirection
-    );
-
-    drawSmartPath(startX, startY, endX, endY, {
-      seed: options?.seed,
-      switchChance: options?.switchChance,
-      waypoints: uniqueWaypoints,
-    });
-  };
-
-  // Fonction locale pour vérifier les tuiles dans le contexte de génération
-  const getPathAt = (x: number, y: number): boolean => {
-    if (y < 0 || y >= WORLD_HEIGHT || x < 0 || x >= WORLD_WIDTH) {
-      return false;
-    }
-    const terrain = map[y][x];
-    return terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
-  };
-
-  // Fonction pour s'assurer que toutes les extrémités de chemins ont des connexions correctes
-  const validateAndFixPathEnds = () => {
-    for (let y = 0; y < WORLD_HEIGHT; y++) {
-      for (let x = 0; x < WORLD_WIDTH; x++) {
-        const terrain = map[y][x];
-        if (terrain.overlay === TILE_KIND.PATH || terrain.base === TILE_KIND.PATH) {
-          // Compter les connexions adjacentes
-          const connections = [
-            getPathAt(x, y - 1), // north
-            getPathAt(x, y + 1), // south
-            getPathAt(x + 1, y), // east
-            getPathAt(x - 1, y), // west
-          ].filter(Boolean).length;
-
-          // Si c'est un chemin isolé (0 connexions), le supprimer
-          if (connections === 0) {
-            if (terrain.overlay === TILE_KIND.PATH) {
-              terrain.overlay = undefined;
-            } else if (terrain.base === TILE_KIND.PATH) {
-              terrain.base = TILE_KIND.GRASS;
-            }
-          }
-        }
-      }
-    }
-  };
-
-  const plantTree = (x: number, y: number) => {
-    if (map[y]?.[x] !== undefined) {
-      // Garder le gazon en base et mettre un arbre aléatoire en overlay
-      map[y][x].base = TILE_KIND.GRASS;
-      map[y][x].overlay = TILE_KIND.TREE;
-    }
-  };
-
-  const scatterTrees = (points: Array<[number, number]>) => {
-    for (const [x, y] of points) {
-      plantTree(x, y);
-    }
-  };
-
-  const plantFlower = (x: number, y: number) => {
-    if (map[y]?.[x] !== undefined) {
-      // Garder le gazon en base et mettre les fleurs en overlay
-      map[y][x].base = TILE_KIND.GRASS;
-      map[y][x].overlay = TILE_KIND.FLOWER;
-    }
-  };
-
-  const scatterFlowers = (points: Array<[number, number]>) => {
-    for (const [x, y] of points) {
-      plantFlower(x, y);
-    }
-  };
-
-  const sculptRectWithNoise = (
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
-    tileKind: TileKind,
-    options?: {
-      seed?: number;
-      maxInset?: number;
-      stepEvery?: number;
-      stepSize?: number;
-      growthChance?: number;
-    }
-  ) => {
-    if (width <= 0 || height <= 0) return;
-    const seed =
-      options?.seed ?? startX * 193 + startY * 211 + width * 17 + height * 19;
-    const maxInset = Math.max(
-      1,
-      Math.min(
-        options?.maxInset ?? 2,
-        Math.floor(Math.min(width, height) / 2)
-      )
-    );
-    const stepEvery = Math.max(0, Math.floor(options?.stepEvery ?? 0));
-    const stepSize = Math.max(0, Math.floor(options?.stepSize ?? 0));
-    const growthChance = Math.min(Math.max(options?.growthChance ?? 0.18, 0), 1);
-    let lateralShift = 0;
-
-    for (let y = startY; y < startY + height; y++) {
-      if (!map[y]) continue;
-      const rowIndex = y - startY;
-
-      if (stepEvery > 0 && rowIndex > 0 && rowIndex % stepEvery === 0) {
-        const directionNoise = pseudoRandom(seed + rowIndex * 61) - 0.5;
-        lateralShift = clamp(
-          lateralShift + (directionNoise >= 0 ? 1 : -1) * stepSize,
-          -maxInset,
-          maxInset
-        );
-      }
-
-      for (let x = startX; x < startX + width; x++) {
-        const entry = map[y]?.[x];
-        if (!entry) continue;
-        if (entry.base !== tileKind) continue;
-
-        const distLeft = x - startX;
-        const distRight = startX + width - 1 - x;
-        const distTop = y - startY;
-        const distBottom = startY + height - 1 - y;
-        const minDist = Math.min(distLeft, distRight, distTop, distBottom);
-
-        if (minDist >= maxInset) {
-          continue;
-        }
-
-        const normalized = (maxInset - minDist) / maxInset;
-        const noise = pseudoRandom(seed + x * 131 + y * 197);
-        const shouldCarve = noise > 0.6 - normalized * 0.35;
-
-        if (
-          shouldCarve ||
-          (stepEvery > 0 &&
-            ((x - startX + lateralShift) % (stepEvery + 1) === 0 &&
-              noise > 0.45 + normalized * 0.1))
-        ) {
-          entry.base = TILE_KIND.GRASS;
-          if (entry.overlay === tileKind) {
-            delete entry.overlay;
-          }
-          continue;
-        }
-
-        if (noise < growthChance && minDist >= maxInset - 1) {
-          const smallestEdge = Math.min(
-            distLeft,
-            distRight,
-            distTop,
-            distBottom
-          );
-          const candidates: Array<[number, number]> = [];
-          if (distLeft === smallestEdge) candidates.push([-1, 0]);
-          if (distRight === smallestEdge) candidates.push([1, 0]);
-          if (distTop === smallestEdge) candidates.push([0, -1]);
-          if (distBottom === smallestEdge) candidates.push([0, 1]);
-
-          for (const [dx, dy] of candidates) {
-            const nx = x + dx;
-            const ny = y + dy;
-            const neighbor = map[ny]?.[nx];
-            if (
-              !neighbor ||
-              neighbor.base !== TILE_KIND.GRASS ||
-              neighbor.overlay !== undefined
-            ) {
-              continue;
-            }
-            neighbor.base = tileKind;
-          }
-        }
-      }
-    }
-  };
-
-  const updateGrassCliffs = () => {
-    const hasLowerAt = (x: number, y: number) => {
-      if (y < 0 || y >= WORLD_HEIGHT || x < 0 || x >= WORLD_WIDTH) {
-        return false;
-      }
-      return tileHasLowerTerrain(map[y]?.[x]);
-    };
-
-    for (let y = 0; y < WORLD_HEIGHT; y++) {
-      for (let x = 0; x < WORLD_WIDTH; x++) {
-        const tile = map[y][x];
-        if (!tile) continue;
-
-        if (tile.base !== TILE_KIND.GRASS) {
-          tile.cliffConnections = undefined;
-          continue;
-        }
-
-        const connections = computeCliffConnections(x, y, hasLowerAt);
-        if (connections.size > 0) {
-          tile.cliffConnections = Array.from(connections);
-        } else {
-          delete tile.cliffConnections;
-        }
-      }
-    }
-  };
-
-  // Coastline
-  for (let x = 0; x < WORLD_WIDTH; x++) {
-    map[0][x].base = TILE_KIND.WATER;
-    map[WORLD_HEIGHT - 1][x].base = TILE_KIND.WATER;
-  }
-  for (let y = 0; y < WORLD_HEIGHT; y++) {
-    map[y][0].base = TILE_KIND.WATER;
-    map[y][WORLD_WIDTH - 1].base = TILE_KIND.WATER;
-  }
-  for (let x = 1; x < WORLD_WIDTH - 1; x++) {
-    map[1][x].base = TILE_KIND.WATER; // Eau en base
-    map[1][x].overlay = TILE_KIND.SAND; // Sable en overlay (plage)
-    map[WORLD_HEIGHT - 2][x].base = TILE_KIND.WATER;
-    map[WORLD_HEIGHT - 2][x].overlay = TILE_KIND.SAND;
-  }
-  for (let y = 1; y < WORLD_HEIGHT - 1; y++) {
-    map[y][1].base = TILE_KIND.WATER;
-    map[y][1].overlay = TILE_KIND.SAND;
-    map[y][WORLD_WIDTH - 2].base = TILE_KIND.WATER;
-    map[y][WORLD_WIDTH - 2].overlay = TILE_KIND.SAND;
+    row[x].base = TILE_KIND.SAND;
+    delete row[x].overlay;
+    row[x].cliffConnections = undefined;
   }
 
-  // Ponds and beaches
-  fillOrganicRect(6, 5, 10, 4, TILE_KIND.WATER, {
-    maxOffset: 1,
-    seed: 42,
-  });
-  // Bordure de sable en base pour éviter que le décor repose sur du gazon
-  outlineRect(5, 4, 12, 6, TILE_KIND.SAND);
-  // Conserver une transition douce éventuellement utilisée par le rendu
-  outlineRect(5, 4, 12, 6, TILE_KIND.SAND, true);
+  const desiredPathLength = Math.max(
+    LANDMARK_ASSIGNMENT_ORDER.length,
+    Math.floor(island.size * 0.45)
+  );
 
-  fillOrganicRect(42, 30, 10, 6, TILE_KIND.WATER, {
-    maxOffset: 2,
-    seed: 84,
-    stepEvery: 2,
-    stepSize: 1,
-  });
-  outlineRect(41, 29, 12, 8, TILE_KIND.SAND);
-  outlineRect(41, 29, 12, 8, TILE_KIND.SAND, true);
+  const pathKeys = carvePathOnIsland(island, desiredPathLength, rng);
+  const path: Coord[] = pathKeys.map((key) => coordFromKey(key as CoordKey));
 
-  // Farmland belt in the south-west avec bords irréguliers
-  fillRect(6, 34, 12, 6, TILE_KIND.FIELD);
-  sculptRectWithNoise(6, 34, 12, 6, TILE_KIND.FIELD, {
-    seed: 128,
-    maxInset: 3,
-    stepEvery: 2,
-    stepSize: 1,
-    growthChance: 0.22,
-  });
-  scatterTrees([
-    [5, 33],
-    [18, 33],
-    [5, 41],
-    [18, 41],
-  ]);
-
-  // Flower meadows near the creative quarter
-  fillOrganicRect(38, 16, 6, 4, TILE_KIND.FLOWER, {
-    maxOffset: 2,
-    seed: 211,
-  });
-  fillOrganicRect(38, 28, 6, 4, TILE_KIND.FLOWER, {
-    maxOffset: 2,
-    seed: 213,
-  });
-  scatterFlowers([
-    [32, 14],
-    [46, 18],
-    [34, 30],
-    [48, 30],
-  ]);
-
-  // Woodland clusters for ambiance
-  scatterTrees([
-    [22, 11],
-    [20, 18],
-    [34, 14],
-    [22, 27],
-    [28, 34],
-    [50, 26],
-    [10, 26],
-  ]);
-
-  // Additional flowers along the central path
-  scatterFlowers([
-    [26, 18],
-    [34, 18],
-    [16, 23],
-    [42, 23],
-    [32, 31],
-  ]);
-
-  // Path network - réseau unifié centré sur la mairie (30,22)
-  // Épine dorsale principale horizontale avec courbes maîtrisées
-  drawCurvedAxis(12, 22, 48, 22, {
-    seed: 401,
-    jitter: 2.5,
-    axisJitter: 1,
-    segmentLength: 6,
-    stepEvery: 2,
-    stepSize: 1,
-    switchChance: 0.25,
-    extraWaypoints: [
-      [18, 21],
-      [24, 23],
-      [30, 22],
-      [36, 21],
-      [42, 24],
-    ],
-  });
-
-  // Connexions vers les quartiers depuis la ligne principale
-  // Clarté (14,12) - Nord-Ouest depuis (14,22)
-  drawCurvedAxis(14, 22, 14, 12, {
-    seed: 402,
-    jitter: 1.6,
-    axisJitter: 0.5,
-    segmentLength: 3,
-    stepEvery: 2,
-    stepSize: 1,
-    extraWaypoints: [
-      [13, 20],
-      [15, 18],
-      [13, 15],
-    ],
-  });
-
-  // Création (44,12) - Nord-Est depuis (44,22)
-  drawCurvedAxis(44, 22, 44, 12, {
-    seed: 403,
-    jitter: 1.6,
-    axisJitter: 0.5,
-    segmentLength: 3,
-    stepEvery: 2,
-    stepSize: 1,
-    extraWaypoints: [
-      [45, 20],
-      [43, 18],
-      [45, 15],
-    ],
-  });
-
-  // Décision (14,32) - Sud-Ouest depuis (14,22)
-  drawCurvedAxis(14, 22, 14, 32, {
-    seed: 404,
-    jitter: 1.8,
-    axisJitter: 0.5,
-    segmentLength: 3,
-    stepEvery: 2,
-    stepSize: 1,
-    extraWaypoints: [
-      [13, 24],
-      [15, 27],
-      [13, 30],
-    ],
-  });
-
-  // Éthique (44,32) - Sud-Est depuis (44,22)
-  drawCurvedAxis(44, 22, 44, 32, {
-    seed: 405,
-    jitter: 1.8,
-    axisJitter: 0.5,
-    segmentLength: 3,
-    stepEvery: 2,
-    stepSize: 1,
-    extraWaypoints: [
-      [45, 24],
-      [43, 27],
-      [45, 30],
-    ],
-  });
-
-  // Decorative trees framing the plazas
-  scatterTrees([
-    [12, 10],
-    [46, 10],
-    [12, 30],
-    [46, 30],
-    [18, 20],
-    [42, 24],
-  ]);
-
-  // Add much more natural variety and scattered elements
-  // Random scattered trees across the landscape
-  const randomTrees = [];
-  for (let i = 0; i < 40; i++) {
-    const x = 3 + Math.floor(Math.random() * (WORLD_WIDTH - 6));
-    const y = 3 + Math.floor(Math.random() * (WORLD_HEIGHT - 6));
-    // Avoid placing on water, paths, or buildings
-    if (x !== 14 && x !== 44 && x !== 30 && y !== 12 && y !== 32 && y !== 22) {
-      randomTrees.push([x, y] as [number, number]);
+  for (const [x, y] of path) {
+    const tile = tiles[y]?.[x];
+    if (!tile) {
+      continue;
     }
-  }
-  scatterTrees(randomTrees);
-
-  // Random scattered flowers
-  const randomFlowers = [];
-  for (let i = 0; i < 60; i++) {
-    const x = 3 + Math.floor(Math.random() * (WORLD_WIDTH - 6));
-    const y = 3 + Math.floor(Math.random() * (WORLD_HEIGHT - 6));
-    // Avoid placing on water, paths, or buildings
-    if (x !== 14 && x !== 44 && x !== 30 && y !== 12 && y !== 32 && y !== 22) {
-      randomFlowers.push([x, y] as [number, number]);
-    }
-  }
-  scatterFlowers(randomFlowers);
-
-  // Add natural clusters of trees (forests)
-  const forestClusters = [
-    // Forest near top-left
-    [[8, 8], [9, 8], [10, 8], [8, 9], [9, 9], [10, 9], [11, 10]],
-    // Forest near bottom-right
-    [[48, 35], [49, 35], [50, 35], [48, 36], [49, 36], [50, 36], [51, 37]],
-    // Small grove near center
-    [[25, 18], [26, 18], [27, 19], [25, 19]],
-  ];
-
-  for (const cluster of forestClusters) {
-    scatterTrees(cluster);
+    tile.base = TILE_KIND.SAND;
+    tile.overlay = TILE_KIND.PATH;
   }
 
-  // Add flower meadows
-  const flowerMeadows = [
-    // Meadow near clarte
-    [[10, 15], [11, 15], [12, 15], [10, 16], [11, 16]],
-    // Meadow near ethique
-    [[46, 28], [47, 28], [48, 28], [46, 29], [47, 29]],
-  ];
+  const landmarks = assignLandmarksFromPath(path);
 
-  for (const meadow of flowerMeadows) {
-    scatterFlowers(meadow);
-  }
-
-  // Nettoyer les chemins isolés et mal connectés
-  validateAndFixPathEnds();
-
-  updateGrassCliffs();
-
-  return map;
+  return { tiles, path, landmarks };
 }
 
 // Générée une seule fois et mise en cache
-let _worldCache: TerrainTile[][] | null = null;
-function getWorld(): TerrainTile[][] {
+let _worldCache: GeneratedWorld | null = null;
+function getWorld(): GeneratedWorld {
   if (!_worldCache) {
     _worldCache = generateWorld();
   }
   return _worldCache;
 }
 
-const world = getWorld();
+const generatedWorld = getWorld();
+const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
+
+const BUILDING_META: Record<QuarterId, { label: string; color: string }> = {
+  mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
+  clarte: { label: "Quartier Clarté", color: "#06d6a0" },
+  creation: { label: "Quartier Création", color: "#118ab2" },
+  decision: { label: "Quartier Décision", color: "#ef476f" },
+  ethique: { label: "Quartier Éthique", color: "#8338ec" },
+};
+
+const BUILDING_DISPLAY_ORDER: QuarterId[] = [
+  "mairie",
+  "clarte",
+  "creation",
+  "decision",
+  "ethique",
+];
 
 const buildings: Array<{
   id: QuarterId;
@@ -1459,15 +1364,22 @@ const buildings: Array<{
   y: number;
   label: string;
   color: string;
-}> = [
-  { id: "mairie", x: 30, y: 22, label: "Mairie (Bilan)", color: "#ffd166" },
-  { id: "clarte", x: 14, y: 12, label: "Quartier Clarté", color: "#06d6a0" },
-  { id: "creation", x: 44, y: 12, label: "Quartier Création", color: "#118ab2" },
-  { id: "decision", x: 14, y: 32, label: "Quartier Décision", color: "#ef476f" },
-  { id: "ethique", x: 44, y: 32, label: "Quartier Éthique", color: "#8338ec" },
-];
+}> = BUILDING_DISPLAY_ORDER.map((id) => {
+  const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
+  const meta = BUILDING_META[id];
+  return {
+    id,
+    x: landmark.x,
+    y: landmark.y,
+    label: meta.label,
+    color: meta.color,
+  };
+});
 
-const START = { x: 30, y: 22 }; // Au centre du réseau principal de chemins
+const START = {
+  x: generatedWorld.landmarks.mairie?.x ?? FALLBACK_LANDMARKS.mairie.x,
+  y: generatedWorld.landmarks.mairie?.y ?? FALLBACK_LANDMARKS.mairie.y,
+};
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -1477,23 +1389,31 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function PlayerSprite({ ts, step }: { ts: Tileset; step: number }) {
+function PlayerSprite({
+  ts,
+  step,
+  tileSize,
+}: {
+  ts: Tileset;
+  step: number;
+  tileSize: number;
+}) {
   const hasCustomFrames =
     ts.mode === "atlas" && ts.url && ts.map.player.length > 0;
   const frames = hasCustomFrames ? ts.map.player : DEFAULT_PLAYER_FRAMES;
   const frame = frames[step % frames.length] ?? frames[0];
   const renderTileset = hasCustomFrames ? ts : DEFAULT_ATLAS;
-  const tileSize = renderTileset.size ?? DEFAULT_TILE_SIZE;
+  const sourceTileSize = renderTileset.size ?? DEFAULT_TILE_SIZE;
   const width =
     (Array.isArray(frame) && typeof frame[2] === "number"
       ? frame[2]
-      : tileSize) ?? tileSize;
+      : sourceTileSize) ?? sourceTileSize;
   const height =
     (Array.isArray(frame) && typeof frame[3] === "number"
       ? frame[3]
-      : tileSize) ?? tileSize;
+      : sourceTileSize) ?? sourceTileSize;
   if (width > 0 && height > 0) {
-    return <SpriteFromAtlas ts={renderTileset} coord={frame} />;
+    return <SpriteFromAtlas ts={renderTileset} coord={frame} scale={tileSize} />;
   }
   return null;
 }
@@ -1501,9 +1421,11 @@ function PlayerSprite({ ts, step }: { ts: Tileset; step: number }) {
 function BuildingSprite({
   id,
   ts,
+  tileSize,
 }: {
   id: QuarterId;
   ts: Tileset;
+  tileSize: number;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
   const coord =
@@ -1525,7 +1447,7 @@ function BuildingSprite({
       ? coord[3]
       : activeTileset.size) ?? activeTileset.size;
   if (width > 0 && height > 0) {
-    return <SpriteFromAtlas ts={activeTileset} coord={coord} />;
+    return <SpriteFromAtlas ts={activeTileset} coord={coord} scale={tileSize} />;
   }
   return null;
 }
@@ -1608,7 +1530,7 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
       <div />
       <button
         onClick={() => onMove(0, -1)}
-        className="px-3 py-2 rounded-xl bg-white/80 hover:bg-white shadow text-sm"
+        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
         aria-label="Haut"
       >
         ▲
@@ -1616,7 +1538,7 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
       <div />
       <button
         onClick={() => onMove(-1, 0)}
-        className="px-3 py-2 rounded-xl bg-white/80 hover:bg-white shadow text-sm"
+        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
         aria-label="Gauche"
       >
         ◀
@@ -1624,7 +1546,7 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
       <div />
       <button
         onClick={() => onMove(1, 0)}
-        className="px-3 py-2 rounded-xl bg-white/80 hover:bg-white shadow text-sm"
+        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
         aria-label="Droite"
       >
         ▶
@@ -1632,7 +1554,7 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
       <div />
       <button
         onClick={() => onMove(0, 1)}
-        className="px-3 py-2 rounded-xl bg-white/80 hover:bg-white shadow text-sm col-start-2"
+        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm col-start-2"
         aria-label="Bas"
       >
         ▼
@@ -1685,12 +1607,7 @@ function getConnectionsForCoord(coord: TileCoord): string[] {
   }
 
   const entry = MAP_PACK_ATLAS.get(tileName);
-  const connections = entry?.connections
-    ? entry.connections
-        .split(",")
-        .map((dir) => dir.trim())
-        .filter(Boolean)
-    : [];
+  const connections = entry?.connections ?? [];
 
   TILE_CONNECTION_CACHE.set(key, connections);
   return connections;
@@ -1790,16 +1707,11 @@ function getPathTileCoord(x: number, y: number): TileCoord {
   // Chercher une tuile qui correspond exactement aux connexions, en priorisant les tuiles recommandées
   const availableMatches = [];
   for (const [tileName, entry] of MAP_PACK_ATLAS.entries()) {
-    if (entry.type !== "path" || !entry.connections) {
+    if (entry.category !== "path" || entry.connections.length === 0) {
       continue;
     }
 
-    const entryConnections = entry.connections
-      .split(",")
-      .map((dir) => dir.trim())
-      .filter(Boolean)
-      .sort()
-      .join(",");
+    const entryConnections = [...entry.connections].sort().join(",");
 
     if (entryConnections === connectionString) {
       // Tuiles prioritaires spécifiées par l'utilisateur
@@ -1810,10 +1722,17 @@ function getPathTileCoord(x: number, y: number): TileCoord {
       ];
 
       const isPriorityTile = priorityTiles.includes(tileName);
-      const priority = isPriorityTile ? 1 :
-                       entry.subtype === "straight" ? 2 :
-                       entry.subtype === "corner" ? 3 :
-                       entry.subtype === "T" ? 4 : 5;
+      const priority = isPriorityTile
+        ? 1
+        : entry.subtype === "straight"
+        ? 2
+        : entry.subtype === "corner"
+        ? 3
+        : entry.subtype === "t_junction"
+        ? 4
+        : entry.subtype === "crossroads"
+        ? 5
+        : 6;
       availableMatches.push({ tileName, priority });
     }
   }
@@ -1873,9 +1792,14 @@ function getAtlasTile(
     case TILE_KIND.FIELD:
       return ts.map.farmland;
     case TILE_KIND.TREE:
-      return getRandomTileByType("object", "tree", x * 1000 + y) || ts.map.details.tree;
+      return (
+        getRandomTileByCategory("object", "tree", x * 1000 + y) || ts.map.details.tree
+      );
     case TILE_KIND.FLOWER:
-      return getRandomTileByType("object", "flower", x * 2000 + y) || ts.map.details.flower;
+      return (
+        getRandomTileByCategory("object", "flower", x * 2000 + y) ||
+        ts.map.details.flower
+      );
     default:
       return ts.map.grass.center;
   }
@@ -1886,11 +1810,13 @@ function TileWithTs({
   ts,
   x,
   y,
+  tileSize,
 }: {
   terrain: TerrainTile;
   ts: Tileset;
   x: number;
   y: number;
+  tileSize: number;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
 
@@ -1904,13 +1830,13 @@ function TileWithTs({
     <div className="relative">
       {/* Couche de base */}
       {baseCoord && (
-        <SpriteFromAtlas ts={activeTileset} coord={baseCoord} scale={TILE} />
+        <SpriteFromAtlas ts={activeTileset} coord={baseCoord} scale={tileSize} />
       )}
 
       {/* Couche overlay par-dessus */}
       {overlayCoord && (
         <div className="absolute inset-0">
-          <SpriteFromAtlas ts={activeTileset} coord={overlayCoord} scale={TILE} />
+          <SpriteFromAtlas ts={activeTileset} coord={overlayCoord} scale={tileSize} />
         </div>
       )}
     </div>
@@ -2568,6 +2494,8 @@ export default function ExplorateurIA({
   completionId,
   navigateToActivities,
 }: ActivityProps) {
+  const tileSize = useResponsiveTileSize();
+  const cellSize = tileSize + TILE_GAP;
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
   const [progress, setProgress] = useState<Progress>({
@@ -2643,12 +2571,12 @@ export default function ExplorateurIA({
     const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
     const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const targetLeft = clamp(
-      player.x * CELL_SIZE - container.clientWidth / 2 + TILE / 2,
+      player.x * cellSize - container.clientWidth / 2 + tileSize / 2,
       0,
       maxLeft
     );
     const targetTop = clamp(
-      player.y * CELL_SIZE - container.clientHeight / 2 + TILE / 2,
+      player.y * cellSize - container.clientHeight / 2 + tileSize / 2,
       0,
       maxTop
     );
@@ -2660,7 +2588,7 @@ export default function ExplorateurIA({
     if (firstScrollRef.current) {
       firstScrollRef.current = false;
     }
-  }, [player.x, player.y]);
+  }, [player.x, player.y, cellSize, tileSize]);
 
   useEffect(() => {
     if (completionTriggered.current) {
@@ -2784,7 +2712,7 @@ export default function ExplorateurIA({
   return (
     <div className="relative space-y-6">
       <Fireworks show={celebrate} />
-      <div className="grid md:grid-cols-[minmax(0,1fr)_260px] gap-6">
+      <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="rounded-2xl border bg-white p-4 shadow relative">
           <div className="absolute right-3 top-3 flex items-center gap-2 text-[11px] text-slate-600 bg-slate-100/80 px-2 py-1 rounded-full border shadow-sm">
             <span className="tracking-wide uppercase">Tiny Town</span>
@@ -2802,15 +2730,15 @@ export default function ExplorateurIA({
           </div>
           <div
             ref={worldContainerRef}
-            className="mt-4 overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
-            style={{ maxHeight: "60vh" }}
+            className="mt-4 overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-pan-y max-w-full"
+            style={{ maxHeight: "min(70vh, 520px)" }}
           >
             <div className="inline-block p-3">
               <div
                 className="grid min-w-max"
                 style={{
-                  gridTemplateColumns: `repeat(${GRID_W}, ${TILE}px)`,
-                  gridTemplateRows: `repeat(${GRID_H}, ${TILE}px)`,
+                  gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
+                  gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
                   gap: TILE_GAP,
                 }}
               >
@@ -2819,7 +2747,13 @@ export default function ExplorateurIA({
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
                     return (
                       <div key={`${x}-${y}`} className="relative">
-                        <TileWithTs terrain={terrain} ts={tileset} x={x} y={y} />
+                        <TileWithTs
+                          terrain={terrain}
+                          ts={tileset}
+                          x={x}
+                          y={y}
+                          tileSize={tileSize}
+                        />
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
@@ -2837,13 +2771,17 @@ export default function ExplorateurIA({
                                 }}
                                 title={building.label}
                               >
-                                <BuildingSprite id={building.id} ts={tileset} />
+                                <BuildingSprite
+                                  id={building.id}
+                                  ts={tileset}
+                                  tileSize={tileSize}
+                                />
                               </button>
                             )
                         )}
                         {player.x === x && player.y === y && (
                           <div className="absolute inset-1 animate-[float_1.2s_ease-in-out_infinite]">
-                            <PlayerSprite ts={tileset} step={walkStep} />
+                            <PlayerSprite ts={tileset} step={walkStep} tileSize={tileSize} />
                           </div>
                         )}
                       </div>
@@ -2868,13 +2806,13 @@ export default function ExplorateurIA({
             </div>
             <button
               onClick={openIfOnBuilding}
-              className="px-3 py-1 rounded-lg bg-slate-100 border"
+              className="px-3 py-2 rounded-lg bg-slate-100 border w-full sm:w-auto"
             >
               Entrer
             </button>
           </div>
         </div>
-        <aside className="space-y-4">
+        <aside className="space-y-4 md:sticky md:top-4">
           <div className="rounded-2xl border bg-white p-4 shadow">
             <div className="text-xs uppercase tracking-wide text-slate-500">
               Progression
