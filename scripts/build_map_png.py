@@ -670,6 +670,18 @@ def compute_island_edges(
         "southeast": (-1, -1),
         "southwest": (1, -1),
     }
+    cardinal_offsets: Dict[str, tuple[int, int]] = {
+        "north": (0, -1),
+        "south": (0, 1),
+        "east": (1, 0),
+        "west": (-1, 0),
+    }
+    corner_cardinals: Dict[str, tuple[str, str]] = {
+        "northeast": ("north", "east"),
+        "northwest": ("north", "west"),
+        "southeast": ("south", "east"),
+        "southwest": ("south", "west"),
+    }
 
     def priority(orientation: Tuple[str, ...], orientation_type: str) -> tuple[int, int]:
         direction = orientation[0] if orientation else ""
@@ -679,7 +691,7 @@ def compute_island_edges(
         interior_rank = 0 if orientation_type == "interior" else 1
         return (diagonal_rank, interior_rank)
 
-    candidates: set[tuple[int, int]] = set()
+    candidates: Dict[tuple[int, int], bool] = {}
     outside_water = find_outside_water(island, width, height)
     by_island_cell: Dict[tuple[int, int], tuple[Tuple[str, ...], str, bool]] = {}
     priorities: Dict[tuple[int, int], tuple[int, int]] = {}
@@ -690,11 +702,21 @@ def compute_island_edges(
                 if dx == 0 and dy == 0:
                     continue
                 nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in island:
-                    candidates.add((nx, ny))
+                if (nx, ny) in island:
+                    continue
 
-    for (x, y) in sorted(candidates, key=lambda item: (item[1], item[0])):
-        is_outside = (x, y) in outside_water
+                if 0 <= nx < width and 0 <= ny < height:
+                    is_outside = (nx, ny) in outside_water
+                else:
+                    is_outside = True
+
+                previous = candidates.get((nx, ny))
+                if previous is None or (not previous and is_outside):
+                    candidates[(nx, ny)] = is_outside
+
+    for (x, y), is_outside in sorted(
+        candidates.items(), key=lambda item: (item[0][1], item[0][0])
+    ):
         classification = classify_edge_cell((x, y), island, is_outside)
         if not classification:
             continue
@@ -711,6 +733,18 @@ def compute_island_edges(
         target = (x + delta[0], y + delta[1])
         if target not in island:
             continue
+
+        if orientation_type == "exterior" and direction in corner_cardinals:
+            neighbors = corner_cardinals[direction]
+            if all(
+                (
+                    target[0] + cardinal_offsets[card][0],
+                    target[1] + cardinal_offsets[card][1],
+                )
+                in island
+                for card in neighbors
+            ):
+                orientation_type = "interior"
 
         current_priority = priority(orientation, orientation_type)
         previous_priority = priorities.get(target)
