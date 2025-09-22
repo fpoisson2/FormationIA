@@ -26,6 +26,7 @@ interface ActivityLayoutProps {
   contentClassName?: string;
   contentAs?: ContentElement;
   titleAlign?: "left" | "center";
+  withLandingGradient?: boolean;
   onHeaderEdit?: (field: 'eyebrow' | 'title' | 'subtitle' | 'badge', value: string) => void;
   activityConfig?: any;
   onSaveActivity?: (config: any) => void;
@@ -50,6 +51,7 @@ function ActivityLayout({
   onHeaderEdit,
   activityConfig,
   onSaveActivity,
+  withLandingGradient = true,
 }: ActivityLayoutProps): JSX.Element {
   const { isEditMode, token } = useAdminAuth();
   const [isSaving, setIsSaving] = useState(false);
@@ -75,7 +77,8 @@ function ActivityLayout({
   return (
     <div
       className={combineClasses(
-        "landing-gradient min-h-screen px-6 pb-16 pt-10 text-[color:var(--brand-black)]",
+        "min-h-screen px-6 pb-16 pt-10 text-[color:var(--brand-black)]",
+        withLandingGradient ? "landing-gradient" : "",
         outerClassName
       )}
       data-activity={activityId}

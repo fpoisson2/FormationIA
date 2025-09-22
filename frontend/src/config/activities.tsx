@@ -48,6 +48,7 @@ export interface ActivityLayoutOptions {
   headerClassName?: string;
   contentClassName?: string;
   contentAs?: keyof JSX.IntrinsicElements;
+  withLandingGradient?: boolean;
 }
 
 export interface ActivityLayoutConfig
@@ -248,10 +249,11 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         badge: "Ville interactive",
       },
       layout: {
-        outerClassName: "px-0 pt-0 pb-0 md:px-6 md:pt-10 md:pb-16",
-        innerClassName: "max-w-none gap-0 md:gap-12",
+        outerClassName: "min-h-[100dvh] px-0 pt-0 pb-0 md:px-6 md:pt-10 md:pb-16",
+        innerClassName: "max-w-none w-full gap-0 md:gap-12",
         headerClassName: "hidden md:block",
         contentClassName: "space-y-0 md:space-y-12",
+        withLandingGradient: false,
       },
       card: {
         title: "L’Explorateur IA",
@@ -317,6 +319,7 @@ const SERIALIZABLE_LAYOUT_KEYS: Array<keyof ActivityLayoutOptions> = [
   "headerClassName",
   "contentClassName",
   "contentAs",
+  "withLandingGradient",
 ];
 
 function resolveComponent(
@@ -646,6 +649,7 @@ function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
     headerClassName: definition.layout?.headerClassName,
     contentClassName: definition.layout?.contentClassName,
     contentAs: definition.layout?.contentAs,
+    withLandingGradient: definition.layout?.withLandingGradient,
   };
   return base;
 }
