@@ -2869,6 +2869,102 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   );
 }
 
+function MobileArrowControls({ onMove }: { onMove: (dx: number, dy: number) => void }) {
+  const buttonClass =
+    "flex h-14 w-14 items-center justify-center rounded-full bg-slate-900/35 text-white text-2xl shadow-lg backdrop-blur-md transition active:scale-95";
+  const handle = (dx: number, dy: number) => () => {
+    onMove(dx, dy);
+  };
+
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      <div className="pointer-events-auto absolute bottom-5 left-5 rounded-3xl bg-slate-900/20 p-4 shadow-lg backdrop-blur-sm">
+        <div className="grid grid-cols-3 gap-3">
+          <div />
+          <button
+            type="button"
+            aria-label="Aller vers le haut"
+            onClick={handle(0, -1)}
+            className={buttonClass}
+          >
+            ▲
+          </button>
+          <div />
+          <button
+            type="button"
+            aria-label="Aller vers la gauche"
+            onClick={handle(-1, 0)}
+            className={buttonClass}
+          >
+            ◀
+          </button>
+          <div />
+          <button
+            type="button"
+            aria-label="Aller vers la droite"
+            onClick={handle(1, 0)}
+            className={buttonClass}
+          >
+            ▶
+          </button>
+          <div />
+          <button
+            type="button"
+            aria-label="Aller vers le bas"
+            onClick={handle(0, 1)}
+            className={classNames(buttonClass, "col-start-2")}
+          >
+            ▼
+          </button>
+          <div />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type MobilePromptBuilding = {
+  id: QuarterId;
+  x: number;
+  y: number;
+  label: string;
+  number?: number;
+  color: string;
+};
+
+function MobileEnterPromptOverlay({
+  building,
+  onEnter,
+}: {
+  building: MobilePromptBuilding | null;
+  onEnter: () => void;
+}) {
+  if (!building) {
+    return null;
+  }
+
+  const title =
+    building.number != null ? `Quartier ${building.number}` : building.label;
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-6">
+      <button
+        type="button"
+        onClick={onEnter}
+        className="pointer-events-auto flex min-w-[180px] flex-col items-center justify-center rounded-full bg-white/95 px-6 py-3 text-center text-sm font-semibold text-slate-800 shadow-2xl ring-2 ring-emerald-200/80 animate-[prompt-pop_260ms_ease-out] backdrop-blur"
+      >
+        <span
+          className="text-[11px] font-medium uppercase tracking-wide"
+          style={{ color: building.color }}
+        >
+          {title}
+        </span>
+        <span className="text-lg leading-none text-slate-800">Entrer</span>
+      </button>
+    </div>
+  );
+}
+
 function tileLayersAt(
   x: number,
   y: number
@@ -4392,6 +4488,39 @@ export default function ExplorateurIA({
     [buildingAt, player.x, player.y]
   );
 
+  const showMobileControls = isMobile && !isEditMode && !open;
+
+  const mobilePromptBuilding = useMemo(() => {
+    if (!mobilePrompt) {
+      return null;
+    }
+    return buildings.find((entry) => entry.id === mobilePrompt) ?? null;
+  }, [mobilePrompt]);
+
+  const mobilePromptLocked = useMemo(() => {
+    if (!mobilePromptBuilding) {
+      return false;
+    }
+    const key = coordKey(mobilePromptBuilding.x, mobilePromptBuilding.y);
+    return activeGateKeys.has(key);
+  }, [activeGateKeys, mobilePromptBuilding]);
+
+  const handleMobileEnter = useCallback(() => {
+    if (!mobilePromptBuilding || mobilePromptLocked) {
+      return;
+    }
+    setMobilePrompt(null);
+    setOpen(mobilePromptBuilding.id);
+  }, [mobilePromptBuilding, mobilePromptLocked]);
+
+  const handleOverlayMove = useCallback(
+    (dx: number, dy: number) => {
+      cancelAutoWalk();
+      move(dx, dy);
+    },
+    [cancelAutoWalk, move]
+  );
+
   useEffect(() => {
     if (!isMobile || isEditMode) {
       setMobilePrompt(null);
@@ -4412,7 +4541,9 @@ export default function ExplorateurIA({
     <div
       className={classNames(
         "relative w-full",
-        isMobile ? "flex min-h-[100dvh] flex-col overflow-hidden" : "space-y-6"
+        isMobile
+          ? "flex flex-1 h-full min-h-[100dvh] flex-col overflow-hidden"
+          : "space-y-6"
       )}
     >
       <Fireworks show={celebrate} />
@@ -4448,11 +4579,12 @@ export default function ExplorateurIA({
           )}
           <div
             ref={worldContainerRef}
-            className={
+            className={classNames(
+              "relative touch-manipulation",
               isMobile
-                ? "flex-1 min-h-0 h-full w-full overflow-hidden touch-manipulation"
-                : "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-manipulation"
-            }
+                ? "flex-1 min-h-0 h-full w-full overflow-hidden"
+                : "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
+            )}
             style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
             <div
@@ -4520,12 +4652,11 @@ export default function ExplorateurIA({
                           if (building.x !== x || building.y !== y) {
                             return null;
                           }
-                          const showMobilePrompt =
-                            isMobile &&
-                            !isEditMode &&
+                          const highlightTile =
+                            showMobileControls &&
                             !tileBlocked &&
-                            open === null &&
-                            mobilePrompt === building.id;
+                            mobilePromptBuilding?.id === building.id &&
+                            !mobilePromptLocked;
                           return (
                             <div key={building.id} className="absolute inset-0 z-10">
                               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -4535,6 +4666,15 @@ export default function ExplorateurIA({
                                   tileSize={tileSize}
                                 />
                               </div>
+                              {highlightTile && (
+                                <div
+                                  className="pointer-events-none absolute z-20 rounded-lg border-2 border-emerald-300/80 animate-pulse"
+                                  style={{
+                                    inset: `${Math.max(tileSize * 0.1, 2)}px`,
+                                    boxShadow: "0 0 12px rgba(16, 185, 129, 0.45)",
+                                  }}
+                                />
+                              )}
                               {!isMobile && (
                                 <button
                                   onClick={(event) => {
@@ -4555,26 +4695,6 @@ export default function ExplorateurIA({
                                   <span className="sr-only">{building.label}</span>
                                 </button>
                               )}
-                              {showMobilePrompt && (
-                                <div className="pointer-events-none absolute inset-0 flex items-start justify-center">
-                                  <button
-                                    type="button"
-                                    className="pointer-events-auto -translate-y-9 rounded-full bg-white/95 px-4 py-2 text-center text-sm font-semibold text-slate-700 shadow-lg ring-2 ring-emerald-200"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setMobilePrompt(null);
-                                      setOpen(building.id);
-                                    }}
-                                  >
-                                    <span className="block text-[11px] font-medium uppercase tracking-wide text-emerald-600">
-                                      {building.number != null
-                                        ? `Quartier ${building.number}`
-                                        : building.label}
-                                    </span>
-                                    <span className="block text-base">Entrer</span>
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           );
                         })}
@@ -4589,9 +4709,19 @@ export default function ExplorateurIA({
                 )}
               </div>
             </div>
+            {showMobileControls && (
+              <>
+                <MobileEnterPromptOverlay
+                  building={mobilePromptLocked ? null : mobilePromptBuilding}
+                  onEnter={handleMobileEnter}
+                />
+                <MobileArrowControls onMove={handleOverlayMove} />
+              </>
+            )}
           </div>
           <style>{`
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
+            @keyframes prompt-pop { 0%{ transform: translateY(18px) scale(0.92); opacity: 0; } 60%{ transform: translateY(-6px) scale(1.04); opacity: 1; } 100%{ transform: translateY(0) scale(1); opacity: 1; } }
           `}</style>
           {!isMobile && (
             <div className="mt-3 flex items-center justify-between text-sm">
@@ -4613,7 +4743,8 @@ export default function ExplorateurIA({
             </div>
           )}
         </div>
-        <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
+        {!isMobile && (
+          <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
           <div className="rounded-2xl border bg-white p-4 shadow">
             <div className="text-xs uppercase tracking-wide text-slate-500">
               Progression
@@ -4742,7 +4873,8 @@ export default function ExplorateurIA({
               </button>
             </div>
           </div>
-        </aside>
+          </aside>
+        )}
       </div>
 
       <Modal
