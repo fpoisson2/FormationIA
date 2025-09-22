@@ -423,6 +423,7 @@ type TerrainObjectDefinition = {
   compatibleTerrains: readonly TileKind[];
   atlasCategory: AtlasCategory;
   atlasSubtype?: string;
+  atlasChoices?: readonly string[];
   weight: number;
   fallback: TileCoord;
 };
@@ -444,7 +445,6 @@ const TERRAIN_OBJECT_CATALOG = {
       TILE_KIND.GRASS,
       TILE_KIND.DIRT,
       TILE_KIND.DIRT_GRAY,
-      TILE_KIND.SNOW,
     ] as const,
     atlasCategory: "object",
     atlasSubtype: "tree",
@@ -455,8 +455,9 @@ const TERRAIN_OBJECT_CATALOG = {
     compatibleTerrains: [TILE_KIND.SNOW] as const,
     atlasCategory: "object",
     atlasSubtype: "tree",
+    atlasChoices: ["mapTile_109.png", "mapTile_110.png"] as const,
     weight: 4,
-    fallback: atlas("mapTile_110.png"),
+    fallback: atlas("mapTile_109.png"),
   },
   deadTree: {
     compatibleTerrains: [TILE_KIND.DIRT, TILE_KIND.DIRT_GRAY] as const,
@@ -498,6 +499,22 @@ const TERRAIN_OBJECT_CATALOG = {
     atlasSubtype: "rock",
     weight: 1,
     fallback: atlas("mapTile_039.png"),
+  },
+  igloo: {
+    compatibleTerrains: [TILE_KIND.SNOW] as const,
+    atlasCategory: "object",
+    atlasSubtype: "building",
+    atlasChoices: ["mapTile_095.png"] as const,
+    weight: 1,
+    fallback: atlas("mapTile_095.png"),
+  },
+  snowman: {
+    compatibleTerrains: [TILE_KIND.SNOW] as const,
+    atlasCategory: "character",
+    atlasSubtype: "npc",
+    atlasChoices: ["mapTile_094.png"] as const,
+    weight: 1,
+    fallback: atlas("mapTile_094.png"),
   },
 } as const satisfies Record<string, TerrainObjectDefinition>;
 
@@ -554,12 +571,11 @@ const TERRAIN_OBJECT_POOLS = {
     ],
   },
   [TILE_KIND.SNOW]: {
-    density: 0.32,
+    density: 0.34,
     objects: [
-      { id: "snowyTree", weight: 3 },
-      { id: "pineTree", weight: 2 },
-      { id: "smallRock" },
-      { id: "mushroomPatch" },
+      { id: "snowyTree", weight: 4 },
+      { id: "snowman", weight: 2 },
+      { id: "igloo", weight: 1 },
     ],
   },
   [TILE_KIND.FIELD]: {
@@ -1960,13 +1976,61 @@ function carvePathOnIsland(
     return [];
   }
 
+  const distanceFromEdge = new Map<CoordKey, number>();
+  const frontier: CoordKey[] = [];
+  for (const key of cells) {
+    const degree = neighborMap.get(key)?.length ?? 0;
+    if (degree < 4) {
+      distanceFromEdge.set(key, 0);
+      frontier.push(key);
+    }
+  }
+
+  for (let index = 0; index < frontier.length; index++) {
+    const current = frontier[index];
+    const currentDistance = distanceFromEdge.get(current) ?? 0;
+    for (const neighbor of neighborMap.get(current) ?? []) {
+      if (distanceFromEdge.has(neighbor)) {
+        continue;
+      }
+      distanceFromEdge.set(neighbor, currentDistance + 1);
+      frontier.push(neighbor);
+    }
+  }
+
+  let maxEdgeDistance = 0;
+  for (const distance of distanceFromEdge.values()) {
+    if (distance > maxEdgeDistance) {
+      maxEdgeDistance = distance;
+    }
+  }
+
+  let candidateStarts = cells;
+  if (maxEdgeDistance > 0) {
+    const MIN_START_DISTANCE = 2;
+    const preferredThreshold = Math.min(maxEdgeDistance, MIN_START_DISTANCE);
+    const preferred = cells.filter(
+      (key) => (distanceFromEdge.get(key) ?? 0) >= preferredThreshold
+    );
+    if (preferred.length > 0) {
+      candidateStarts = preferred;
+    } else {
+      const farthest = cells.filter(
+        (key) => (distanceFromEdge.get(key) ?? 0) === maxEdgeDistance
+      );
+      if (farthest.length > 0) {
+        candidateStarts = farthest;
+      }
+    }
+  }
+
   const maxLength = Math.min(desiredLength, cells.length);
   const minLength = Math.max(1, Math.min(6, maxLength));
   let bestPath: CoordKey[] = [];
 
   for (let targetLength = maxLength; targetLength >= minLength; targetLength--) {
     for (let attempt = 0; attempt < 120; attempt++) {
-      const start = randomChoice(rng, cells);
+      const start = randomChoice(rng, candidateStarts);
       const { previous, distances } = bfsFrom(start, neighborMap, rng);
       if (distances.size <= 1) {
         continue;
@@ -3009,6 +3073,20 @@ function getTerrainObjectSprite(
     return null;
   }
 
+  const spriteTileset =
+    tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
+
+  if (definition.atlasChoices && definition.atlasChoices.length > 0) {
+    const index = placement.seed % definition.atlasChoices.length;
+    const chosenName = definition.atlasChoices[index];
+    if (chosenName) {
+      const chosen = atlas(chosenName);
+      if (chosen) {
+        return { coord: chosen, tileset: spriteTileset };
+      }
+    }
+  }
+
   const coord =
     getRandomTileByCategory(
       definition.atlasCategory,
@@ -3019,9 +3097,6 @@ function getTerrainObjectSprite(
   if (!coord) {
     return null;
   }
-
-  const spriteTileset =
-    tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
 
   return { coord, tileset: spriteTileset };
 }
