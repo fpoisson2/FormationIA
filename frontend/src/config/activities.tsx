@@ -51,6 +51,8 @@ export interface ActivityLayoutOptions {
   withLandingGradient?: boolean;
   useDynamicViewportHeight?: boolean;
   withBasePadding?: boolean;
+  withBaseContentSpacing?: boolean;
+  withBaseInnerGap?: boolean;
 }
 
 export interface ActivityLayoutConfig
@@ -260,6 +262,8 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         withLandingGradient: false,
         useDynamicViewportHeight: true,
         withBasePadding: false,
+        withBaseContentSpacing: false,
+        withBaseInnerGap: false,
       },
       card: {
         title: "L’Explorateur IA",
@@ -328,6 +332,8 @@ const SERIALIZABLE_LAYOUT_KEYS: Array<keyof ActivityLayoutOptions> = [
   "withLandingGradient",
   "useDynamicViewportHeight",
   "withBasePadding",
+  "withBaseContentSpacing",
+  "withBaseInnerGap",
 ];
 
 function resolveComponent(

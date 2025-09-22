@@ -4412,26 +4412,23 @@ export default function ExplorateurIA({
     <div
       className={classNames(
         "relative w-full",
-        isMobile
-          ? "flex min-h-[100dvh] flex-col overflow-hidden"
-          : "space-y-6"
+        isMobile ? "flex min-h-[100dvh] flex-col overflow-hidden" : "space-y-6"
       )}
     >
       <Fireworks show={celebrate} />
       <div
-        className={classNames(
-          "grid w-full gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]",
+        className={
           isMobile
-            ? "flex-1 min-h-0 grid-rows-[minmax(0,1fr)] gap-0"
-            : ""
-        )}
+            ? "grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0"
+            : "grid w-full gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]"
+        }
       >
         <div
-          className={classNames(
-            "relative flex flex-col rounded-2xl border bg-white p-4 shadow",
-            isMobile &&
-              "h-full min-h-0 flex-1 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none"
-          )}
+          className={
+            isMobile
+              ? "relative flex min-h-0 flex-1 flex-col"
+              : "relative flex flex-col rounded-2xl border bg-white p-4 shadow"
+          }
         >
           {!isMobile && (
             <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
@@ -4451,21 +4448,23 @@ export default function ExplorateurIA({
           )}
           <div
             ref={worldContainerRef}
-            className={classNames(
-              "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-manipulation",
-              isMobile &&
-                "mt-0 min-h-0 h-full w-full flex-1 rounded-none border-0 bg-transparent shadow-none"
-            )}
+            className={
+              isMobile
+                ? "flex-1 min-h-0 h-full w-full overflow-hidden touch-manipulation"
+                : "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-manipulation"
+            }
             style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
             <div
-              className={classNames(
-                "inline-block",
-                isMobile ? "h-full w-full p-0" : "p-3"
-              )}
+              className={
+                isMobile ? "flex h-full w-full" : "inline-block p-3"
+              }
             >
               <div
-                className="grid min-w-max"
+                className={classNames(
+                  "grid",
+                  isMobile ? "h-full w-full min-w-max" : "min-w-max"
+                )}
                 style={{
                   gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
                   gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,

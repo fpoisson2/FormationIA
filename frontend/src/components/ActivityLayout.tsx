@@ -29,6 +29,8 @@ interface ActivityLayoutProps {
   withLandingGradient?: boolean;
   useDynamicViewportHeight?: boolean;
   withBasePadding?: boolean;
+  withBaseContentSpacing?: boolean;
+  withBaseInnerGap?: boolean;
   onHeaderEdit?: (
     field: "eyebrow" | "title" | "subtitle" | "badge",
     value: string
@@ -59,6 +61,8 @@ function ActivityLayout({
   withLandingGradient = true,
   useDynamicViewportHeight = false,
   withBasePadding = true,
+  withBaseContentSpacing = true,
+  withBaseInnerGap = true,
 }: ActivityLayoutProps): JSX.Element {
   const { isEditMode, token } = useAdminAuth();
   const [isSaving, setIsSaving] = useState(false);
@@ -94,7 +98,8 @@ function ActivityLayout({
     >
       <div
         className={combineClasses(
-          "mx-auto flex max-w-6xl flex-col gap-12",
+          "mx-auto flex max-w-6xl flex-col",
+          withBaseInnerGap ? "gap-12" : "",
           innerClassName
         )}
       >
@@ -196,7 +201,10 @@ function ActivityLayout({
           {headerChildren}
         </header>
         <ContentTag
-          className={combineClasses("space-y-10", contentClassName)}
+          className={combineClasses(
+            withBaseContentSpacing ? "space-y-10" : "",
+            contentClassName
+          )}
         >
           {children}
         </ContentTag>
