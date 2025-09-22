@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -10,6 +12,13 @@ import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesh
 import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
+import {
+  CLARTE_QUESTIONS,
+  CREATION_POOL,
+  DECISIONS,
+  DILEMMAS,
+  type CreationSpec,
+} from "./explorateurIA/worlds/world1";
 
 // ---
 // "Explorateur IA" — Frontend React (module web auto-portant)
@@ -298,9 +307,9 @@ const FALLBACK_SAND_TILES: SandTiles = {
   },
 };
 
-function deriveSandTilesFromAtlas(): SandTiles {
+function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
   const sandEntries = Array.from(MAP_PACK_ATLAS.values()).filter(
-    (entry) => entry.category === "terrain" && entry.subtype === "sand"
+    (entry) => entry.category === "terrain" && entry.subtype === subtype
   );
 
   const derived: SandTiles = {
@@ -403,6 +412,9 @@ const TILE_KIND = {
   TREE: 4,
   FLOWER: 5,
   FIELD: 6,
+  DIRT: 7,
+  DIRT_GRAY: 8,
+  SNOW: 9,
 } as const;
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
@@ -412,6 +424,44 @@ const LOWER_TERRAIN_TYPES = new Set<TileKind>([
   TILE_KIND.SAND,
   TILE_KIND.FIELD,
 ]);
+
+type TerrainThemeConfig = {
+  label: string;
+  base: TileKind;
+};
+
+const TERRAIN_THEMES = {
+  sand: {
+    label: "Sable",
+    base: TILE_KIND.SAND,
+  },
+  grass: {
+    label: "Gazon",
+    base: TILE_KIND.GRASS,
+  },
+  dirt: {
+    label: "Terre",
+    base: TILE_KIND.DIRT,
+  },
+  dirtGray: {
+    label: "Terre grise",
+    base: TILE_KIND.DIRT_GRAY,
+  },
+  snow: {
+    label: "Neige",
+    base: TILE_KIND.SNOW,
+  },
+} as const satisfies Record<string, TerrainThemeConfig>;
+
+type TerrainThemeId = keyof typeof TERRAIN_THEMES;
+
+const TERRAIN_THEME_ORDER: TerrainThemeId[] = [
+  "sand",
+  "grass",
+  "dirt",
+  "dirtGray",
+  "snow",
+];
 
 const DIAGONAL_CONNECTIONS = new Set<string>([
   "northeast",
@@ -450,6 +500,75 @@ function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
     return true;
   }
   return isLowerTerrainKind(tile.base);
+}
+
+function applyTerrainThemeToWorld(
+  tiles: TerrainTile[][],
+  theme: TerrainThemeConfig
+) {
+  for (const row of tiles) {
+    for (const tile of row) {
+      if (!tile) {
+        continue;
+      }
+      if (tile.base === TILE_KIND.WATER) {
+        continue;
+      }
+      tile.base = theme.base;
+      if (tile.overlay && tile.overlay !== TILE_KIND.PATH) {
+        delete tile.overlay;
+      }
+      tile.edge = undefined;
+      tile.cliffConnections = undefined;
+    }
+  }
+}
+
+function recomputeWorldMetadata(worldTiles: TerrainTile[][]) {
+  const height = worldTiles.length;
+  const width = worldTiles[0]?.length ?? 0;
+
+  const hasLower = (tx: number, ty: number) =>
+    tileHasLowerTerrain(worldTiles[ty]?.[tx] ?? null);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const connections = Array.from(computeCliffConnections(x, y, hasLower));
+      const tile = worldTiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      tile.cliffConnections = connections.length > 0 ? connections : undefined;
+    }
+  }
+
+  const islandCells = new Set<CoordKey>();
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = worldTiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      if (tile.base !== TILE_KIND.WATER) {
+        islandCells.add(coordKey(x, y));
+      }
+      tile.edge = undefined;
+    }
+  }
+
+  const placements = computeIslandEdgePlacements(
+    islandCells,
+    width,
+    height
+  );
+
+  for (const [key, placement] of placements.entries()) {
+    const [px, py] = coordFromKey(key as CoordKey);
+    const tile = worldTiles[py]?.[px];
+    if (tile) {
+      tile.edge = placement;
+    }
+  }
 }
 
 function computeCliffConnections(
@@ -540,6 +659,13 @@ type Tileset = {
 };
 
 const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
+
+const BUILTIN_GROUND_VARIANTS = {
+  grass: deriveSandTilesFromAtlas("grass"),
+  dirt: deriveSandTilesFromAtlas("dirt_brown"),
+  dirtGray: deriveSandTilesFromAtlas("dirt_gray"),
+  snow: deriveSandTilesFromAtlas("ice"),
+} as const satisfies Record<string, SandTiles>;
 
 function cloneSandTiles(source: SandTiles): SandTiles {
   const clonedEdges = EDGE_DIRECTIONS.reduce((acc, direction) => {
@@ -1129,67 +1255,17 @@ function findOutsideWaterCells(
 function fillSmallLakesInIsland(
   island: Set<CoordKey>,
   width: number,
-  height: number,
-  minSpan = 3
+  height: number
 ) {
-  if (minSpan <= 1) {
-    return;
-  }
-
   const outside = findOutsideWaterCells(island, width, height);
-  const visited = new Set<CoordKey>(outside);
 
   for (let x = 1; x < width - 1; x++) {
     for (let y = 1; y < height - 1; y++) {
-      const startKey = coordKey(x, y);
-      if (island.has(startKey) || visited.has(startKey)) {
+      const key = coordKey(x, y);
+      if (island.has(key) || outside.has(key)) {
         continue;
       }
-
-      const queue: Coord[] = [[x, y]];
-      const component: CoordKey[] = [startKey];
-      visited.add(startKey);
-
-      let minX = x;
-      let maxX = x;
-      let minY = y;
-      let maxY = y;
-
-      while (queue.length > 0) {
-        const [cx, cy] = queue.shift()!;
-        for (const [dx, dy] of [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ] as const) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-          if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-            continue;
-          }
-          const key = coordKey(nx, ny);
-          if (island.has(key) || visited.has(key)) {
-            continue;
-          }
-          visited.add(key);
-          queue.push([nx, ny]);
-          component.push(key);
-
-          if (nx < minX) minX = nx;
-          if (nx > maxX) maxX = nx;
-          if (ny < minY) minY = ny;
-          if (ny > maxY) maxY = ny;
-        }
-      }
-
-      const spanX = maxX - minX + 1;
-      const spanY = maxY - minY + 1;
-      if (spanX < minSpan || spanY < minSpan) {
-        for (const key of component) {
-          island.add(key);
-        }
-      }
+      island.add(key);
     }
   }
 }
@@ -1456,6 +1532,76 @@ function smoothIslandShape(island: Set<CoordKey>) {
   }
 }
 
+function pruneNarrowSpurs(island: Set<CoordKey>, maxLength = 3) {
+  if (island.size === 0 || maxLength <= 0) {
+    return;
+  }
+
+  let changed = false;
+  do {
+    changed = false;
+    const neighborMap = buildNeighborMap(island);
+    const visited = new Set<CoordKey>();
+    const toRemove = new Set<CoordKey>();
+
+    for (const [key, neighbors] of neighborMap.entries()) {
+      if (visited.has(key) || neighbors.length !== 1) {
+        continue;
+      }
+
+      const chain: CoordKey[] = [];
+      let current: CoordKey | null = key;
+      let previous: CoordKey | null = null;
+      let shouldRemove = false;
+
+      while (current) {
+        chain.push(current);
+        visited.add(current);
+
+        const nextNeighbors = neighborMap.get(current) ?? [];
+        const degree = nextNeighbors.length;
+        const candidates = nextNeighbors.filter((candidate) => candidate !== previous);
+
+        if (chain.length > maxLength) {
+          shouldRemove = false;
+          break;
+        }
+
+        if (candidates.length !== 1) {
+          if (chain.length <= maxLength && degree >= 2) {
+            shouldRemove = true;
+          }
+          break;
+        }
+
+        previous = current;
+        current = candidates[0] ?? null;
+
+        if (current && chain.includes(current)) {
+          shouldRemove = false;
+          break;
+        }
+      }
+
+      if (shouldRemove) {
+        for (let index = 0; index < chain.length - 1; index++) {
+          const cell = chain[index];
+          if (cell) {
+            toRemove.add(cell);
+          }
+        }
+      }
+    }
+
+    if (toRemove.size > 0) {
+      changed = true;
+      for (const key of toRemove) {
+        island.delete(key);
+      }
+    }
+  } while (changed);
+}
+
 function buildNeighborMap(cells: Set<CoordKey>): Map<CoordKey, CoordKey[]> {
   const neighborMap = new Map<CoordKey, CoordKey[]>();
   for (const key of cells) {
@@ -1618,6 +1764,15 @@ const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
   "ethique",
 ];
 
+const PROGRESSION_SEQUENCE: QuarterId[] = [
+  "clarte",
+  "creation",
+  "decision",
+  "ethique",
+];
+
+const PROGRESSION_WITH_GOAL: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+
 type PathMarkerPlacement = { x: number; y: number; coord: TileCoord };
 
 type GeneratedWorld = {
@@ -1658,14 +1813,87 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     pickFrom(path.map((_, index) => index));
   }
 
+  const stageOrder: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+  const indexByStage = new Map<QuarterId, number>();
+  const takenIndices = new Set<number>();
+
+  for (let index = 0; index < path.length; index++) {
+    const [x, y] = path[index];
+    for (const stage of PROGRESSION_SEQUENCE) {
+      if (indexByStage.has(stage)) {
+        continue;
+      }
+      const assignment = assignments[stage];
+      if (assignment.x === x && assignment.y === y) {
+        indexByStage.set(stage, index);
+        takenIndices.add(index);
+      }
+    }
+  }
+
+  if (path.length > 0) {
+    indexByStage.set("mairie", path.length - 1);
+    const [goalX, goalY] = path[path.length - 1];
+    assignments.mairie = { x: goalX, y: goalY };
+  }
+
+  const moveStage = (stage: QuarterId, targetIndex: number) => {
+    const currentIndex = indexByStage.get(stage);
+    if (currentIndex === targetIndex) {
+      return;
+    }
+    const [x, y] = path[targetIndex];
+    if (currentIndex !== undefined) {
+      takenIndices.delete(currentIndex);
+    }
+    assignments[stage] = { x, y };
+    indexByStage.set(stage, targetIndex);
+    takenIndices.add(targetIndex);
+  };
+
+  const MIN_GAP = 1;
+  let adjusted = false;
+  do {
+    adjusted = false;
+    for (let index = stageOrder.length - 2; index >= 0; index--) {
+      const stage = stageOrder[index];
+      const nextStage = stageOrder[index + 1];
+      const stageIndex = indexByStage.get(stage);
+      const nextIndex = indexByStage.get(nextStage);
+      if (stageIndex === undefined || nextIndex === undefined) {
+        continue;
+      }
+      if (nextIndex - stageIndex <= MIN_GAP) {
+        const previousStage = index > 0 ? stageOrder[index - 1] : undefined;
+        const previousIndex = previousStage
+          ? indexByStage.get(previousStage)
+          : undefined;
+        const minIndex = previousIndex !== undefined ? previousIndex + 1 : 0;
+        const maxIndex = nextIndex - (MIN_GAP + 1);
+        if (maxIndex < minIndex) {
+          continue;
+        }
+        const start = Math.min(stageIndex - 1, maxIndex);
+        for (let candidate = start; candidate >= minIndex; candidate--) {
+          if (!takenIndices.has(candidate)) {
+            moveStage(stage, candidate);
+            adjusted = true;
+            break;
+          }
+        }
+      }
+    }
+  } while (adjusted);
+
   return assignments;
 }
 
 const START_MARKER_COORD = atlas("mapTile_179.png");
 const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
+const GATE_MARKER_COORD = atlas("mapTile_044.png");
 
-function generateWorld(): GeneratedWorld {
-  const rng = createRng(WORLD_SEED);
+function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
+  const rng = createRng(seed);
   const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
     Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
   );
@@ -1673,6 +1901,7 @@ function generateWorld(): GeneratedWorld {
   const island = generateIslandCells(WORLD_WIDTH, WORLD_HEIGHT, rng);
   fillSmallLakesInIsland(island, WORLD_WIDTH, WORLD_HEIGHT);
   smoothIslandShape(island);
+  pruneNarrowSpurs(island);
 
   for (const key of island) {
     const [x, y] = coordFromKey(key as CoordKey);
@@ -1755,12 +1984,23 @@ const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
-const MARKER_COORD_BY_KEY = new Map<string, TileCoord>(
-  generatedWorld.markers.map((placement) => [
-    `${placement.x}-${placement.y}`,
-    placement.coord,
-  ])
-);
+const MARKER_COORD_BY_KEY = new Map<string, TileCoord>();
+function updateMarkerCoordCache(markers: PathMarkerPlacement[]) {
+  MARKER_COORD_BY_KEY.clear();
+  for (const placement of markers) {
+    MARKER_COORD_BY_KEY.set(`${placement.x}-${placement.y}`, placement.coord);
+  }
+}
+updateMarkerCoordCache(generatedWorld.markers);
+
+const PATH_INDEX_BY_COORD = new Map<CoordKey, number>();
+function updatePathIndexCache(path: Coord[]) {
+  PATH_INDEX_BY_COORD.clear();
+  path.forEach(([x, y], index) => {
+    PATH_INDEX_BY_COORD.set(coordKey(x, y), index);
+  });
+}
+updatePathIndexCache(generatedWorld.path);
 
 const BUILDING_META: Record<
   QuarterId,
@@ -1788,29 +2028,197 @@ const buildings: Array<{
   label: string;
   color: string;
   number?: number;
-}> = BUILDING_DISPLAY_ORDER.map((id) => {
-  const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
-  const meta = BUILDING_META[id];
-  return {
-    id,
-    x: landmark.x,
-    y: landmark.y,
-    label: meta.label,
-    color: meta.color,
-    number: meta.number,
-  };
-});
+}> = [];
+function rebuildBuildings() {
+  buildings.splice(0, buildings.length, ...BUILDING_DISPLAY_ORDER.map((id) => {
+    const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
+    const meta = BUILDING_META[id];
+    return {
+      id,
+      x: landmark.x,
+      y: landmark.y,
+      label: meta.label,
+      color: meta.color,
+      number: meta.number,
+    };
+  }));
+}
+rebuildBuildings();
 
-const START = (() => {
+const BUILDING_BY_COORD = new Map<CoordKey, QuarterId>();
+function rebuildBuildingLookup() {
+  BUILDING_BY_COORD.clear();
+  for (const building of buildings) {
+    BUILDING_BY_COORD.set(coordKey(building.x, building.y), building.id);
+  }
+}
+rebuildBuildingLookup();
+
+type PathGate = {
+  stage: QuarterId;
+  x: number;
+  y: number;
+};
+
+const PATH_GATES: PathGate[] = [];
+function rebuildPathGates() {
+  PATH_GATES.splice(0, PATH_GATES.length);
+  const buildingById = new Map(buildings.map((entry) => [entry.id, entry] as const));
+
+  for (let index = 0; index < PROGRESSION_SEQUENCE.length; index++) {
+    const stage = PROGRESSION_SEQUENCE[index];
+    const currentBuilding = buildingById.get(stage);
+    const nextStage = PROGRESSION_WITH_GOAL[index + 1];
+    const nextBuilding = nextStage ? buildingById.get(nextStage) : undefined;
+
+    if (!currentBuilding || !nextBuilding) {
+      continue;
+    }
+
+    const stageIndex = PATH_INDEX_BY_COORD.get(
+      coordKey(currentBuilding.x, currentBuilding.y)
+    );
+    const nextIndex = PATH_INDEX_BY_COORD.get(
+      coordKey(nextBuilding.x, nextBuilding.y)
+    );
+
+    if (
+      stageIndex === undefined ||
+      nextIndex === undefined ||
+      stageIndex === nextIndex
+    ) {
+      continue;
+    }
+
+    const step = stageIndex < nextIndex ? 1 : -1;
+    let gateCoord: Coord | undefined;
+
+    for (let pathIndex = stageIndex + step; pathIndex !== nextIndex; pathIndex += step) {
+      const candidate = generatedWorld.path[pathIndex];
+      if (!candidate) {
+        break;
+      }
+      const candidateKey = coordKey(candidate[0], candidate[1]);
+      if (!BUILDING_BY_COORD.has(candidateKey)) {
+        gateCoord = candidate;
+        break;
+      }
+    }
+
+    if (!gateCoord) {
+      const fallbackIndex = stageIndex + step;
+      if (fallbackIndex >= 0 && fallbackIndex < generatedWorld.path.length) {
+        gateCoord = generatedWorld.path[fallbackIndex];
+      } else {
+        gateCoord = [currentBuilding.x, currentBuilding.y];
+      }
+    }
+
+    if (gateCoord) {
+      let gateKey = coordKey(gateCoord[0], gateCoord[1]);
+      if (BUILDING_BY_COORD.get(gateKey) === "mairie") {
+        const gateIndex = PATH_INDEX_BY_COORD.get(gateKey);
+        if (gateIndex !== undefined) {
+          const previousIndex = gateIndex - step;
+          if (previousIndex >= 0 && previousIndex < generatedWorld.path.length) {
+            const previousCoord = generatedWorld.path[previousIndex];
+            const previousKey = coordKey(previousCoord[0], previousCoord[1]);
+            if (BUILDING_BY_COORD.get(previousKey) !== "mairie") {
+              gateCoord = previousCoord;
+              gateKey = previousKey;
+            } else {
+              gateCoord = [currentBuilding.x, currentBuilding.y];
+              gateKey = coordKey(gateCoord[0], gateCoord[1]);
+            }
+          } else {
+            gateCoord = [currentBuilding.x, currentBuilding.y];
+            gateKey = coordKey(gateCoord[0], gateCoord[1]);
+          }
+        } else {
+          gateCoord = [currentBuilding.x, currentBuilding.y];
+          gateKey = coordKey(gateCoord[0], gateCoord[1]);
+        }
+      }
+
+      if (BUILDING_BY_COORD.get(gateKey) === "mairie") {
+        gateCoord = [currentBuilding.x, currentBuilding.y];
+      }
+
+      PATH_GATES.push({ stage, x: gateCoord[0], y: gateCoord[1] });
+    }
+  }
+}
+rebuildPathGates();
+
+const GATE_BY_COORD = new Map<CoordKey, PathGate>();
+function rebuildGateLookup() {
+  GATE_BY_COORD.clear();
+  for (const gate of PATH_GATES) {
+    GATE_BY_COORD.set(coordKey(gate.x, gate.y), gate);
+  }
+}
+rebuildGateLookup();
+
+const START = { x: 0, y: 0 };
+function updateStartFromWorld() {
   const firstStep = generatedWorld.path[0];
   if (firstStep) {
-    const [x, y] = firstStep;
-    return { x, y };
+    START.x = firstStep[0];
+    START.y = firstStep[1];
+    return;
   }
   const fallback =
     generatedWorld.landmarks.mairie ?? FALLBACK_LANDMARKS.mairie;
-  return { x: fallback.x, y: fallback.y };
-})();
+  START.x = fallback.x;
+  START.y = fallback.y;
+}
+updateStartFromWorld();
+
+function randomWorldSeed(): number {
+  return Math.floor(Math.random() * 1_000_000) + 1;
+}
+
+function regenerateWorldInPlace(seed: number = randomWorldSeed()): {
+  seed: number;
+  start: { x: number; y: number };
+} {
+  const nextWorld = generateWorld(seed);
+
+  world.length = 0;
+  for (const row of nextWorld.tiles) {
+    world.push(row.map((tile) => ({ ...tile })));
+  }
+  generatedWorld.tiles = world;
+
+  generatedWorld.path.length = 0;
+  generatedWorld.path.push(...nextWorld.path);
+
+  generatedWorld.markers.length = 0;
+  generatedWorld.markers.push(...nextWorld.markers);
+
+  const landmarkKeys = Object.keys({ ...generatedWorld.landmarks }) as QuarterId[];
+  for (const key of landmarkKeys) {
+    const nextLandmark = nextWorld.landmarks[key] ?? FALLBACK_LANDMARKS[key];
+    generatedWorld.landmarks[key] = { x: nextLandmark.x, y: nextLandmark.y };
+  }
+
+  updateMarkerCoordCache(generatedWorld.markers);
+  updatePathIndexCache(generatedWorld.path);
+  rebuildBuildings();
+  rebuildBuildingLookup();
+  rebuildPathGates();
+  rebuildGateLookup();
+  updateStartFromWorld();
+
+  if (_worldCache) {
+    _worldCache.tiles = world;
+    _worldCache.path = generatedWorld.path;
+    _worldCache.markers = generatedWorld.markers;
+    _worldCache.landmarks = generatedWorld.landmarks;
+  }
+
+  return { seed, start: { x: START.x, y: START.y } };
+}
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -2099,8 +2507,34 @@ function resolveEdgeDirection(orientation: EdgeOrientation): EdgeDirection | nul
   return EDGE_DIRECTION_SET.has(key) ? key : null;
 }
 
+const DIAGONAL_EDGE_NAMES = new Set([
+  "northeast",
+  "northwest",
+  "southeast",
+  "southwest",
+]);
+
+function isDiagonalEdgeOrientation(orientation: EdgeOrientation): boolean {
+  if (orientation.length === 0) {
+    return false;
+  }
+  if (orientation.length === 1) {
+    return DIAGONAL_EDGE_NAMES.has(orientation[0]);
+  }
+  if (orientation.length === 2) {
+    const values = new Set(orientation);
+    return (
+      (values.has("north") && values.has("east")) ||
+      (values.has("north") && values.has("west")) ||
+      (values.has("south") && values.has("east")) ||
+      (values.has("south") && values.has("west"))
+    );
+  }
+  return false;
+}
+
 function getSandEdgeVariantCoord(
-  ts: Tileset,
+  sandTiles: SandTiles,
   orientation: EdgeOrientation,
   variant: EdgeVariantType
 ): TileCoord | null {
@@ -2108,7 +2542,7 @@ function getSandEdgeVariantCoord(
   if (!direction) {
     return null;
   }
-  const bucket = ts.map.sand.edges[direction];
+  const bucket = sandTiles.edges[direction];
   if (!bucket) {
     return null;
   }
@@ -2116,14 +2550,23 @@ function getSandEdgeVariantCoord(
   return preferred ?? bucket.exterior ?? bucket.interior ?? null;
 }
 
-function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
+function getSandTileCoord(
+  x: number,
+  y: number,
+  ts: Tileset,
+  overrides?: SandTiles
+): TileCoord {
+  const sandTiles = overrides ?? ts.map.sand;
   const tile = world[y]?.[x];
   if (tile?.edge && !tile.edge.touchesOutside) {
-    const oriented = getSandEdgeVariantCoord(
-      ts,
-      tile.edge.orientation,
-      tile.edge.variant
-    );
+    const orientation = tile.edge.orientation;
+    const prefersInterior =
+      tile.edge.variant !== "interior" && isDiagonalEdgeOrientation(orientation);
+    const variantToUse = prefersInterior ? "interior" : tile.edge.variant;
+    let oriented = getSandEdgeVariantCoord(sandTiles, orientation, variantToUse);
+    if (!oriented && prefersInterior) {
+      oriented = getSandEdgeVariantCoord(sandTiles, orientation, "exterior");
+    }
     if (oriented) {
       return oriented;
     }
@@ -2135,7 +2578,7 @@ function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
   const eastWater = tileLayersAt(x + 1, y).base === TILE_KIND.WATER;
 
   const pickFallback = (direction: EdgeDirection): TileCoord | null => {
-    const variant = ts.map.sand.edges[direction];
+    const variant = sandTiles.edges[direction];
     if (!variant) {
       return null;
     }
@@ -2167,7 +2610,7 @@ function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
     return pickFallback("west") ?? ts.map.sand.center;
   }
 
-  return ts.map.sand.center;
+  return sandTiles.center;
 }
 
 function getWaterTileCoord(x: number, y: number, ts: Tileset): TileCoord {
@@ -2288,6 +2731,12 @@ function getAtlasTile(
       return getWaterTileCoord(x, y, ts);
     case TILE_KIND.SAND:
       return getSandTileCoord(x, y, ts);
+    case TILE_KIND.DIRT:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirt);
+    case TILE_KIND.DIRT_GRAY:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirtGray);
+    case TILE_KIND.SNOW:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.snow);
     case TILE_KIND.FIELD:
       return ts.map.farmland;
     case TILE_KIND.TREE:
@@ -2318,6 +2767,17 @@ function TileWithTs({
   tileSize: number;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
+  const baseVariantTiles =
+    terrain.base === TILE_KIND.GRASS
+      ? BUILTIN_GROUND_VARIANTS.grass
+      : terrain.base === TILE_KIND.DIRT
+      ? BUILTIN_GROUND_VARIANTS.dirt
+      : terrain.base === TILE_KIND.DIRT_GRAY
+      ? BUILTIN_GROUND_VARIANTS.dirtGray
+      : terrain.base === TILE_KIND.SNOW
+      ? BUILTIN_GROUND_VARIANTS.snow
+      : null;
+  const baseRenderTileset = baseVariantTiles ? DEFAULT_ATLAS : activeTileset;
 
   const edgePlacement = terrain.edge;
   const shouldUseWaterBase = edgePlacement?.touchesOutside ?? false;
@@ -2332,24 +2792,29 @@ function TileWithTs({
 
   const edgeOverlayCoord = edgePlacement?.touchesOutside
     ? getSandEdgeVariantCoord(
-        activeTileset,
+        baseVariantTiles ?? activeTileset.map.sand,
         edgePlacement.orientation,
         edgePlacement.variant
       )
     : null;
 
-  const overlays = [edgeOverlayCoord, overlayCoord].filter(
-    (coord): coord is TileCoord => Array.isArray(coord)
-  );
+  const overlays = [
+    edgeOverlayCoord ? { coord: edgeOverlayCoord, tileset: baseRenderTileset } : null,
+    overlayCoord ? { coord: overlayCoord, tileset: activeTileset } : null,
+  ].filter((entry): entry is { coord: TileCoord; tileset: Tileset } => Boolean(entry));
 
   return (
     <div className="relative">
       {baseCoord && (
-        <SpriteFromAtlas ts={activeTileset} coord={baseCoord} scale={tileSize} />
+        <SpriteFromAtlas ts={baseRenderTileset} coord={baseCoord} scale={tileSize} />
       )}
-      {overlays.map((coord, index) => (
+      {overlays.map((entry, index) => (
         <div key={index} className="absolute inset-0">
-          <SpriteFromAtlas ts={activeTileset} coord={coord} scale={tileSize} />
+          <SpriteFromAtlas
+            ts={entry.tileset}
+            coord={entry.coord}
+            scale={tileSize}
+          />
         </div>
       ))}
     </div>
@@ -2417,32 +2882,6 @@ function Fireworks({ show }: { show: boolean }) {
     </div>
   );
 }
-
-const CLARTE_QUESTIONS = [
-  {
-    q: "Quel est le meilleur énoncé pour obtenir un plan clair?",
-    options: [
-      {
-        id: "A",
-        text: "Écris un plan.",
-        explain: "Trop vague : objectifs, sections, longueur… manquent.",
-        score: 0,
-      },
-      {
-        id: "B",
-        text: "Donne un plan en 5 sections sur l'énergie solaire pour débutants, avec titres et 2 sous-points chacun.",
-        explain: "Précis, contraint et adapté au public cible.",
-        score: 100,
-      },
-      {
-        id: "C",
-        text: "Plan énergie solaire?",
-        explain: "Formulation télégraphique, ambiguë.",
-        score: 10,
-      },
-    ],
-  },
-];
 
 function ClarteQuiz({ onDone }: { onDone: (score: number) => void }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -2528,20 +2967,6 @@ function MiniAnimation({ strength }: { strength: number }) {
     </div>
   );
 }
-
-type CreationSpec = {
-  action: string | null;
-  media: string | null;
-  style: string | null;
-  theme: string | null;
-};
-
-const CREATION_POOL = {
-  action: ["créer", "rédiger", "composer"],
-  media: ["affiche", "article", "capsule audio"],
-  style: ["cartoon", "académique", "minimaliste"],
-  theme: ["énergie", "ville intelligente", "biodiversité"],
-};
 
 function CreationBuilder({ onDone }: { onDone: (spec: CreationSpec) => void }) {
   const [spec, setSpec] = useState<CreationSpec>({
@@ -2744,25 +3169,6 @@ function GeneratedPreview({ spec }: { spec: CreationSpec }) {
   );
 }
 
-const DECISIONS = [
-  {
-    prompt: "Votre équipe doit annoncer un projet. Choisissez une stratégie de communication:",
-    options: [
-      { id: "A", title: "A — Rapide", impact: "+ vitesse / – profondeur", next: 1 },
-      { id: "B", title: "B — Équilibrée", impact: "+ clarté / – temps", next: 1 },
-      { id: "C", title: "C — Personnalisée", impact: "+ pertinence / – effort", next: 1 },
-    ],
-  },
-  {
-    prompt: "Le public réagit. Ensuite?",
-    options: [
-      { id: "A", title: "A — FAQ automatisée", impact: "+ échelle / – nuance", next: null },
-      { id: "B", title: "B — Atelier interactif", impact: "+ engagement / – logistique", next: null },
-      { id: "C", title: "C — Messages ciblés", impact: "+ efficacité / – données", next: null },
-    ],
-  },
-];
-
 function DecisionPath({ onDone }: { onDone: (path: string[]) => void }) {
   const [step, setStep] = useState(0);
   const [path, setPath] = useState<string[]>([]);
@@ -2806,55 +3212,6 @@ function DecisionPath({ onDone }: { onDone: (path: string[]) => void }) {
     </div>
   );
 }
-
-const DILEMMAS = [
-  {
-    s: "Un outil génère un résumé contenant des stéréotypes.",
-    options: [
-      {
-        id: "ignorer",
-        label: "Ignorer",
-        fb: "Risque d'amplifier le biais et de diffuser une erreur.",
-        score: 0,
-      },
-      {
-        id: "corriger",
-        label: "Corriger et justifier",
-        fb: "Bonne pratique: signalez et corrigez les biais.",
-        score: 100,
-      },
-      {
-        id: "expliquer",
-        label: "Demander des explications",
-        fb: "Utile, mais sans correction le risque demeure.",
-        score: 60,
-      },
-    ],
-  },
-  {
-    s: "Un modèle révèle des données sensibles dans un exemple.",
-    options: [
-      {
-        id: "ignorer",
-        label: "Ignorer",
-        fb: "Non-conforme à la protection des données.",
-        score: 0,
-      },
-      {
-        id: "corriger",
-        label: "Supprimer et anonymiser",
-        fb: "Conforme aux bonnes pratiques.",
-        score: 100,
-      },
-      {
-        id: "expliquer",
-        label: "Demander justification",
-        fb: "Insuffisant sans retrait immédiat.",
-        score: 40,
-      },
-    ],
-  },
-];
 
 function EthicsDilemmas({ onDone }: { onDone: (score: number) => void }) {
   const [index, setIndex] = useState(0);
@@ -3006,6 +3363,7 @@ function BadgeView({
 export default function ExplorateurIA({
   completionId,
   navigateToActivities,
+  isEditMode = false,
 }: ActivityProps) {
   const tileSize = useResponsiveTileSize();
   const cellSize = tileSize + TILE_GAP;
@@ -3020,12 +3378,81 @@ export default function ExplorateurIA({
   });
   const [celebrate, setCelebrate] = useState(false);
   const [tileset, setTileset] = useTileset();
+  const [worldVersion, forceWorldRefresh] = useState(0);
+  const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
+  const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
   const firstScrollRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const completionTriggered = useRef(false);
+
+  const isQuarterCompleted = useCallback(
+    (id: QuarterId) => {
+      switch (id) {
+        case "clarte":
+          return progress.clarte.done;
+        case "creation":
+          return progress.creation.done;
+        case "decision":
+          return progress.decision.done;
+        case "ethique":
+          return progress.ethique.done;
+        case "mairie":
+          return (
+            progress.clarte.done &&
+            progress.creation.done &&
+            progress.decision.done &&
+            progress.ethique.done
+          );
+        default:
+          return false;
+      }
+    },
+    [progress]
+  );
+
+  const activeGateKeys = useMemo(() => {
+    const active = new Set<CoordKey>();
+    for (const gate of PATH_GATES) {
+      if (!isQuarterCompleted(gate.stage)) {
+        active.add(coordKey(gate.x, gate.y));
+      }
+    }
+    return active;
+  }, [isQuarterCompleted, worldVersion]);
+
+  const handleThemeChange = useCallback(
+    (themeId: TerrainThemeId) => {
+      if (!isEditMode) {
+        return;
+      }
+      const theme = TERRAIN_THEMES[themeId];
+      if (!theme) {
+        return;
+      }
+      setSelectedTheme(themeId);
+      applyTerrainThemeToWorld(world, theme);
+      recomputeWorldMetadata(world);
+      forceWorldRefresh((value) => value + 1);
+    },
+    [forceWorldRefresh, isEditMode]
+  );
+
+  const handleRegenerateWorld = useCallback(() => {
+    if (!isEditMode) {
+      return;
+    }
+    const { start } = regenerateWorldInPlace();
+    const theme = TERRAIN_THEMES[selectedTheme];
+    if (theme) {
+      applyTerrainThemeToWorld(world, theme);
+    }
+    recomputeWorldMetadata(world);
+    setPlayer({ x: start.x, y: start.y });
+    forceWorldRefresh((value) => value + 1);
+  }, [forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,
@@ -3118,6 +3545,20 @@ export default function ExplorateurIA({
     }
   }, [progress, markCompleted]);
 
+  useEffect(() => {
+    if (blockedStage && isQuarterCompleted(blockedStage)) {
+      setBlockedStage(null);
+    }
+  }, [blockedStage, isQuarterCompleted]);
+
+  useEffect(() => {
+    if (!blockedStage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setBlockedStage(null), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [blockedStage]);
+
   const attemptPlayMusic = () => {
     if (isMusicPlaying) {
       return;
@@ -3153,6 +3594,11 @@ export default function ExplorateurIA({
   const move = (dx: number, dy: number) => {
     const nx = player.x + dx;
     const ny = player.y + dy;
+    const gate = GATE_BY_COORD.get(coordKey(nx, ny));
+    if (gate && !isQuarterCompleted(gate.stage)) {
+      setBlockedStage(gate.stage);
+      return;
+    }
     if (!isWalkable(nx, ny, player.x, player.y)) return;
     attemptPlayMusic();
     setPlayer({ x: nx, y: ny });
@@ -3261,6 +3707,11 @@ export default function ExplorateurIA({
                       tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
                     const markerCoord = MARKER_COORD_BY_KEY.get(`${x}-${y}`);
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
+                    const tileKey = coordKey(x, y);
+                    const gate = GATE_BY_COORD.get(tileKey);
+                    const gateActive = gate ? !isQuarterCompleted(gate.stage) : false;
+                    const tileBlocked = activeGateKeys.has(tileKey);
+
                     return (
                       <div key={`${x}-${y}`} className="relative">
                         <TileWithTs
@@ -3282,14 +3733,34 @@ export default function ExplorateurIA({
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
+                        {gateActive && (
+                          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                            <SpriteFromAtlas
+                              ts={DEFAULT_ATLAS}
+                              coord={GATE_MARKER_COORD}
+                              scale={tileSize}
+                            />
+                          </div>
+                        )}
                         {buildings.map(
                           (building) =>
                             building.x === x &&
                             building.y === y && (
                               <button
                                 key={building.id}
-                                onClick={() => setOpen(building.id)}
-                                className="absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+                                onClick={(event) => {
+                                  if (isEditMode) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    return;
+                                  }
+                                  setOpen(building.id);
+                                }}
+                                disabled={tileBlocked}
+                                className={classNames(
+                                  "absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70",
+                                  tileBlocked && "cursor-not-allowed opacity-70"
+                                )}
                                 title={building.label}
                               >
                                 <BuildingSprite
@@ -3341,13 +3812,34 @@ export default function ExplorateurIA({
             <ul className="mt-2 text-sm space-y-2">
               {buildings.map((building) => (
                 <li key={building.id} className="flex items-center justify-between gap-3">
-                  <button
-                    onClick={() => setOpen(building.id)}
-                    className="text-left hover:underline"
-                    style={{ color: building.color }}
-                  >
-                    {building.label}
-                  </button>
+                  {(() => {
+                    const key = coordKey(building.x, building.y);
+                    const tileBlocked = activeGateKeys.has(key);
+                    const gate = GATE_BY_COORD.get(key);
+                    const lockMessageStage = gate?.stage ?? building.id;
+                    const isLocked = tileBlocked && !isQuarterCompleted(building.id);
+                    return (
+                      <button
+                        onClick={() => {
+                          if (isLocked) {
+                            setBlockedStage(lockMessageStage);
+                            return;
+                          }
+                          setOpen(building.id);
+                        }}
+                        disabled={isLocked}
+                        className={classNames(
+                          "text-left",
+                          isLocked
+                            ? "cursor-not-allowed opacity-60"
+                            : "hover:underline"
+                        )}
+                        style={{ color: building.color }}
+                      >
+                        {building.label}
+                      </button>
+                    );
+                  })()}
                   <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50">
                     {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
                     {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
@@ -3371,7 +3863,51 @@ export default function ExplorateurIA({
                 <p>Clic: Accès direct</p>
               </div>
             </div>
+            {blockedStage && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
+                Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
+              </div>
+            )}
           </div>
+          {isEditMode && (
+            <div className="rounded-2xl border bg-white p-4 shadow">
+              <div className="text-xs uppercase tracking-wide text-slate-500">
+                Terrain
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                {TERRAIN_THEME_ORDER.map((key) => {
+                  const theme = TERRAIN_THEMES[key];
+                  const isActive = selectedTheme === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleThemeChange(key)}
+                      className={classNames(
+                        "rounded-xl border px-3 py-2 text-left transition",
+                        isActive
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
+                      )}
+                      aria-pressed={isActive}
+                    >
+                      {theme.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={handleRegenerateWorld}
+                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
+              >
+                Régénérer la forme
+              </button>
+              <p className="mt-3 text-xs text-slate-500">
+                Choisissez un style pour changer l'apparence et utilisez le bouton pour régénérer la forme de l'île. Le changement est visible immédiatement.
+              </p>
+            </div>
+          )}
           <div className="rounded-2xl border bg-white p-4 shadow">
             <div className="text-xs uppercase tracking-wide text-slate-500">
               Tileset
