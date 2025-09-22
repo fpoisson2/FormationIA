@@ -177,6 +177,8 @@ const TILE_CONNECTION_CACHE = new Map<string, string[]>();
 
 const NUMBER_TILE_PATTERN = /(\d+)/;
 
+type NumberTile = { value: number; coord: TileCoord };
+
 function atlas(name: string): TileCoord {
   const entry = MAP_PACK_ATLAS.get(name);
   if (!entry) {
@@ -191,8 +193,8 @@ function atlas(name: string): TileCoord {
   ];
 }
 
-function collectWalkableNumberTileCoords(): TileCoord[] {
-  const numbers: Array<{ value: number; coord: TileCoord }> = [];
+function collectWalkableNumberTiles(): NumberTile[] {
+  const numbers: NumberTile[] = [];
   for (const entry of MAP_PACK_ATLAS.values()) {
     if (entry.subtype !== "number" || !entry.walkable) {
       continue;
@@ -203,16 +205,35 @@ function collectWalkableNumberTileCoords(): TileCoord[] {
       continue;
     }
     const value = Number.parseInt(match[1] ?? "", 10);
-    if (Number.isNaN(value)) {
+    if (Number.isNaN(value) || value >= 10) {
       continue;
     }
     numbers.push({ value, coord: atlas(entry.name) });
   }
   numbers.sort((a, b) => a.value - b.value);
-  return numbers.map((item) => item.coord);
+  return numbers;
 }
 
-const NUMBER_TILE_COORDS = collectWalkableNumberTileCoords();
+const NUMBER_TILES = collectWalkableNumberTiles();
+const NUMBER_TILE_MAP = new Map<number, TileCoord>(
+  NUMBER_TILES.map(({ value, coord }) => [value, coord])
+);
+
+const FALLBACK_NUMBER_TILE_NAMES: Record<number, string | undefined> = {
+  5: "mapTile_135.png",
+};
+
+function getNumberTileCoord(value: number): TileCoord | null {
+  const coord = NUMBER_TILE_MAP.get(value);
+  if (coord) {
+    return coord;
+  }
+  const fallback = FALLBACK_NUMBER_TILE_NAMES[value];
+  if (fallback) {
+    return atlas(fallback);
+  }
+  return null;
+}
 
 const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
 
@@ -1458,28 +1479,49 @@ function buildNeighborMap(cells: Set<CoordKey>): Map<CoordKey, CoordKey[]> {
   return neighborMap;
 }
 
-function isTooCloseToPath(candidate: CoordKey, path: CoordKey[]): boolean {
-  if (path.length === 0) {
-    return false;
-  }
+function bfsFrom(
+  start: CoordKey,
+  neighborMap: Map<CoordKey, CoordKey[]>,
+  rng: () => number
+): {
+  previous: Map<CoordKey, CoordKey | null>;
+  distances: Map<CoordKey, number>;
+} {
+  const previous = new Map<CoordKey, CoordKey | null>();
+  const distances = new Map<CoordKey, number>();
+  const queue: CoordKey[] = [start];
 
-  const allowed = new Set<CoordKey>([path[path.length - 1]]);
-  if (path.length >= 2) {
-    allowed.add(path[path.length - 2]);
-  }
+  previous.set(start, null);
+  distances.set(start, 0);
 
-  const [cx, cy] = coordFromKey(candidate);
-  for (const key of path) {
-    if (allowed.has(key)) {
-      continue;
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    const neighbors = [...(neighborMap.get(node) ?? [])];
+    shuffleInPlace(rng, neighbors);
+    for (const neighbor of neighbors) {
+      if (previous.has(neighbor)) {
+        continue;
+      }
+      previous.set(neighbor, node);
+      distances.set(neighbor, (distances.get(node) ?? 0) + 1);
+      queue.push(neighbor);
     }
-    const [px, py] = coordFromKey(key);
-    if (Math.abs(cx - px) + Math.abs(cy - py) === 1) {
-      return true;
-    }
   }
 
-  return false;
+  return { previous, distances };
+}
+
+function reconstructPath(
+  previous: Map<CoordKey, CoordKey | null>,
+  goal: CoordKey
+): CoordKey[] {
+  const path: CoordKey[] = [];
+  let current: CoordKey | null | undefined = goal;
+  while (current != null) {
+    path.push(current);
+    current = previous.get(current) ?? null;
+  }
+  return path.reverse();
 }
 
 function carvePathOnIsland(
@@ -1493,56 +1535,53 @@ function carvePathOnIsland(
     return [];
   }
 
-  const length = Math.min(desiredLength, cells.length);
-  const minLength = Math.max(1, Math.min(6, length));
+  const maxLength = Math.min(desiredLength, cells.length);
+  const minLength = Math.max(1, Math.min(6, maxLength));
+  let bestPath: CoordKey[] = [];
 
-  for (let currentLength = length; currentLength >= minLength; currentLength--) {
-    for (let attempt = 0; attempt < 200; attempt++) {
+  for (let targetLength = maxLength; targetLength >= minLength; targetLength--) {
+    for (let attempt = 0; attempt < 120; attempt++) {
       const start = randomChoice(rng, cells);
-      const visited = new Set<CoordKey>([start]);
-      const path: CoordKey[] = [start];
-      const stack: Array<[CoordKey, CoordKey[]]> = [[start, []]];
+      const { previous, distances } = bfsFrom(start, neighborMap, rng);
+      if (distances.size <= 1) {
+        continue;
+      }
 
-      const prepareOptions = (key: CoordKey) => {
-        const options = [...(neighborMap.get(key) ?? [])];
-        shuffleInPlace(rng, options);
-        return options;
-      };
+      const candidates: CoordKey[] = [];
+      let farthest: { key: CoordKey; distance: number } | null = null;
 
-      stack[0][1] = prepareOptions(start);
-
-      while (stack.length > 0) {
-        if (path.length >= currentLength) {
-          return path;
-        }
-
-        const top = stack[stack.length - 1];
-        const [node, options] = top;
-        let nextKey: CoordKey | null = null;
-
-        while (options.length > 0) {
-          const candidate = options.pop()!;
-          if (visited.has(candidate)) {
-            continue;
-          }
-          if (isTooCloseToPath(candidate, path)) {
-            continue;
-          }
-          nextKey = candidate;
-          break;
-        }
-
-        if (!nextKey) {
-          stack.pop();
-          path.pop();
+      for (const [key, distance] of distances) {
+        if (distance === 0) {
           continue;
         }
+        if (distance >= targetLength - 1) {
+          candidates.push(key);
+        }
+        if (!farthest || distance > farthest.distance) {
+          farthest = { key, distance };
+        }
+      }
 
-        visited.add(nextKey);
-        path.push(nextKey);
-        stack.push([nextKey, prepareOptions(nextKey)]);
+      const goal =
+        candidates.length > 0
+          ? randomChoice(rng, candidates)
+          : farthest?.key ?? null;
+      if (!goal) {
+        continue;
+      }
+
+      const path = reconstructPath(previous, goal);
+      if (path.length >= targetLength) {
+        return path.slice(0, targetLength);
+      }
+      if (path.length > bestPath.length) {
+        bestPath = path;
       }
     }
+  }
+
+  if (bestPath.length > 0) {
+    return bestPath;
   }
 
   return [cells[0]];
@@ -1579,13 +1618,13 @@ const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
   "ethique",
 ];
 
-type PathNumberPlacement = { x: number; y: number; coord: TileCoord };
+type PathMarkerPlacement = { x: number; y: number; coord: TileCoord };
 
 type GeneratedWorld = {
   tiles: TerrainTile[][];
   path: Coord[];
   landmarks: Record<QuarterId, { x: number; y: number }>;
-  numbers: PathNumberPlacement[];
+  markers: PathMarkerPlacement[];
 };
 
 function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; y: number }> {
@@ -1601,14 +1640,29 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     return assignments;
   }
 
-  const indices = distributeIndices(path.length, LANDMARK_ASSIGNMENT_ORDER.length);
-  LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
-    const [x, y] = path[indices[index]];
-    assignments[id] = { x, y };
-  });
+  const interiorIndices = path
+    .map((_, index) => index)
+    .filter((index) => index > 0 && index < path.length - 1);
+
+  const pickFrom = (indices: number[]) => {
+    const distributed = distributeIndices(indices.length, LANDMARK_ASSIGNMENT_ORDER.length);
+    LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
+      const [x, y] = path[indices[distributed[index]]];
+      assignments[id] = { x, y };
+    });
+  };
+
+  if (interiorIndices.length >= LANDMARK_ASSIGNMENT_ORDER.length) {
+    pickFrom(interiorIndices);
+  } else {
+    pickFrom(path.map((_, index) => index));
+  }
 
   return assignments;
 }
+
+const START_MARKER_COORD = atlas("mapTile_179.png");
+const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 
 function generateWorld(): GeneratedWorld {
   const rng = createRng(WORLD_SEED);
@@ -1663,25 +1717,28 @@ function generateWorld(): GeneratedWorld {
     tile.overlay = TILE_KIND.PATH;
   }
 
-  const numbers: PathNumberPlacement[] = [];
-  const maxDigits = Math.min(NUMBER_TILE_COORDS.length, path.length);
-  if (maxDigits > 0) {
-    const indices = distributeIndices(path.length, maxDigits);
-    indices.forEach((rawIndex, digitIndex) => {
-      const coord = NUMBER_TILE_COORDS[digitIndex];
-      if (!coord) {
-        return;
-      }
-      const index = Math.min(Math.max(rawIndex, 0), path.length - 1);
-      const [x, y] = path[index] ?? path[0];
-      const spriteCoord = [...coord] as TileCoord;
-      numbers.push({ x, y, coord: spriteCoord });
-    });
+  const landmarks = assignLandmarksFromPath(path);
+  if (path.length > 0) {
+    const [goalX, goalY] = path[path.length - 1];
+    landmarks.mairie = { x: goalX, y: goalY };
   }
 
-  const landmarks = assignLandmarksFromPath(path);
+  const markers: PathMarkerPlacement[] = [];
+  const startCoord = path[0];
+  if (startCoord) {
+    const [startX, startY] = startCoord;
+    markers.push({ x: startX, y: startY, coord: START_MARKER_COORD });
+  }
 
-  return { tiles, path, landmarks, numbers };
+  const goalCoord = landmarks.mairie ?? FALLBACK_LANDMARKS.mairie;
+  if (goalCoord) {
+    const { x: goalX, y: goalY } = goalCoord;
+    if (!startCoord || goalX !== startCoord[0] || goalY !== startCoord[1]) {
+      markers.push({ x: goalX, y: goalY, coord: GOAL_MARKER_COORD });
+    }
+  }
+
+  return { tiles, path, landmarks, markers };
 }
 
 // Générée une seule fois et mise en cache
@@ -1698,19 +1755,22 @@ const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
-const NUMBER_COORD_BY_KEY = new Map<string, TileCoord>(
-  generatedWorld.numbers.map((placement) => [
+const MARKER_COORD_BY_KEY = new Map<string, TileCoord>(
+  generatedWorld.markers.map((placement) => [
     `${placement.x}-${placement.y}`,
     placement.coord,
   ])
 );
 
-const BUILDING_META: Record<QuarterId, { label: string; color: string }> = {
+const BUILDING_META: Record<
+  QuarterId,
+  { label: string; color: string; number?: number }
+> = {
   mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
-  clarte: { label: "Quartier Clarté", color: "#06d6a0" },
-  creation: { label: "Quartier Création", color: "#118ab2" },
-  decision: { label: "Quartier Décision", color: "#ef476f" },
-  ethique: { label: "Quartier Éthique", color: "#8338ec" },
+  clarte: { label: "Quartier Clarté", color: "#06d6a0", number: 1 },
+  creation: { label: "Quartier Création", color: "#118ab2", number: 2 },
+  decision: { label: "Quartier Décision", color: "#ef476f", number: 3 },
+  ethique: { label: "Quartier Éthique", color: "#8338ec", number: 4 },
 };
 
 const BUILDING_DISPLAY_ORDER: QuarterId[] = [
@@ -1727,6 +1787,7 @@ const buildings: Array<{
   y: number;
   label: string;
   color: string;
+  number?: number;
 }> = BUILDING_DISPLAY_ORDER.map((id) => {
   const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
   const meta = BUILDING_META[id];
@@ -1736,13 +1797,20 @@ const buildings: Array<{
     y: landmark.y,
     label: meta.label,
     color: meta.color,
+    number: meta.number,
   };
 });
 
-const START = {
-  x: generatedWorld.landmarks.mairie?.x ?? FALLBACK_LANDMARKS.mairie.x,
-  y: generatedWorld.landmarks.mairie?.y ?? FALLBACK_LANDMARKS.mairie.y,
-};
+const START = (() => {
+  const firstStep = generatedWorld.path[0];
+  if (firstStep) {
+    const [x, y] = firstStep;
+    return { x, y };
+  }
+  const fallback =
+    generatedWorld.landmarks.mairie ?? FALLBACK_LANDMARKS.mairie;
+  return { x: fallback.x, y: fallback.y };
+})();
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -1782,25 +1850,27 @@ function PlayerSprite({
 }
 
 function BuildingSprite({
-  id,
+  quarter,
   ts,
   tileSize,
 }: {
-  id: QuarterId;
+  quarter: QuarterId;
   ts: Tileset;
   tileSize: number;
 }) {
+  const numberValue = BUILDING_META[quarter]?.number;
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
   const coord =
-    id === "mairie"
+    (typeof numberValue === "number" ? getNumberTileCoord(numberValue) : null) ??
+    (quarter === "mairie"
       ? activeTileset.map.houses.townHall
-      : id === "clarte"
+      : quarter === "clarte"
       ? activeTileset.map.houses.clarte
-      : id === "creation"
+      : quarter === "creation"
       ? activeTileset.map.houses.creation
-      : id === "decision"
+      : quarter === "decision"
       ? activeTileset.map.houses.decision
-      : activeTileset.map.houses.ethique;
+      : activeTileset.map.houses.ethique);
   const width =
     (Array.isArray(coord) && typeof coord[2] === "number"
       ? coord[2]
@@ -2240,14 +2310,12 @@ function TileWithTs({
   x,
   y,
   tileSize,
-  numberCoord,
 }: {
   terrain: TerrainTile;
   ts: Tileset;
   x: number;
   y: number;
   tileSize: number;
-  numberCoord?: TileCoord | null;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
 
@@ -2270,7 +2338,7 @@ function TileWithTs({
       )
     : null;
 
-  const overlays = [edgeOverlayCoord, overlayCoord, numberCoord].filter(
+  const overlays = [edgeOverlayCoord, overlayCoord].filter(
     (coord): coord is TileCoord => Array.isArray(coord)
   );
 
@@ -3189,7 +3257,9 @@ export default function ExplorateurIA({
               >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
-                    const numberCoord = NUMBER_COORD_BY_KEY.get(`${x}-${y}`);
+                    const activeTileset =
+                      tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
+                    const markerCoord = MARKER_COORD_BY_KEY.get(`${x}-${y}`);
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
                     return (
                       <div key={`${x}-${y}`} className="relative">
@@ -3199,8 +3269,16 @@ export default function ExplorateurIA({
                           x={x}
                           y={y}
                           tileSize={tileSize}
-                          numberCoord={numberCoord}
                         />
+                        {markerCoord && (
+                          <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
+                            <SpriteFromAtlas
+                              ts={activeTileset}
+                              coord={markerCoord}
+                              scale={tileSize}
+                            />
+                          </div>
+                        )}
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
@@ -3211,15 +3289,11 @@ export default function ExplorateurIA({
                               <button
                                 key={building.id}
                                 onClick={() => setOpen(building.id)}
-                                className="absolute inset-1 rounded-lg border-2 flex items-center justify-center shadow"
-                                style={{
-                                  borderColor: building.color,
-                                  background: "rgba(255,255,255,0.9)",
-                                }}
+                                className="absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
                                 title={building.label}
                               >
                                 <BuildingSprite
-                                  id={building.id}
+                                  quarter={building.id}
                                   ts={tileset}
                                   tileSize={tileSize}
                                 />
@@ -3227,7 +3301,7 @@ export default function ExplorateurIA({
                             )
                         )}
                         {player.x === x && player.y === y && (
-                          <div className="absolute inset-1 animate-[float_1.2s_ease-in-out_infinite]">
+                          <div className="pointer-events-none absolute inset-1 z-30 animate-[float_1.2s_ease-in-out_infinite]">
                             <PlayerSprite ts={tileset} step={walkStep} tileSize={tileSize} />
                           </div>
                         )}
