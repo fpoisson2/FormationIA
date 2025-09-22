@@ -2878,7 +2878,7 @@ function MobileArrowControls({ onMove }: { onMove: (dx: number, dy: number) => v
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 flex items-end justify-end"
+      className="pointer-events-none fixed inset-0 z-40 flex items-end justify-end"
       style={{
         paddingRight: "calc(16px + env(safe-area-inset-right))",
         paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
@@ -2953,7 +2953,12 @@ function MobileEnterPromptOverlay({
     building.number != null ? `Quartier ${building.number}` : building.label;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-6">
+    <div
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-6"
+      style={{
+        paddingBottom: "calc(24px + env(safe-area-inset-bottom))",
+      }}
+    >
       <button
         type="button"
         onClick={onEnter}
