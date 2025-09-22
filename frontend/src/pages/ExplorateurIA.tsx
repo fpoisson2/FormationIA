@@ -1376,6 +1376,24 @@ function useResponsiveTileSize(): number {
   return size;
 }
 
+function useIsMobile(breakpoint = 768): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const recompute = () => {
+      setIsMobile(window.innerWidth < breakpoint);
+    };
+    recompute();
+    window.addEventListener("resize", recompute);
+    return () => window.removeEventListener("resize", recompute);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
 type Coord = [number, number];
 type CoordKey = `${number},${number}`;
 
@@ -3756,6 +3774,7 @@ export default function ExplorateurIA({
   isEditMode = false,
 }: ActivityProps) {
   const tileSize = useResponsiveTileSize();
+  const isMobile = useIsMobile();
   const cellSize = tileSize + TILE_GAP;
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
@@ -3777,6 +3796,14 @@ export default function ExplorateurIA({
   const firstScrollRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const completionTriggered = useRef(false);
+  const autoWalkQueue = useRef<Coord[]>([]);
+  const autoWalkTarget = useRef<Coord | null>(null);
+  const [isAutoWalking, setIsAutoWalking] = useState(false);
+  const cancelAutoWalk = useCallback(() => {
+    autoWalkQueue.current = [];
+    autoWalkTarget.current = null;
+    setIsAutoWalking(false);
+  }, []);
 
   const isQuarterCompleted = useCallback(
     (id: QuarterId) => {
@@ -3953,7 +3980,7 @@ export default function ExplorateurIA({
     return () => window.clearTimeout(timeout);
   }, [blockedStage]);
 
-  const attemptPlayMusic = () => {
+  const attemptPlayMusic = useCallback(() => {
     if (isMusicPlaying) {
       return;
     }
@@ -3966,7 +3993,7 @@ export default function ExplorateurIA({
     void audio.play().then(() => setIsMusicPlaying(true)).catch(() => {
       // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
     });
-  };
+  }, [isMusicPlaying]);
 
   const toggleMusic = () => {
     const audio = audioRef.current;
@@ -3985,28 +4012,220 @@ export default function ExplorateurIA({
     }
   };
 
-  const move = (dx: number, dy: number) => {
-    const nx = player.x + dx;
-    const ny = player.y + dy;
-    const gate = GATE_BY_COORD.get(coordKey(nx, ny));
-    if (gate && !isQuarterCompleted(gate.stage)) {
-      setBlockedStage(gate.stage);
-      return;
-    }
-    if (!isWalkable(nx, ny, player.x, player.y)) return;
-    attemptPlayMusic();
-    setPlayer({ x: nx, y: ny });
-    setWalkStep((step) => step + 1);
-  };
+  const move = useCallback(
+    (dx: number, dy: number): boolean => {
+      let moved = false;
+      setPlayer((current) => {
+        const nx = current.x + dx;
+        const ny = current.y + dy;
+        const gate = GATE_BY_COORD.get(coordKey(nx, ny));
+        if (gate && !isQuarterCompleted(gate.stage)) {
+          setBlockedStage(gate.stage);
+          return current;
+        }
+        if (!isWalkable(nx, ny, current.x, current.y)) {
+          return current;
+        }
+        attemptPlayMusic();
+        setWalkStep((step) => step + 1);
+        moved = true;
+        return { x: nx, y: ny };
+      });
+      return moved;
+    },
+    [attemptPlayMusic, isQuarterCompleted]
+  );
 
   const buildingAt = (x: number, y: number) => {
     return buildings.find((building) => building.x === x && building.y === y) || null;
   };
 
-  const openIfOnBuilding = () => {
+  const openIfOnBuilding = useCallback(() => {
     const hit = buildingAt(player.x, player.y);
     if (hit) setOpen(hit.id);
-  };
+  }, [player.x, player.y]);
+
+  const findWalkPath = useCallback(
+    (fromX: number, fromY: number, toX: number, toY: number): Coord[] => {
+      const startKey = coordKey(fromX, fromY);
+      const goalKey = coordKey(toX, toY);
+      const directions: Coord[] = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+
+      const attempt = (targetKey: CoordKey): Coord[] => {
+        const visited = new Set<CoordKey>([startKey]);
+        const previous = new Map<CoordKey, CoordKey | null>();
+        previous.set(startKey, null);
+        const queue: CoordKey[] = [startKey];
+
+        while (queue.length > 0) {
+          const currentKey = queue.shift()!;
+          if (currentKey === targetKey) {
+            const pathKeys = reconstructPath(previous, targetKey);
+            return pathKeys.map((key) => coordFromKey(key));
+          }
+          const [cx, cy] = coordFromKey(currentKey);
+          for (const [dx, dy] of directions) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            const neighborKey = coordKey(nx, ny);
+            if (visited.has(neighborKey)) {
+              continue;
+            }
+            if (!isWalkable(nx, ny, cx, cy)) {
+              continue;
+            }
+            const gate = GATE_BY_COORD.get(neighborKey);
+            if (gate && !isQuarterCompleted(gate.stage)) {
+              continue;
+            }
+            visited.add(neighborKey);
+            previous.set(neighborKey, currentKey);
+            queue.push(neighborKey);
+          }
+        }
+
+        return [];
+      };
+
+      const directPath = attempt(goalKey);
+      if (directPath.length > 0) {
+        return directPath;
+      }
+
+      const fallbackTargets: CoordKey[] = [];
+      for (const [dx, dy] of directions) {
+        const nx = toX + dx;
+        const ny = toY + dy;
+        const neighborKey = coordKey(nx, ny);
+        if (!isWalkable(nx, ny)) {
+          continue;
+        }
+        const gate = GATE_BY_COORD.get(neighborKey);
+        if (gate && !isQuarterCompleted(gate.stage)) {
+          continue;
+        }
+        fallbackTargets.push(neighborKey);
+      }
+
+      let best: Coord[] = [];
+      for (const fallbackKey of fallbackTargets) {
+        const candidate = attempt(fallbackKey);
+        if (candidate.length > 0 && (best.length === 0 || candidate.length < best.length)) {
+          best = candidate;
+        }
+      }
+
+      return best;
+    },
+    [isQuarterCompleted]
+  );
+
+  const handleTilePress = useCallback(
+    (targetX: number, targetY: number) => {
+      if (!isMobile) {
+        return;
+      }
+      if (targetX === player.x && targetY === player.y) {
+        cancelAutoWalk();
+        openIfOnBuilding();
+        return;
+      }
+
+      const path = findWalkPath(player.x, player.y, targetX, targetY);
+      if (path.length <= 1) {
+        const dx = targetX - player.x;
+        const dy = targetY - player.y;
+        if (Math.abs(dx) + Math.abs(dy) === 1) {
+          cancelAutoWalk();
+          move(dx, dy);
+        }
+        return;
+      }
+
+      autoWalkQueue.current = path.slice(1);
+      autoWalkTarget.current = buildingAt(targetX, targetY)
+        ? ([targetX, targetY] as Coord)
+        : null;
+      setIsAutoWalking(true);
+    },
+    [
+      cancelAutoWalk,
+      findWalkPath,
+      isMobile,
+      move,
+      openIfOnBuilding,
+      player.x,
+      player.y,
+    ]
+  );
+
+  useEffect(() => {
+    if (!isMobile) {
+      if (isAutoWalking) {
+        cancelAutoWalk();
+      }
+      return;
+    }
+
+    if (!isAutoWalking) {
+      if (
+        autoWalkTarget.current &&
+        player.x === autoWalkTarget.current[0] &&
+        player.y === autoWalkTarget.current[1]
+      ) {
+        openIfOnBuilding();
+        autoWalkTarget.current = null;
+      }
+      return;
+    }
+
+    if (autoWalkQueue.current.length === 0) {
+      setIsAutoWalking(false);
+      if (
+        autoWalkTarget.current &&
+        player.x === autoWalkTarget.current[0] &&
+        player.y === autoWalkTarget.current[1]
+      ) {
+        openIfOnBuilding();
+      }
+      autoWalkTarget.current = null;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const next = autoWalkQueue.current.shift();
+      if (!next) {
+        setIsAutoWalking(false);
+        return;
+      }
+      const [nextX, nextY] = next;
+      const dx = nextX - player.x;
+      const dy = nextY - player.y;
+      if (Math.abs(dx) + Math.abs(dy) !== 1) {
+        cancelAutoWalk();
+        return;
+      }
+      const didMove = move(dx, dy);
+      if (!didMove) {
+        cancelAutoWalk();
+      }
+    }, 160);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    cancelAutoWalk,
+    isAutoWalking,
+    isMobile,
+    move,
+    openIfOnBuilding,
+    player.x,
+    player.y,
+  ]);
 
   const complete = (id: QuarterId, payload?: unknown) => {
     setProgress((previous) => {
@@ -4063,10 +4282,26 @@ export default function ExplorateurIA({
   const at = buildingAt(player.x, player.y);
 
   return (
-    <div className="relative space-y-6">
+    <div
+      className={classNames(
+        "relative",
+        isMobile ? "flex min-h-[100dvh] flex-col" : "space-y-6"
+      )}
+    >
       <Fireworks show={celebrate} />
-      <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="rounded-2xl border bg-white p-4 shadow relative">
+      <div
+        className={classNames(
+          "grid gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]",
+          isMobile ? "flex-1 min-h-0 grid-rows-[minmax(0,1fr)]" : ""
+        )}
+      >
+        <div
+          className={classNames(
+            "relative flex flex-col rounded-2xl border bg-white p-4 shadow",
+            isMobile &&
+              "h-full min-h-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none"
+          )}
+        >
           <div className="absolute right-3 top-3 flex items-center gap-2 text-[11px] text-slate-600 bg-slate-100/80 px-2 py-1 rounded-full border shadow-sm">
             <span className="tracking-wide uppercase">Tiny Town</span>
             <button
@@ -4083,8 +4318,11 @@ export default function ExplorateurIA({
           </div>
           <div
             ref={worldContainerRef}
-            className="mt-4 overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-pan-y max-w-full"
-            style={{ maxHeight: "min(70vh, 520px)" }}
+            className={classNames(
+              "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-pan-y",
+              isMobile && "mt-0 min-h-0 flex-1 rounded-none border-0 shadow-none"
+            )}
+            style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
             <div className="inline-block p-3">
               <div
@@ -4107,7 +4345,11 @@ export default function ExplorateurIA({
                     const tileBlocked = activeGateKeys.has(tileKey);
 
                     return (
-                      <div key={`${x}-${y}`} className="relative">
+                      <div
+                        key={`${x}-${y}`}
+                        className="relative"
+                        onClick={() => handleTilePress(x, y)}
+                      >
                         <TileWithTs
                           terrain={terrain}
                           ts={tileset}
@@ -4180,8 +4422,18 @@ export default function ExplorateurIA({
           <style>{`
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
           `}</style>
-          <div className="mt-3 flex items-center justify-between text-sm">
-            <div>
+          <div
+            className={classNames(
+              "mt-3 flex items-center justify-between text-sm",
+              isMobile &&
+                "mt-4 flex-col gap-3 rounded-2xl border border-white/50 bg-white/95 p-4 text-slate-700 shadow-lg"
+            )}
+          >
+            <div
+              className={classNames(
+                isMobile && "text-center text-base font-medium"
+              )}
+            >
               {at ? (
                 <span>
                   Vous êtes devant: <span className="font-semibold">{at.label}</span>
@@ -4192,13 +4444,17 @@ export default function ExplorateurIA({
             </div>
             <button
               onClick={openIfOnBuilding}
-              className="px-3 py-2 rounded-lg bg-slate-100 border w-full sm:w-auto"
+              className={classNames(
+                "px-3 py-2 rounded-lg bg-slate-100 border w-full sm:w-auto",
+                isMobile &&
+                  "bg-emerald-500 text-white text-base font-semibold py-3 shadow-md active:scale-95"
+              )}
             >
               Entrer
             </button>
           </div>
         </div>
-        <aside className="space-y-4 md:sticky md:top-4">
+        <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
           <div className="rounded-2xl border bg-white p-4 shadow">
             <div className="text-xs uppercase tracking-wide text-slate-500">
               Progression
@@ -4384,7 +4640,7 @@ export default function ExplorateurIA({
         <BadgeView progress={progress} onDownloadJSON={downloadJSON} />
       </Modal>
 
-      <footer className="text-center text-xs text-slate-500">
+      <footer className="hidden text-center text-xs text-slate-500 md:block">
         Module web auto-portant — aucune saisie de texte requise. © Explorateur IA
       </footer>
     </div>
