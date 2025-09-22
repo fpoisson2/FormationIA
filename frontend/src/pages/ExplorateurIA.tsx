@@ -40,8 +40,8 @@ type Progress = {
 
 const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
-const MIN_TILE_SIZE = 20;
-const MOBILE_VERTICAL_PADDING = 32;
+const MIN_TILE_SIZE = 12;
+const MOBILE_VERTICAL_PADDING = 0;
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
 
@@ -1381,12 +1381,15 @@ function computeTileSize(): number {
   const availableHeight = Math.max(0, height - MOBILE_VERTICAL_PADDING);
   const tileForWidth = width / GRID_W;
   const tileForHeight = availableHeight / GRID_H;
-  const ideal = Math.floor(Math.min(tileForWidth, tileForHeight));
-  if (!Number.isFinite(ideal) || ideal <= 0) {
+  const bestFit = Math.min(tileForWidth, tileForHeight);
+  if (!Number.isFinite(bestFit) || bestFit <= 0) {
     return MIN_TILE_SIZE;
   }
 
-  return Math.max(MIN_TILE_SIZE, Math.min(BASE_TILE_SIZE, ideal));
+  const capped = Math.min(BASE_TILE_SIZE, bestFit);
+  const normalized = Math.max(capped, Math.min(MIN_TILE_SIZE, bestFit));
+
+  return Math.round(normalized * 100) / 100;
 }
 
 function useResponsiveTileSize(): number {
