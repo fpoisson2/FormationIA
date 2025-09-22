@@ -1,9 +1,13 @@
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
+  type MouseEvent,
   type ReactNode,
+  type TouchEvent,
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
@@ -413,6 +417,56 @@ const LOWER_TERRAIN_TYPES = new Set<TileKind>([
   TILE_KIND.FIELD,
 ]);
 
+type TerrainBrushConfig = {
+  label: string;
+  base: TileKind;
+  overlay?: TileKind;
+};
+
+const TERRAIN_BRUSHES = {
+  path: {
+    label: "Chemin",
+    base: TILE_KIND.SAND,
+    overlay: TILE_KIND.PATH,
+  },
+  sand: {
+    label: "Sable",
+    base: TILE_KIND.SAND,
+  },
+  grass: {
+    label: "Herbe",
+    base: TILE_KIND.GRASS,
+  },
+  water: {
+    label: "Eau",
+    base: TILE_KIND.WATER,
+  },
+  field: {
+    label: "Champ cultivé",
+    base: TILE_KIND.FIELD,
+  },
+  tree: {
+    label: "Arbre",
+    base: TILE_KIND.TREE,
+  },
+  flower: {
+    label: "Fleurs",
+    base: TILE_KIND.FLOWER,
+  },
+} as const satisfies Record<string, TerrainBrushConfig>;
+
+type TerrainBrushKey = keyof typeof TERRAIN_BRUSHES;
+
+const TERRAIN_BRUSH_ORDER: TerrainBrushKey[] = [
+  "path",
+  "sand",
+  "grass",
+  "water",
+  "field",
+  "tree",
+  "flower",
+];
+
 const DIAGONAL_CONNECTIONS = new Set<string>([
   "northeast",
   "northwest",
@@ -450,6 +504,88 @@ function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
     return true;
   }
   return isLowerTerrainKind(tile.base);
+}
+
+function applyTerrainBrush(
+  tiles: TerrainTile[][],
+  x: number,
+  y: number,
+  brush: TerrainBrushConfig
+): boolean {
+  const row = tiles[y];
+  if (!row) {
+    return false;
+  }
+  const tile = row[x];
+  if (!tile) {
+    return false;
+  }
+
+  const targetBase = brush.base;
+  const targetOverlay = brush.overlay ?? null;
+  const currentOverlay = tile.overlay ?? null;
+
+  if (tile.base === targetBase && currentOverlay === targetOverlay) {
+    return false;
+  }
+
+  tile.base = targetBase;
+  if (targetOverlay === null) {
+    delete tile.overlay;
+  } else {
+    tile.overlay = targetOverlay;
+  }
+  tile.edge = undefined;
+  tile.cliffConnections = undefined;
+
+  return true;
+}
+
+function recomputeWorldMetadata(worldTiles: TerrainTile[][]) {
+  const height = worldTiles.length;
+  const width = worldTiles[0]?.length ?? 0;
+
+  const hasLower = (tx: number, ty: number) =>
+    tileHasLowerTerrain(worldTiles[ty]?.[tx] ?? null);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const connections = Array.from(computeCliffConnections(x, y, hasLower));
+      const tile = worldTiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      tile.cliffConnections = connections.length > 0 ? connections : undefined;
+    }
+  }
+
+  const islandCells = new Set<CoordKey>();
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = worldTiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      if (tile.base !== TILE_KIND.WATER) {
+        islandCells.add(coordKey(x, y));
+      }
+      tile.edge = undefined;
+    }
+  }
+
+  const placements = computeIslandEdgePlacements(
+    islandCells,
+    width,
+    height
+  );
+
+  for (const [key, placement] of placements.entries()) {
+    const [px, py] = coordFromKey(key as CoordKey);
+    const tile = worldTiles[py]?.[px];
+    if (tile) {
+      tile.edge = placement;
+    }
+  }
 }
 
 function computeCliffConnections(
@@ -1663,6 +1799,7 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
 
 const START_MARKER_COORD = atlas("mapTile_179.png");
 const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
+const GATE_MARKER_COORD = atlas("mapTile_044.png");
 
 function generateWorld(): GeneratedWorld {
   const rng = createRng(WORLD_SEED);
@@ -1762,6 +1899,10 @@ const MARKER_COORD_BY_KEY = new Map<string, TileCoord>(
   ])
 );
 
+const PATH_INDEX_BY_COORD = new Map<CoordKey, number>(
+  generatedWorld.path.map(([x, y], index) => [coordKey(x, y), index] as const)
+);
+
 const BUILDING_META: Record<
   QuarterId,
   { label: string; color: string; number?: number }
@@ -1800,6 +1941,40 @@ const buildings: Array<{
     number: meta.number,
   };
 });
+
+type PathGate = {
+  stage: QuarterId;
+  x: number;
+  y: number;
+};
+
+const PROGRESSION_SEQUENCE: QuarterId[] = [
+  "clarte",
+  "creation",
+  "decision",
+  "ethique",
+];
+
+const PATH_GATES: PathGate[] = PROGRESSION_SEQUENCE.map((stage) => {
+  const building = buildings.find((candidate) => candidate.id === stage);
+  if (!building) {
+    return null;
+  }
+  const stageIndex = PATH_INDEX_BY_COORD.get(coordKey(building.x, building.y));
+  if (stageIndex === undefined) {
+    return null;
+  }
+  const gateCoord = generatedWorld.path[stageIndex + 1];
+  if (!gateCoord) {
+    return null;
+  }
+  return { stage, x: gateCoord[0], y: gateCoord[1] };
+}).filter((gate): gate is PathGate => Boolean(gate));
+
+const GATE_BY_COORD = new Map<CoordKey, PathGate>();
+for (const gate of PATH_GATES) {
+  GATE_BY_COORD.set(coordKey(gate.x, gate.y), gate);
+}
 
 const START = (() => {
   const firstStep = generatedWorld.path[0];
@@ -3006,6 +3181,7 @@ function BadgeView({
 export default function ExplorateurIA({
   completionId,
   navigateToActivities,
+  isEditMode = false,
 }: ActivityProps) {
   const tileSize = useResponsiveTileSize();
   const cellSize = tileSize + TILE_GAP;
@@ -3020,12 +3196,94 @@ export default function ExplorateurIA({
   });
   const [celebrate, setCelebrate] = useState(false);
   const [tileset, setTileset] = useTileset();
+  const [, forceWorldRefresh] = useState(0);
+  const [selectedBrush, setSelectedBrush] = useState<TerrainBrushKey>("path");
+  const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
   const firstScrollRef = useRef(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const completionTriggered = useRef(false);
+
+  const isQuarterCompleted = useCallback(
+    (id: QuarterId) => {
+      switch (id) {
+        case "clarte":
+          return progress.clarte.done;
+        case "creation":
+          return progress.creation.done;
+        case "decision":
+          return progress.decision.done;
+        case "ethique":
+          return progress.ethique.done;
+        case "mairie":
+          return (
+            progress.clarte.done &&
+            progress.creation.done &&
+            progress.decision.done &&
+            progress.ethique.done
+          );
+        default:
+          return false;
+      }
+    },
+    [progress]
+  );
+
+  const activeGateKeys = useMemo(() => {
+    const active = new Set<CoordKey>();
+    for (const gate of PATH_GATES) {
+      if (!isQuarterCompleted(gate.stage)) {
+        active.add(coordKey(gate.x, gate.y));
+      }
+    }
+    return active;
+  }, [isQuarterCompleted]);
+
+  const handleTerrainEdit = useCallback(
+    (x: number, y: number) => {
+      if (!isEditMode) {
+        return;
+      }
+      const brush = TERRAIN_BRUSHES[selectedBrush];
+      if (!brush) {
+        return;
+      }
+      const changed = applyTerrainBrush(world, x, y, brush);
+      if (!changed) {
+        return;
+      }
+      recomputeWorldMetadata(world);
+      forceWorldRefresh((value) => value + 1);
+    },
+    [isEditMode, selectedBrush, forceWorldRefresh]
+  );
+
+  const handleEditPointer = useCallback(
+    (
+      event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>,
+      x: number,
+      y: number
+    ) => {
+      if (!isEditMode) {
+        return;
+      }
+
+      if ("button" in event && event.type === "mousedown" && event.button !== 0) {
+        return;
+      }
+
+      if ("buttons" in event && event.type === "mouseenter" && event.buttons !== 1) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      handleTerrainEdit(x, y);
+    },
+    [handleTerrainEdit, isEditMode]
+  );
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,
@@ -3118,6 +3376,20 @@ export default function ExplorateurIA({
     }
   }, [progress, markCompleted]);
 
+  useEffect(() => {
+    if (blockedStage && isQuarterCompleted(blockedStage)) {
+      setBlockedStage(null);
+    }
+  }, [blockedStage, isQuarterCompleted]);
+
+  useEffect(() => {
+    if (!blockedStage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setBlockedStage(null), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [blockedStage]);
+
   const attemptPlayMusic = () => {
     if (isMusicPlaying) {
       return;
@@ -3153,6 +3425,11 @@ export default function ExplorateurIA({
   const move = (dx: number, dy: number) => {
     const nx = player.x + dx;
     const ny = player.y + dy;
+    const gate = GATE_BY_COORD.get(coordKey(nx, ny));
+    if (gate && !isQuarterCompleted(gate.stage)) {
+      setBlockedStage(gate.stage);
+      return;
+    }
     if (!isWalkable(nx, ny, player.x, player.y)) return;
     attemptPlayMusic();
     setPlayer({ x: nx, y: ny });
@@ -3261,8 +3538,19 @@ export default function ExplorateurIA({
                       tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
                     const markerCoord = MARKER_COORD_BY_KEY.get(`${x}-${y}`);
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
+                    const tileKey = coordKey(x, y);
+                    const gate = GATE_BY_COORD.get(tileKey);
+                    const gateActive = gate ? !isQuarterCompleted(gate.stage) : false;
+                    const tileBlocked = activeGateKeys.has(tileKey);
+
                     return (
-                      <div key={`${x}-${y}`} className="relative">
+                      <div
+                        key={`${x}-${y}`}
+                        className="relative"
+                        onMouseDownCapture={(event) => handleEditPointer(event, x, y)}
+                        onMouseEnter={(event) => handleEditPointer(event, x, y)}
+                        onTouchStartCapture={(event) => handleEditPointer(event, x, y)}
+                      >
                         <TileWithTs
                           terrain={terrain}
                           ts={tileset}
@@ -3282,14 +3570,34 @@ export default function ExplorateurIA({
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
+                        {gateActive && (
+                          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                            <SpriteFromAtlas
+                              ts={DEFAULT_ATLAS}
+                              coord={GATE_MARKER_COORD}
+                              scale={tileSize}
+                            />
+                          </div>
+                        )}
                         {buildings.map(
                           (building) =>
                             building.x === x &&
                             building.y === y && (
                               <button
                                 key={building.id}
-                                onClick={() => setOpen(building.id)}
-                                className="absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+                                onClick={(event) => {
+                                  if (isEditMode) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    return;
+                                  }
+                                  setOpen(building.id);
+                                }}
+                                disabled={tileBlocked}
+                                className={classNames(
+                                  "absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70",
+                                  tileBlocked && "cursor-not-allowed opacity-70"
+                                )}
                                 title={building.label}
                               >
                                 <BuildingSprite
@@ -3341,13 +3649,34 @@ export default function ExplorateurIA({
             <ul className="mt-2 text-sm space-y-2">
               {buildings.map((building) => (
                 <li key={building.id} className="flex items-center justify-between gap-3">
-                  <button
-                    onClick={() => setOpen(building.id)}
-                    className="text-left hover:underline"
-                    style={{ color: building.color }}
-                  >
-                    {building.label}
-                  </button>
+                  {(() => {
+                    const key = coordKey(building.x, building.y);
+                    const tileBlocked = activeGateKeys.has(key);
+                    const gate = GATE_BY_COORD.get(key);
+                    const lockMessageStage = gate?.stage ?? building.id;
+                    const isLocked = tileBlocked && !isQuarterCompleted(building.id);
+                    return (
+                      <button
+                        onClick={() => {
+                          if (isLocked) {
+                            setBlockedStage(lockMessageStage);
+                            return;
+                          }
+                          setOpen(building.id);
+                        }}
+                        disabled={isLocked}
+                        className={classNames(
+                          "text-left",
+                          isLocked
+                            ? "cursor-not-allowed opacity-60"
+                            : "hover:underline"
+                        )}
+                        style={{ color: building.color }}
+                      >
+                        {building.label}
+                      </button>
+                    );
+                  })()}
                   <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50">
                     {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
                     {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
@@ -3371,7 +3700,42 @@ export default function ExplorateurIA({
                 <p>Clic: Accès direct</p>
               </div>
             </div>
+            {blockedStage && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
+                Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
+              </div>
+            )}
           </div>
+          {isEditMode && (
+            <div className="rounded-2xl border bg-white p-4 shadow">
+              <div className="text-xs uppercase tracking-wide text-slate-500">
+                Édition du terrain
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                {TERRAIN_BRUSH_ORDER.map((key) => {
+                  const brush = TERRAIN_BRUSHES[key];
+                  const isActive = selectedBrush === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedBrush(key)}
+                      className={classNames(
+                        "rounded-xl border px-3 py-2 text-left transition",
+                        isActive
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
+                      )}
+                    >
+                      {brush.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                Maintenez le clic pour peindre plusieurs cases. Les modifications sont visibles immédiatement.
+              </p>
+            </div>
+          )}
           <div className="rounded-2xl border bg-white p-4 shadow">
             <div className="text-xs uppercase tracking-wide text-slate-500">
               Tileset
