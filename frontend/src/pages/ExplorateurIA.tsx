@@ -1479,28 +1479,49 @@ function buildNeighborMap(cells: Set<CoordKey>): Map<CoordKey, CoordKey[]> {
   return neighborMap;
 }
 
-function isTooCloseToPath(candidate: CoordKey, path: CoordKey[]): boolean {
-  if (path.length === 0) {
-    return false;
-  }
+function bfsFrom(
+  start: CoordKey,
+  neighborMap: Map<CoordKey, CoordKey[]>,
+  rng: () => number
+): {
+  previous: Map<CoordKey, CoordKey | null>;
+  distances: Map<CoordKey, number>;
+} {
+  const previous = new Map<CoordKey, CoordKey | null>();
+  const distances = new Map<CoordKey, number>();
+  const queue: CoordKey[] = [start];
 
-  const allowed = new Set<CoordKey>([path[path.length - 1]]);
-  if (path.length >= 2) {
-    allowed.add(path[path.length - 2]);
-  }
+  previous.set(start, null);
+  distances.set(start, 0);
 
-  const [cx, cy] = coordFromKey(candidate);
-  for (const key of path) {
-    if (allowed.has(key)) {
-      continue;
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    const neighbors = [...(neighborMap.get(node) ?? [])];
+    shuffleInPlace(rng, neighbors);
+    for (const neighbor of neighbors) {
+      if (previous.has(neighbor)) {
+        continue;
+      }
+      previous.set(neighbor, node);
+      distances.set(neighbor, (distances.get(node) ?? 0) + 1);
+      queue.push(neighbor);
     }
-    const [px, py] = coordFromKey(key);
-    if (Math.abs(cx - px) + Math.abs(cy - py) === 1) {
-      return true;
-    }
   }
 
-  return false;
+  return { previous, distances };
+}
+
+function reconstructPath(
+  previous: Map<CoordKey, CoordKey | null>,
+  goal: CoordKey
+): CoordKey[] {
+  const path: CoordKey[] = [];
+  let current: CoordKey | null | undefined = goal;
+  while (current != null) {
+    path.push(current);
+    current = previous.get(current) ?? null;
+  }
+  return path.reverse();
 }
 
 function carvePathOnIsland(
@@ -1514,56 +1535,53 @@ function carvePathOnIsland(
     return [];
   }
 
-  const length = Math.min(desiredLength, cells.length);
-  const minLength = Math.max(1, Math.min(6, length));
+  const maxLength = Math.min(desiredLength, cells.length);
+  const minLength = Math.max(1, Math.min(6, maxLength));
+  let bestPath: CoordKey[] = [];
 
-  for (let currentLength = length; currentLength >= minLength; currentLength--) {
-    for (let attempt = 0; attempt < 200; attempt++) {
+  for (let targetLength = maxLength; targetLength >= minLength; targetLength--) {
+    for (let attempt = 0; attempt < 120; attempt++) {
       const start = randomChoice(rng, cells);
-      const visited = new Set<CoordKey>([start]);
-      const path: CoordKey[] = [start];
-      const stack: Array<[CoordKey, CoordKey[]]> = [[start, []]];
+      const { previous, distances } = bfsFrom(start, neighborMap, rng);
+      if (distances.size <= 1) {
+        continue;
+      }
 
-      const prepareOptions = (key: CoordKey) => {
-        const options = [...(neighborMap.get(key) ?? [])];
-        shuffleInPlace(rng, options);
-        return options;
-      };
+      const candidates: CoordKey[] = [];
+      let farthest: { key: CoordKey; distance: number } | null = null;
 
-      stack[0][1] = prepareOptions(start);
-
-      while (stack.length > 0) {
-        if (path.length >= currentLength) {
-          return path;
-        }
-
-        const top = stack[stack.length - 1];
-        const [node, options] = top;
-        let nextKey: CoordKey | null = null;
-
-        while (options.length > 0) {
-          const candidate = options.pop()!;
-          if (visited.has(candidate)) {
-            continue;
-          }
-          if (isTooCloseToPath(candidate, path)) {
-            continue;
-          }
-          nextKey = candidate;
-          break;
-        }
-
-        if (!nextKey) {
-          stack.pop();
-          path.pop();
+      for (const [key, distance] of distances) {
+        if (distance === 0) {
           continue;
         }
+        if (distance >= targetLength - 1) {
+          candidates.push(key);
+        }
+        if (!farthest || distance > farthest.distance) {
+          farthest = { key, distance };
+        }
+      }
 
-        visited.add(nextKey);
-        path.push(nextKey);
-        stack.push([nextKey, prepareOptions(nextKey)]);
+      const goal =
+        candidates.length > 0
+          ? randomChoice(rng, candidates)
+          : farthest?.key ?? null;
+      if (!goal) {
+        continue;
+      }
+
+      const path = reconstructPath(previous, goal);
+      if (path.length >= targetLength) {
+        return path.slice(0, targetLength);
+      }
+      if (path.length > bestPath.length) {
+        bestPath = path;
       }
     }
+  }
+
+  if (bestPath.length > 0) {
+    return bestPath;
   }
 
   return [cells[0]];
@@ -3253,7 +3271,7 @@ export default function ExplorateurIA({
                           tileSize={tileSize}
                         />
                         {markerCoord && (
-                          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                          <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
                             <SpriteFromAtlas
                               ts={activeTileset}
                               coord={markerCoord}
@@ -3283,7 +3301,7 @@ export default function ExplorateurIA({
                             )
                         )}
                         {player.x === x && player.y === y && (
-                          <div className="absolute inset-1 animate-[float_1.2s_ease-in-out_infinite]">
+                          <div className="pointer-events-none absolute inset-1 z-30 animate-[float_1.2s_ease-in-out_infinite]">
                             <PlayerSprite ts={tileset} step={walkStep} tileSize={tileSize} />
                           </div>
                         )}
