@@ -175,6 +175,8 @@ const MAP_PACK_ATLAS = parseAtlasDescription(mapPackAtlasDescription);
 
 const TILE_CONNECTION_CACHE = new Map<string, string[]>();
 
+const NUMBER_TILE_PATTERN = /(\d+)/;
+
 function atlas(name: string): TileCoord {
   const entry = MAP_PACK_ATLAS.get(name);
   if (!entry) {
@@ -188,6 +190,29 @@ function atlas(name: string): TileCoord {
     entry.height || DEFAULT_TILE_SIZE,
   ];
 }
+
+function collectWalkableNumberTileCoords(): TileCoord[] {
+  const numbers: Array<{ value: number; coord: TileCoord }> = [];
+  for (const entry of MAP_PACK_ATLAS.values()) {
+    if (entry.subtype !== "number" || !entry.walkable) {
+      continue;
+    }
+    const target = entry.description ?? entry.name;
+    const match = target ? target.match(NUMBER_TILE_PATTERN) : null;
+    if (!match) {
+      continue;
+    }
+    const value = Number.parseInt(match[1] ?? "", 10);
+    if (Number.isNaN(value)) {
+      continue;
+    }
+    numbers.push({ value, coord: atlas(entry.name) });
+  }
+  numbers.sort((a, b) => a.value - b.value);
+  return numbers.map((item) => item.coord);
+}
+
+const NUMBER_TILE_COORDS = collectWalkableNumberTileCoords();
 
 const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
 
@@ -538,11 +563,11 @@ const DEFAULT_ATLAS: Tileset = {
       flower: atlas("mapTile_054.png"),
     },
     houses: {
-      clarte: atlas("mapTile_131.png"), // chiffre 1
-      creation: atlas("mapTile_132.png"), // chiffre 2
-      decision: atlas("mapTile_133.png"), // chiffre 3
-      ethique: atlas("mapTile_134.png"), // chiffre 4
-      townHall: atlas("mapTile_145.png"), // pas de chiffre (mairie)
+      clarte: atlas("mapTile_114.png"), // panneau d'avertissement
+      creation: atlas("mapTile_050.png"), // tente colorée
+      decision: atlas("mapTile_099.png"), // tour de château
+      ethique: atlas("mapTile_095.png"), // igloo
+      townHall: atlas("mapTile_100.png"), // château principal
     },
     player: DEFAULT_PLAYER_FRAMES.map((frame) => [...frame] as TileCoord),
   },
@@ -1554,10 +1579,13 @@ const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
   "ethique",
 ];
 
+type PathNumberPlacement = { x: number; y: number; coord: TileCoord };
+
 type GeneratedWorld = {
   tiles: TerrainTile[][];
   path: Coord[];
   landmarks: Record<QuarterId, { x: number; y: number }>;
+  numbers: PathNumberPlacement[];
 };
 
 function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; y: number }> {
@@ -1635,9 +1663,25 @@ function generateWorld(): GeneratedWorld {
     tile.overlay = TILE_KIND.PATH;
   }
 
+  const numbers: PathNumberPlacement[] = [];
+  const maxDigits = Math.min(NUMBER_TILE_COORDS.length, path.length);
+  if (maxDigits > 0) {
+    const indices = distributeIndices(path.length, maxDigits);
+    indices.forEach((rawIndex, digitIndex) => {
+      const coord = NUMBER_TILE_COORDS[digitIndex];
+      if (!coord) {
+        return;
+      }
+      const index = Math.min(Math.max(rawIndex, 0), path.length - 1);
+      const [x, y] = path[index] ?? path[0];
+      const spriteCoord = [...coord] as TileCoord;
+      numbers.push({ x, y, coord: spriteCoord });
+    });
+  }
+
   const landmarks = assignLandmarksFromPath(path);
 
-  return { tiles, path, landmarks };
+  return { tiles, path, landmarks, numbers };
 }
 
 // Générée une seule fois et mise en cache
@@ -1653,6 +1697,13 @@ const generatedWorld = getWorld();
 const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
+
+const NUMBER_COORD_BY_KEY = new Map<string, TileCoord>(
+  generatedWorld.numbers.map((placement) => [
+    `${placement.x}-${placement.y}`,
+    placement.coord,
+  ])
+);
 
 const BUILDING_META: Record<QuarterId, { label: string; color: string }> = {
   mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
@@ -2189,12 +2240,14 @@ function TileWithTs({
   x,
   y,
   tileSize,
+  numberCoord,
 }: {
   terrain: TerrainTile;
   ts: Tileset;
   x: number;
   y: number;
   tileSize: number;
+  numberCoord?: TileCoord | null;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
 
@@ -2217,7 +2270,7 @@ function TileWithTs({
       )
     : null;
 
-  const overlays = [edgeOverlayCoord, overlayCoord].filter(
+  const overlays = [edgeOverlayCoord, overlayCoord, numberCoord].filter(
     (coord): coord is TileCoord => Array.isArray(coord)
   );
 
@@ -3136,6 +3189,7 @@ export default function ExplorateurIA({
               >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
+                    const numberCoord = NUMBER_COORD_BY_KEY.get(`${x}-${y}`);
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
                     return (
                       <div key={`${x}-${y}`} className="relative">
@@ -3145,6 +3199,7 @@ export default function ExplorateurIA({
                           x={x}
                           y={y}
                           tileSize={tileSize}
+                          numberCoord={numberCoord}
                         />
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
