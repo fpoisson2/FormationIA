@@ -1804,6 +1804,78 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     pickFrom(path.map((_, index) => index));
   }
 
+  const stageOrder: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+  const indexByStage = new Map<QuarterId, number>();
+  const takenIndices = new Set<number>();
+
+  for (let index = 0; index < path.length; index++) {
+    const [x, y] = path[index];
+    for (const stage of PROGRESSION_SEQUENCE) {
+      if (indexByStage.has(stage)) {
+        continue;
+      }
+      const assignment = assignments[stage];
+      if (assignment.x === x && assignment.y === y) {
+        indexByStage.set(stage, index);
+        takenIndices.add(index);
+      }
+    }
+  }
+
+  if (path.length > 0) {
+    indexByStage.set("mairie", path.length - 1);
+    const [goalX, goalY] = path[path.length - 1];
+    assignments.mairie = { x: goalX, y: goalY };
+  }
+
+  const moveStage = (stage: QuarterId, targetIndex: number) => {
+    const currentIndex = indexByStage.get(stage);
+    if (currentIndex === targetIndex) {
+      return;
+    }
+    const [x, y] = path[targetIndex];
+    if (currentIndex !== undefined) {
+      takenIndices.delete(currentIndex);
+    }
+    assignments[stage] = { x, y };
+    indexByStage.set(stage, targetIndex);
+    takenIndices.add(targetIndex);
+  };
+
+  const MIN_GAP = 1;
+  let adjusted = false;
+  do {
+    adjusted = false;
+    for (let index = stageOrder.length - 2; index >= 0; index--) {
+      const stage = stageOrder[index];
+      const nextStage = stageOrder[index + 1];
+      const stageIndex = indexByStage.get(stage);
+      const nextIndex = indexByStage.get(nextStage);
+      if (stageIndex === undefined || nextIndex === undefined) {
+        continue;
+      }
+      if (nextIndex - stageIndex <= MIN_GAP) {
+        const previousStage = index > 0 ? stageOrder[index - 1] : undefined;
+        const previousIndex = previousStage
+          ? indexByStage.get(previousStage)
+          : undefined;
+        const minIndex = previousIndex !== undefined ? previousIndex + 1 : 0;
+        const maxIndex = nextIndex - (MIN_GAP + 1);
+        if (maxIndex < minIndex) {
+          continue;
+        }
+        const start = Math.min(stageIndex - 1, maxIndex);
+        for (let candidate = start; candidate >= minIndex; candidate--) {
+          if (!takenIndices.has(candidate)) {
+            moveStage(stage, candidate);
+            adjusted = true;
+            break;
+          }
+        }
+      }
+    }
+  } while (adjusted);
+
   return assignments;
 }
 
