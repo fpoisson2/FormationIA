@@ -2869,66 +2869,6 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   );
 }
 
-function MobileArrowControls({ onMove }: { onMove: (dx: number, dy: number) => void }) {
-  const buttonClass =
-    "flex h-12 w-12 items-center justify-center rounded-full bg-slate-900/40 text-white text-xl shadow-lg backdrop-blur-md transition active:scale-95";
-  const handle = (dx: number, dy: number) => () => {
-    onMove(dx, dy);
-  };
-
-  return (
-    <div
-      className="pointer-events-none fixed inset-0 z-40 flex items-end justify-end"
-      style={{
-        paddingRight: "calc(16px + env(safe-area-inset-right))",
-        paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
-      }}
-    >
-      <div className="pointer-events-auto rounded-3xl bg-slate-900/25 p-3 shadow-lg backdrop-blur-sm">
-        <div className="grid grid-cols-3 gap-2">
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers le haut"
-            onClick={handle(0, -1)}
-            className={buttonClass}
-          >
-            ▲
-          </button>
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers la gauche"
-            onClick={handle(-1, 0)}
-            className={buttonClass}
-          >
-            ◀
-          </button>
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers la droite"
-            onClick={handle(1, 0)}
-            className={buttonClass}
-          >
-            ▶
-          </button>
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers le bas"
-            onClick={handle(0, 1)}
-            className={classNames(buttonClass, "col-start-2")}
-          >
-            ▼
-          </button>
-          <div />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 type MobilePromptBuilding = {
   id: QuarterId;
   x: number;
@@ -4499,7 +4439,7 @@ export default function ExplorateurIA({
     [buildingAt, player.x, player.y]
   );
 
-  const showMobileControls = isMobile && !isEditMode && !open;
+  const showMobilePrompt = isMobile && !isEditMode && !open;
 
   const mobilePromptBuilding = useMemo(() => {
     if (!mobilePrompt) {
@@ -4523,14 +4463,6 @@ export default function ExplorateurIA({
     setMobilePrompt(null);
     setOpen(mobilePromptBuilding.id);
   }, [mobilePromptBuilding, mobilePromptLocked]);
-
-  const handleOverlayMove = useCallback(
-    (dx: number, dy: number) => {
-      cancelAutoWalk();
-      move(dx, dy);
-    },
-    [cancelAutoWalk, move]
-  );
 
   useEffect(() => {
     if (!isMobile || isEditMode) {
@@ -4664,7 +4596,7 @@ export default function ExplorateurIA({
                             return null;
                           }
                           const highlightTile =
-                            showMobileControls &&
+                            showMobilePrompt &&
                             !tileBlocked &&
                             mobilePromptBuilding?.id === building.id &&
                             !mobilePromptLocked;
@@ -4720,14 +4652,11 @@ export default function ExplorateurIA({
                 )}
               </div>
             </div>
-            {showMobileControls && (
-              <>
-                <MobileEnterPromptOverlay
-                  building={mobilePromptLocked ? null : mobilePromptBuilding}
-                  onEnter={handleMobileEnter}
-                />
-                <MobileArrowControls onMove={handleOverlayMove} />
-              </>
+            {showMobilePrompt && (
+              <MobileEnterPromptOverlay
+                building={mobilePromptLocked ? null : mobilePromptBuilding}
+                onEnter={handleMobileEnter}
+              />
             )}
           </div>
           <style>{`
