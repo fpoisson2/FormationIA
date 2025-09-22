@@ -177,6 +177,8 @@ const TILE_CONNECTION_CACHE = new Map<string, string[]>();
 
 const NUMBER_TILE_PATTERN = /(\d+)/;
 
+type NumberTile = { value: number; coord: TileCoord };
+
 function atlas(name: string): TileCoord {
   const entry = MAP_PACK_ATLAS.get(name);
   if (!entry) {
@@ -191,8 +193,8 @@ function atlas(name: string): TileCoord {
   ];
 }
 
-function collectWalkableNumberTileCoords(): TileCoord[] {
-  const numbers: Array<{ value: number; coord: TileCoord }> = [];
+function collectWalkableNumberTiles(): NumberTile[] {
+  const numbers: NumberTile[] = [];
   for (const entry of MAP_PACK_ATLAS.values()) {
     if (entry.subtype !== "number" || !entry.walkable) {
       continue;
@@ -209,10 +211,30 @@ function collectWalkableNumberTileCoords(): TileCoord[] {
     numbers.push({ value, coord: atlas(entry.name) });
   }
   numbers.sort((a, b) => a.value - b.value);
-  return numbers.map((item) => item.coord);
+  return numbers;
 }
 
-const NUMBER_TILE_COORDS = collectWalkableNumberTileCoords();
+const NUMBER_TILES = collectWalkableNumberTiles();
+const NUMBER_TILE_COORDS = NUMBER_TILES.map((item) => item.coord);
+const NUMBER_TILE_MAP = new Map<number, TileCoord>(
+  NUMBER_TILES.map(({ value, coord }) => [value, coord])
+);
+
+const FALLBACK_NUMBER_TILE_NAMES: Record<number, string | undefined> = {
+  5: "mapTile_135.png",
+};
+
+function getNumberTileCoord(value: number): TileCoord | null {
+  const coord = NUMBER_TILE_MAP.get(value);
+  if (coord) {
+    return coord;
+  }
+  const fallback = FALLBACK_NUMBER_TILE_NAMES[value];
+  if (fallback) {
+    return atlas(fallback);
+  }
+  return null;
+}
 
 const DEFAULT_PLAYER_FRAMES = [atlas("mapTile_136.png")];
 
@@ -1705,12 +1727,15 @@ const NUMBER_COORD_BY_KEY = new Map<string, TileCoord>(
   ])
 );
 
-const BUILDING_META: Record<QuarterId, { label: string; color: string }> = {
-  mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
-  clarte: { label: "Quartier Clarté", color: "#06d6a0" },
-  creation: { label: "Quartier Création", color: "#118ab2" },
-  decision: { label: "Quartier Décision", color: "#ef476f" },
-  ethique: { label: "Quartier Éthique", color: "#8338ec" },
+const BUILDING_META: Record<
+  QuarterId,
+  { label: string; color: string; number: number }
+> = {
+  mairie: { label: "Mairie (Bilan)", color: "#ffd166", number: 5 },
+  clarte: { label: "Quartier Clarté", color: "#06d6a0", number: 1 },
+  creation: { label: "Quartier Création", color: "#118ab2", number: 2 },
+  decision: { label: "Quartier Décision", color: "#ef476f", number: 3 },
+  ethique: { label: "Quartier Éthique", color: "#8338ec", number: 4 },
 };
 
 const BUILDING_DISPLAY_ORDER: QuarterId[] = [
@@ -1727,6 +1752,7 @@ const buildings: Array<{
   y: number;
   label: string;
   color: string;
+  number: number;
 }> = BUILDING_DISPLAY_ORDER.map((id) => {
   const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
   const meta = BUILDING_META[id];
@@ -1736,6 +1762,7 @@ const buildings: Array<{
     y: landmark.y,
     label: meta.label,
     color: meta.color,
+    number: meta.number,
   };
 });
 
@@ -1782,25 +1809,27 @@ function PlayerSprite({
 }
 
 function BuildingSprite({
-  id,
+  quarter,
   ts,
   tileSize,
 }: {
-  id: QuarterId;
+  quarter: QuarterId;
   ts: Tileset;
   tileSize: number;
 }) {
+  const numberValue = BUILDING_META[quarter]?.number;
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
   const coord =
-    id === "mairie"
+    (typeof numberValue === "number" ? getNumberTileCoord(numberValue) : null) ??
+    (quarter === "mairie"
       ? activeTileset.map.houses.townHall
-      : id === "clarte"
+      : quarter === "clarte"
       ? activeTileset.map.houses.clarte
-      : id === "creation"
+      : quarter === "creation"
       ? activeTileset.map.houses.creation
-      : id === "decision"
+      : quarter === "decision"
       ? activeTileset.map.houses.decision
-      : activeTileset.map.houses.ethique;
+      : activeTileset.map.houses.ethique);
   const width =
     (Array.isArray(coord) && typeof coord[2] === "number"
       ? coord[2]
@@ -3219,7 +3248,7 @@ export default function ExplorateurIA({
                                 title={building.label}
                               >
                                 <BuildingSprite
-                                  id={building.id}
+                                  quarter={building.id}
                                   ts={tileset}
                                   tileSize={tileSize}
                                 />
