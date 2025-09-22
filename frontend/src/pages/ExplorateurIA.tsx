@@ -1376,19 +1376,58 @@ function useResponsiveTileSize(): number {
   return size;
 }
 
+function computeIsMobile(breakpoint: number): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const minDimension = Math.min(window.innerWidth, window.innerHeight);
+  const hasCoarsePointer = typeof window.matchMedia === "function"
+    ? window.matchMedia("(pointer: coarse)").matches
+    : false;
+
+  return hasCoarsePointer || minDimension <= breakpoint;
+}
+
 function useIsMobile(breakpoint = 768): boolean {
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => computeIsMobile(breakpoint));
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
+
+    const mediaQuery = typeof window.matchMedia === "function"
+      ? window.matchMedia("(pointer: coarse)")
+      : null;
+
     const recompute = () => {
-      setIsMobile(window.innerWidth < breakpoint);
+      setIsMobile(computeIsMobile(breakpoint));
     };
+
     recompute();
     window.addEventListener("resize", recompute);
-    return () => window.removeEventListener("resize", recompute);
+    window.addEventListener("orientationchange", recompute);
+
+    if (mediaQuery) {
+      if (typeof mediaQuery.addEventListener === "function") {
+        mediaQuery.addEventListener("change", recompute);
+      } else if (typeof mediaQuery.addListener === "function") {
+        mediaQuery.addListener(recompute);
+      }
+    }
+
+    return () => {
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("orientationchange", recompute);
+      if (mediaQuery) {
+        if (typeof mediaQuery.removeEventListener === "function") {
+          mediaQuery.removeEventListener("change", recompute);
+        } else if (typeof mediaQuery.removeListener === "function") {
+          mediaQuery.removeListener(recompute);
+        }
+      }
+    };
   }, [breakpoint]);
 
   return isMobile;
@@ -4284,22 +4323,26 @@ export default function ExplorateurIA({
   return (
     <div
       className={classNames(
-        "relative",
-        isMobile ? "flex min-h-[100dvh] flex-col" : "space-y-6"
+        "relative w-full",
+        isMobile
+          ? "flex min-h-[100dvh] flex-col overflow-hidden"
+          : "space-y-6"
       )}
     >
       <Fireworks show={celebrate} />
       <div
         className={classNames(
-          "grid gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]",
-          isMobile ? "flex-1 min-h-0 grid-rows-[minmax(0,1fr)]" : ""
+          "grid w-full gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]",
+          isMobile
+            ? "flex-1 min-h-0 grid-rows-[minmax(0,1fr)] gap-0"
+            : ""
         )}
       >
         <div
           className={classNames(
             "relative flex flex-col rounded-2xl border bg-white p-4 shadow",
             isMobile &&
-              "h-full min-h-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none"
+              "h-full min-h-0 flex-1 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none"
           )}
         >
           <div className="absolute right-3 top-3 flex items-center gap-2 text-[11px] text-slate-600 bg-slate-100/80 px-2 py-1 rounded-full border shadow-sm">
@@ -4319,12 +4362,18 @@ export default function ExplorateurIA({
           <div
             ref={worldContainerRef}
             className={classNames(
-              "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-pan-y",
-              isMobile && "mt-0 min-h-0 flex-1 rounded-none border-0 shadow-none"
+              "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner touch-manipulation",
+              isMobile &&
+                "mt-0 min-h-0 h-full w-full flex-1 rounded-none border-0 bg-transparent shadow-none"
             )}
             style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
-            <div className="inline-block p-3">
+            <div
+              className={classNames(
+                "inline-block",
+                isMobile ? "h-full w-full p-0" : "p-3"
+              )}
+            >
               <div
                 className="grid min-w-max"
                 style={{
