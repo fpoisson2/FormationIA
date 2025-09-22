@@ -3817,6 +3817,7 @@ export default function ExplorateurIA({
   const cellSize = tileSize + TILE_GAP;
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
+  const [mobilePrompt, setMobilePrompt] = useState<QuarterId | null>(null);
   const [progress, setProgress] = useState<Progress>({
     clarte: { done: false, score: 0 },
     creation: { done: false },
@@ -4075,14 +4076,22 @@ export default function ExplorateurIA({
     [attemptPlayMusic, isQuarterCompleted]
   );
 
-  const buildingAt = (x: number, y: number) => {
+  const buildingAt = useCallback((x: number, y: number) => {
     return buildings.find((building) => building.x === x && building.y === y) || null;
-  };
+  }, []);
 
   const openIfOnBuilding = useCallback(() => {
     const hit = buildingAt(player.x, player.y);
-    if (hit) setOpen(hit.id);
-  }, [player.x, player.y]);
+    if (!hit) {
+      setMobilePrompt(null);
+      return;
+    }
+    if (isMobile && !isEditMode) {
+      setMobilePrompt(hit.id);
+      return;
+    }
+    setOpen(hit.id);
+  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
 
   const findWalkPath = useCallback(
     (fromX: number, fromY: number, toX: number, toY: number): Coord[] => {
@@ -4195,6 +4204,7 @@ export default function ExplorateurIA({
     [
       cancelAutoWalk,
       findWalkPath,
+      buildingAt,
       isMobile,
       move,
       openIfOnBuilding,
@@ -4318,7 +4328,26 @@ export default function ExplorateurIA({
     URL.revokeObjectURL(url);
   };
 
-  const at = buildingAt(player.x, player.y);
+  const at = useMemo(
+    () => buildingAt(player.x, player.y),
+    [buildingAt, player.x, player.y]
+  );
+
+  useEffect(() => {
+    if (!isMobile || isEditMode) {
+      setMobilePrompt(null);
+      return;
+    }
+    if (open || isAutoWalking) {
+      setMobilePrompt(null);
+      return;
+    }
+    if (at) {
+      setMobilePrompt(at.id);
+    } else {
+      setMobilePrompt(null);
+    }
+  }, [at, isAutoWalking, isEditMode, isMobile, open]);
 
   return (
     <div
@@ -4345,20 +4374,22 @@ export default function ExplorateurIA({
               "h-full min-h-0 flex-1 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none"
           )}
         >
-          <div className="absolute right-3 top-3 flex items-center gap-2 text-[11px] text-slate-600 bg-slate-100/80 px-2 py-1 rounded-full border shadow-sm">
-            <span className="tracking-wide uppercase">Tiny Town</span>
-            <button
-              onClick={toggleMusic}
-              className="rounded-full border bg-white px-2 py-[2px] text-xs font-semibold text-slate-700 hover:bg-slate-100"
-              aria-pressed={isMusicPlaying}
-              aria-label={
-                isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
-              }
-              title={isMusicPlaying ? "Pause" : "Lecture"}
-            >
-              {isMusicPlaying ? "⏸" : "♫"}
-            </button>
-          </div>
+          {!isMobile && (
+            <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
+              <span className="tracking-wide uppercase">Tiny Town</span>
+              <button
+                onClick={toggleMusic}
+                className="rounded-full border bg-white px-2 py-[2px] text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                aria-pressed={isMusicPlaying}
+                aria-label={
+                  isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
+                }
+                title={isMusicPlaying ? "Pause" : "Lecture"}
+              >
+                {isMusicPlaying ? "⏸" : "♫"}
+              </button>
+            </div>
+          )}
           <div
             ref={worldContainerRef}
             className={classNames(
@@ -4427,35 +4458,68 @@ export default function ExplorateurIA({
                             />
                           </div>
                         )}
-                        {buildings.map(
-                          (building) =>
-                            building.x === x &&
-                            building.y === y && (
-                              <button
-                                key={building.id}
-                                onClick={(event) => {
-                                  if (isEditMode) {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    return;
-                                  }
-                                  setOpen(building.id);
-                                }}
-                                disabled={tileBlocked}
-                                className={classNames(
-                                  "absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70",
-                                  tileBlocked && "cursor-not-allowed opacity-70"
-                                )}
-                                title={building.label}
-                              >
+                        {buildings.map((building) => {
+                          if (building.x !== x || building.y !== y) {
+                            return null;
+                          }
+                          const showMobilePrompt =
+                            isMobile &&
+                            !isEditMode &&
+                            !tileBlocked &&
+                            open === null &&
+                            mobilePrompt === building.id;
+                          return (
+                            <div key={building.id} className="absolute inset-0 z-10">
+                              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                                 <BuildingSprite
                                   quarter={building.id}
                                   ts={tileset}
                                   tileSize={tileSize}
                                 />
-                              </button>
-                            )
-                        )}
+                              </div>
+                              {!isMobile && (
+                                <button
+                                  onClick={(event) => {
+                                    if (isEditMode) {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      return;
+                                    }
+                                    setOpen(building.id);
+                                  }}
+                                  disabled={tileBlocked}
+                                  className={classNames(
+                                    "absolute inset-0 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70",
+                                    tileBlocked && "cursor-not-allowed opacity-70"
+                                  )}
+                                  title={building.label}
+                                >
+                                  <span className="sr-only">{building.label}</span>
+                                </button>
+                              )}
+                              {showMobilePrompt && (
+                                <div className="pointer-events-none absolute inset-0 flex items-start justify-center">
+                                  <button
+                                    type="button"
+                                    className="pointer-events-auto -translate-y-9 rounded-full bg-white/95 px-4 py-2 text-center text-sm font-semibold text-slate-700 shadow-lg ring-2 ring-emerald-200"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setMobilePrompt(null);
+                                      setOpen(building.id);
+                                    }}
+                                  >
+                                    <span className="block text-[11px] font-medium uppercase tracking-wide text-emerald-600">
+                                      {building.number != null
+                                        ? `Quartier ${building.number}`
+                                        : building.label}
+                                    </span>
+                                    <span className="block text-base">Entrer</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                         {player.x === x && player.y === y && (
                           <div className="pointer-events-none absolute inset-1 z-30 animate-[float_1.2s_ease-in-out_infinite]">
                             <PlayerSprite ts={tileset} step={walkStep} tileSize={tileSize} />
@@ -4471,37 +4535,25 @@ export default function ExplorateurIA({
           <style>{`
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
           `}</style>
-          <div
-            className={classNames(
-              "mt-3 flex items-center justify-between text-sm",
-              isMobile &&
-                "mt-4 flex-col gap-3 rounded-2xl border border-white/50 bg-white/95 p-4 text-slate-700 shadow-lg"
-            )}
-          >
-            <div
-              className={classNames(
-                isMobile && "text-center text-base font-medium"
-              )}
-            >
-              {at ? (
-                <span>
-                  Vous êtes devant: <span className="font-semibold">{at.label}</span>
-                </span>
-              ) : (
-                <span>Explorez la ville et entrez dans un quartier.</span>
-              )}
+          {!isMobile && (
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <div>
+                {at ? (
+                  <span>
+                    Vous êtes devant: <span className="font-semibold">{at.label}</span>
+                  </span>
+                ) : (
+                  <span>Explorez la ville et entrez dans un quartier.</span>
+                )}
+              </div>
+              <button
+                onClick={openIfOnBuilding}
+                className="w-full rounded-lg border bg-slate-100 px-3 py-2 sm:w-auto"
+              >
+                Entrer
+              </button>
             </div>
-            <button
-              onClick={openIfOnBuilding}
-              className={classNames(
-                "px-3 py-2 rounded-lg bg-slate-100 border w-full sm:w-auto",
-                isMobile &&
-                  "bg-emerald-500 text-white text-base font-semibold py-3 shadow-md active:scale-95"
-              )}
-            >
-              Entrer
-            </button>
-          </div>
+          )}
         </div>
         <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
           <div className="rounded-2xl border bg-white p-4 shadow">
