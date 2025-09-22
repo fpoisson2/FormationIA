@@ -42,6 +42,7 @@ const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
+type TileScaleMode = "contain" | "cover";
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
 
@@ -1368,7 +1369,7 @@ function measureViewport(): { width: number; height: number } {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
-function computeTileSize(): number {
+function computeTileSize(mode: TileScaleMode = "contain"): number {
   if (typeof window === "undefined") {
     return BASE_TILE_SIZE;
   }
@@ -1381,19 +1382,25 @@ function computeTileSize(): number {
   const availableHeight = Math.max(0, height - MOBILE_VERTICAL_PADDING);
   const tileForWidth = width / GRID_W;
   const tileForHeight = availableHeight / GRID_H;
-  const bestFit = Math.min(tileForWidth, tileForHeight);
-  if (!Number.isFinite(bestFit) || bestFit <= 0) {
+  const containFit = Math.min(tileForWidth, tileForHeight);
+  const coverFit = Math.max(tileForWidth, tileForHeight);
+  const rawFit = mode === "cover" ? coverFit : containFit;
+
+  if (!Number.isFinite(rawFit) || rawFit <= 0) {
     return MIN_TILE_SIZE;
   }
 
-  const capped = Math.min(BASE_TILE_SIZE, bestFit);
-  const normalized = Math.max(capped, Math.min(MIN_TILE_SIZE, bestFit));
+  const fallback = Number.isFinite(containFit) && containFit > 0
+    ? Math.min(MIN_TILE_SIZE, containFit)
+    : MIN_TILE_SIZE;
+  const capped = Math.min(BASE_TILE_SIZE, rawFit);
+  const normalized = Math.max(capped, fallback);
 
   return Math.round(normalized * 100) / 100;
 }
 
-function useResponsiveTileSize(): number {
-  const [size, setSize] = useState(() => computeTileSize());
+function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
+  const [size, setSize] = useState(() => computeTileSize(mode));
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1401,7 +1408,7 @@ function useResponsiveTileSize(): number {
     }
 
     const recompute = () => {
-      const nextSize = computeTileSize();
+      const nextSize = computeTileSize(mode);
       setSize((current) => (current === nextSize ? current : nextSize));
     };
 
@@ -1423,7 +1430,7 @@ function useResponsiveTileSize(): number {
         viewport.removeEventListener("scroll", recompute);
       }
     };
-  }, []);
+  }, [mode]);
 
   return size;
 }
@@ -3864,8 +3871,8 @@ export default function ExplorateurIA({
   navigateToActivities,
   isEditMode = false,
 }: ActivityProps) {
-  const tileSize = useResponsiveTileSize();
   const isMobile = useIsMobile();
+  const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain");
   const cellSize = tileSize + TILE_GAP;
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
