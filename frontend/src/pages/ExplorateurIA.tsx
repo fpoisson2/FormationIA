@@ -1248,67 +1248,17 @@ function findOutsideWaterCells(
 function fillSmallLakesInIsland(
   island: Set<CoordKey>,
   width: number,
-  height: number,
-  minSpan = 3
+  height: number
 ) {
-  if (minSpan <= 1) {
-    return;
-  }
-
   const outside = findOutsideWaterCells(island, width, height);
-  const visited = new Set<CoordKey>(outside);
 
   for (let x = 1; x < width - 1; x++) {
     for (let y = 1; y < height - 1; y++) {
-      const startKey = coordKey(x, y);
-      if (island.has(startKey) || visited.has(startKey)) {
+      const key = coordKey(x, y);
+      if (island.has(key) || outside.has(key)) {
         continue;
       }
-
-      const queue: Coord[] = [[x, y]];
-      const component: CoordKey[] = [startKey];
-      visited.add(startKey);
-
-      let minX = x;
-      let maxX = x;
-      let minY = y;
-      let maxY = y;
-
-      while (queue.length > 0) {
-        const [cx, cy] = queue.shift()!;
-        for (const [dx, dy] of [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ] as const) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-          if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-            continue;
-          }
-          const key = coordKey(nx, ny);
-          if (island.has(key) || visited.has(key)) {
-            continue;
-          }
-          visited.add(key);
-          queue.push([nx, ny]);
-          component.push(key);
-
-          if (nx < minX) minX = nx;
-          if (nx > maxX) maxX = nx;
-          if (ny < minY) minY = ny;
-          if (ny > maxY) maxY = ny;
-        }
-      }
-
-      const spanX = maxX - minX + 1;
-      const spanY = maxY - minY + 1;
-      if (spanX < minSpan || spanY < minSpan) {
-        for (const key of component) {
-          island.add(key);
-        }
-      }
+      island.add(key);
     }
   }
 }
