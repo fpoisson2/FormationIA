@@ -419,6 +419,174 @@ const TILE_KIND = {
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
 
+type TerrainObjectDefinition = {
+  compatibleTerrains: readonly TileKind[];
+  atlasCategory: AtlasCategory;
+  atlasSubtype?: string;
+  atlasChoices?: readonly string[];
+  weight: number;
+  fallback: TileCoord;
+};
+
+const TERRAIN_OBJECT_CATALOG = {
+  oakTree: {
+    compatibleTerrains: [
+      TILE_KIND.GRASS,
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_GRAY,
+    ] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 3,
+    fallback: atlas("mapTile_115.png"),
+  },
+  pineTree: {
+    compatibleTerrains: [
+      TILE_KIND.GRASS,
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_GRAY,
+    ] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 2,
+    fallback: atlas("mapTile_040.png"),
+  },
+  snowyTree: {
+    compatibleTerrains: [TILE_KIND.SNOW] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    atlasChoices: ["mapTile_109.png", "mapTile_110.png"] as const,
+    weight: 4,
+    fallback: atlas("mapTile_109.png"),
+  },
+  deadTree: {
+    compatibleTerrains: [TILE_KIND.DIRT, TILE_KIND.DIRT_GRAY] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 1,
+    fallback: atlas("mapTile_120.png"),
+  },
+  cactusPlant: {
+    compatibleTerrains: [TILE_KIND.SAND] as const,
+    atlasCategory: "object",
+    atlasSubtype: "plant",
+    weight: 3,
+    fallback: atlas("mapTile_035.png"),
+  },
+  flowerShrub: {
+    compatibleTerrains: [TILE_KIND.GRASS, TILE_KIND.FIELD] as const,
+    atlasCategory: "object",
+    atlasSubtype: "flower",
+    weight: 2,
+    fallback: atlas("mapTile_054.png"),
+  },
+  mushroomPatch: {
+    compatibleTerrains: [TILE_KIND.GRASS, TILE_KIND.FIELD, TILE_KIND.SNOW] as const,
+    atlasCategory: "object",
+    atlasSubtype: "flower_whitebg",
+    weight: 1,
+    fallback: atlas("mapTile_104.png"),
+  },
+  smallRock: {
+    compatibleTerrains: [
+      TILE_KIND.GRASS,
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_GRAY,
+      TILE_KIND.SAND,
+      TILE_KIND.SNOW,
+    ] as const,
+    atlasCategory: "object",
+    atlasSubtype: "rock",
+    weight: 1,
+    fallback: atlas("mapTile_039.png"),
+  },
+  igloo: {
+    compatibleTerrains: [TILE_KIND.SNOW] as const,
+    atlasCategory: "object",
+    atlasSubtype: "building",
+    atlasChoices: ["mapTile_095.png"] as const,
+    weight: 1,
+    fallback: atlas("mapTile_095.png"),
+  },
+  snowman: {
+    compatibleTerrains: [TILE_KIND.SNOW] as const,
+    atlasCategory: "character",
+    atlasSubtype: "npc",
+    atlasChoices: ["mapTile_094.png"] as const,
+    weight: 1,
+    fallback: atlas("mapTile_094.png"),
+  },
+} as const satisfies Record<string, TerrainObjectDefinition>;
+
+type TerrainObjectId = keyof typeof TERRAIN_OBJECT_CATALOG;
+
+type TerrainObjectPlacement = {
+  id: TerrainObjectId;
+  seed: number;
+};
+
+type TerrainObjectPoolEntry = {
+  id: TerrainObjectId;
+  weight?: number;
+};
+
+type TerrainObjectPool = {
+  density: number;
+  objects: readonly TerrainObjectPoolEntry[];
+};
+
+const TERRAIN_OBJECT_POOLS = {
+  [TILE_KIND.GRASS]: {
+    density: 0.35,
+    objects: [
+      { id: "oakTree", weight: 3 },
+      { id: "pineTree", weight: 2 },
+      { id: "flowerShrub", weight: 2 },
+      { id: "mushroomPatch" },
+      { id: "smallRock" },
+    ],
+  },
+  [TILE_KIND.DIRT]: {
+    density: 0.3,
+    objects: [
+      { id: "deadTree", weight: 2 },
+      { id: "oakTree" },
+      { id: "smallRock", weight: 2 },
+      { id: "mushroomPatch" },
+    ],
+  },
+  [TILE_KIND.DIRT_GRAY]: {
+    density: 0.28,
+    objects: [
+      { id: "deadTree", weight: 2 },
+      { id: "pineTree" },
+      { id: "smallRock", weight: 3 },
+    ],
+  },
+  [TILE_KIND.SAND]: {
+    density: 0.22,
+    objects: [
+      { id: "cactusPlant", weight: 3 },
+      { id: "smallRock", weight: 2 },
+    ],
+  },
+  [TILE_KIND.SNOW]: {
+    density: 0.34,
+    objects: [
+      { id: "snowyTree", weight: 4 },
+      { id: "snowman", weight: 2 },
+      { id: "igloo", weight: 1 },
+    ],
+  },
+  [TILE_KIND.FIELD]: {
+    density: 0.18,
+    objects: [
+      { id: "flowerShrub", weight: 2 },
+      { id: "mushroomPatch" },
+    ],
+  },
+} as const satisfies Partial<Record<TileKind, TerrainObjectPool>>;
+
 const LOWER_TERRAIN_TYPES = new Set<TileKind>([
   TILE_KIND.WATER,
   TILE_KIND.SAND,
@@ -486,12 +654,74 @@ function isLowerTerrainKind(kind: TileKind | null | undefined): boolean {
   return kind !== null && kind !== undefined && LOWER_TERRAIN_TYPES.has(kind);
 }
 
+function chooseTerrainObject(
+  tileKind: TileKind,
+  rng: () => number
+): TerrainObjectPlacement | null {
+  const pool = TERRAIN_OBJECT_POOLS[tileKind];
+  if (!pool) {
+    return null;
+  }
+
+  const density = Math.max(0, Math.min(1, pool.density));
+  if (density <= 0 || rng() >= density) {
+    return null;
+  }
+
+  const candidates = pool.objects
+    .map((entry) => {
+      const definition = TERRAIN_OBJECT_CATALOG[entry.id];
+      if (!definition) {
+        return null;
+      }
+      if (!definition.compatibleTerrains.includes(tileKind)) {
+        return null;
+      }
+      const weight = definition.weight * (entry.weight ?? 1);
+      if (weight <= 0) {
+        return null;
+      }
+      return { id: entry.id, weight };
+    })
+    .filter(
+      (candidate): candidate is { id: TerrainObjectId; weight: number } =>
+        candidate !== null
+    );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const totalWeight = candidates.reduce((sum, candidate) => sum + candidate.weight, 0);
+  if (totalWeight <= 0) {
+    return null;
+  }
+
+  let selection = rng() * totalWeight;
+  for (const candidate of candidates) {
+    selection -= candidate.weight;
+    if (selection <= 0) {
+      return {
+        id: candidate.id,
+        seed: Math.floor(rng() * 0x100000000),
+      };
+    }
+  }
+
+  const fallbackCandidate = candidates[candidates.length - 1];
+  return {
+    id: fallbackCandidate.id,
+    seed: Math.floor(rng() * 0x100000000),
+  };
+}
+
 // Types pour la superposition de tuiles
 type TerrainTile = {
   base: TileKind;
   overlay?: TileKind;
   cliffConnections?: string[];
   edge?: IslandEdgePlacement;
+  object?: TerrainObjectPlacement;
 };
 
 function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
@@ -500,6 +730,64 @@ function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
     return true;
   }
   return isLowerTerrainKind(tile.base);
+}
+
+function populateTerrainObjects(
+  tiles: TerrainTile[][],
+  rng: () => number
+) {
+  const height = tiles.length;
+  const width = tiles[0]?.length ?? 0;
+
+  const hasLower = (tx: number, ty: number) =>
+    tileHasLowerTerrain(tiles[ty]?.[tx] ?? null);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      if (tile.base === TILE_KIND.WATER || tile.overlay === TILE_KIND.PATH) {
+        tile.object = undefined;
+        continue;
+      }
+      if (!tileHasLowerTerrain(tile)) {
+        const cliffConnections = computeCliffConnections(x, y, hasLower);
+        if (cliffConnections.size > 0) {
+          tile.object = undefined;
+          continue;
+        }
+      }
+      const placement = chooseTerrainObject(tile.base, rng);
+      tile.object = placement ?? undefined;
+    }
+  }
+}
+
+function createTerrainObjectSeed(
+  seed: number,
+  themeId?: TerrainThemeId
+): number {
+  if (!themeId) {
+    return seed >>> 0;
+  }
+  let hash = seed >>> 0;
+  for (let index = 0; index < themeId.length; index++) {
+    hash = Math.imul(hash ^ themeId.charCodeAt(index), 0x45d9f3b);
+    hash >>>= 0;
+  }
+  return hash >>> 0;
+}
+
+function repopulateTerrainObjects(
+  tiles: TerrainTile[][],
+  seed: number,
+  themeId?: TerrainThemeId
+) {
+  const adjustedSeed = createTerrainObjectSeed(seed, themeId);
+  const rng = createRng(adjustedSeed);
+  populateTerrainObjects(tiles, rng);
 }
 
 function applyTerrainThemeToWorld(
@@ -517,6 +805,9 @@ function applyTerrainThemeToWorld(
       tile.base = theme.base;
       if (tile.overlay && tile.overlay !== TILE_KIND.PATH) {
         delete tile.overlay;
+      }
+      if (tile.object) {
+        tile.object = undefined;
       }
       tile.edge = undefined;
       tile.cliffConnections = undefined;
@@ -538,7 +829,11 @@ function recomputeWorldMetadata(worldTiles: TerrainTile[][]) {
       if (!tile) {
         continue;
       }
-      tile.cliffConnections = connections.length > 0 ? connections : undefined;
+      const hasConnections = connections.length > 0;
+      if (hasConnections && !tileHasLowerTerrain(tile) && tile.object) {
+        tile.object = undefined;
+      }
+      tile.cliffConnections = hasConnections ? connections : undefined;
     }
   }
 
@@ -1681,13 +1976,61 @@ function carvePathOnIsland(
     return [];
   }
 
+  const distanceFromEdge = new Map<CoordKey, number>();
+  const frontier: CoordKey[] = [];
+  for (const key of cells) {
+    const degree = neighborMap.get(key)?.length ?? 0;
+    if (degree < 4) {
+      distanceFromEdge.set(key, 0);
+      frontier.push(key);
+    }
+  }
+
+  for (let index = 0; index < frontier.length; index++) {
+    const current = frontier[index];
+    const currentDistance = distanceFromEdge.get(current) ?? 0;
+    for (const neighbor of neighborMap.get(current) ?? []) {
+      if (distanceFromEdge.has(neighbor)) {
+        continue;
+      }
+      distanceFromEdge.set(neighbor, currentDistance + 1);
+      frontier.push(neighbor);
+    }
+  }
+
+  let maxEdgeDistance = 0;
+  for (const distance of distanceFromEdge.values()) {
+    if (distance > maxEdgeDistance) {
+      maxEdgeDistance = distance;
+    }
+  }
+
+  let candidateStarts = cells;
+  if (maxEdgeDistance > 0) {
+    const MIN_START_DISTANCE = 2;
+    const preferredThreshold = Math.min(maxEdgeDistance, MIN_START_DISTANCE);
+    const preferred = cells.filter(
+      (key) => (distanceFromEdge.get(key) ?? 0) >= preferredThreshold
+    );
+    if (preferred.length > 0) {
+      candidateStarts = preferred;
+    } else {
+      const farthest = cells.filter(
+        (key) => (distanceFromEdge.get(key) ?? 0) === maxEdgeDistance
+      );
+      if (farthest.length > 0) {
+        candidateStarts = farthest;
+      }
+    }
+  }
+
   const maxLength = Math.min(desiredLength, cells.length);
   const minLength = Math.max(1, Math.min(6, maxLength));
   let bestPath: CoordKey[] = [];
 
   for (let targetLength = maxLength; targetLength >= minLength; targetLength--) {
     for (let attempt = 0; attempt < 120; attempt++) {
-      const start = randomChoice(rng, cells);
+      const start = randomChoice(rng, candidateStarts);
       const { previous, distances } = bfsFrom(start, neighborMap, rng);
       if (distances.size <= 1) {
         continue;
@@ -1747,6 +2090,7 @@ function distributeIndices(total: number, count: number): number[] {
 const WORLD_WIDTH = 25;
 const WORLD_HEIGHT = 25;
 const WORLD_SEED = 1247;
+let currentWorldSeed = WORLD_SEED;
 
 const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
   mairie: { x: 12, y: 12 },
@@ -1893,6 +2237,7 @@ const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 const GATE_MARKER_COORD = atlas("mapTile_044.png");
 
 function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
+  currentWorldSeed = seed >>> 0;
   const rng = createRng(seed);
   const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
     Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
@@ -1944,7 +2289,10 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
     }
     tile.base = TILE_KIND.SAND;
     tile.overlay = TILE_KIND.PATH;
+    tile.object = undefined;
   }
+
+  populateTerrainObjects(tiles, rng);
 
   const landmarks = assignLandmarksFromPath(path);
   if (path.length > 0) {
@@ -2716,6 +3064,43 @@ function getPathTileCoord(x: number, y: number): TileCoord {
   return atlas("mapTile_126.png"); // Default: ligne droite nord-sud
 }
 
+function getTerrainObjectSprite(
+  placement: TerrainObjectPlacement,
+  tileset: Tileset
+): { coord: TileCoord; tileset: Tileset } | null {
+  const definition = TERRAIN_OBJECT_CATALOG[placement.id];
+  if (!definition) {
+    return null;
+  }
+
+  const spriteTileset =
+    tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
+
+  if (definition.atlasChoices && definition.atlasChoices.length > 0) {
+    const index = placement.seed % definition.atlasChoices.length;
+    const chosenName = definition.atlasChoices[index];
+    if (chosenName) {
+      const chosen = atlas(chosenName);
+      if (chosen) {
+        return { coord: chosen, tileset: spriteTileset };
+      }
+    }
+  }
+
+  const coord =
+    getRandomTileByCategory(
+      definition.atlasCategory,
+      definition.atlasSubtype,
+      placement.seed
+    ) ?? definition.fallback;
+
+  if (!coord) {
+    return null;
+  }
+
+  return { coord, tileset: spriteTileset };
+}
+
 function getAtlasTile(
   tileKind: TileKind,
   ts: Tileset,
@@ -2790,6 +3175,10 @@ function TileWithTs({
     ? getAtlasTile(terrain.overlay, activeTileset, x, y)
     : null;
 
+  const objectSprite = terrain.object
+    ? getTerrainObjectSprite(terrain.object, activeTileset)
+    : null;
+
   const edgeOverlayCoord = edgePlacement?.touchesOutside
     ? getSandEdgeVariantCoord(
         baseVariantTiles ?? activeTileset.map.sand,
@@ -2801,6 +3190,7 @@ function TileWithTs({
   const overlays = [
     edgeOverlayCoord ? { coord: edgeOverlayCoord, tileset: baseRenderTileset } : null,
     overlayCoord ? { coord: overlayCoord, tileset: activeTileset } : null,
+    objectSprite,
   ].filter((entry): entry is { coord: TileCoord; tileset: Tileset } => Boolean(entry));
 
   return (
@@ -3434,6 +3824,7 @@ export default function ExplorateurIA({
       }
       setSelectedTheme(themeId);
       applyTerrainThemeToWorld(world, theme);
+      repopulateTerrainObjects(world, currentWorldSeed, themeId);
       recomputeWorldMetadata(world);
       forceWorldRefresh((value) => value + 1);
     },
@@ -3444,10 +3835,13 @@ export default function ExplorateurIA({
     if (!isEditMode) {
       return;
     }
-    const { start } = regenerateWorldInPlace();
+    const { seed, start } = regenerateWorldInPlace();
     const theme = TERRAIN_THEMES[selectedTheme];
     if (theme) {
       applyTerrainThemeToWorld(world, theme);
+      repopulateTerrainObjects(world, seed, selectedTheme);
+    } else {
+      repopulateTerrainObjects(world, seed);
     }
     recomputeWorldMetadata(world);
     setPlayer({ x: start.x, y: start.y });
