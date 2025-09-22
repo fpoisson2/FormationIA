@@ -1764,6 +1764,15 @@ const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
   "ethique",
 ];
 
+const PROGRESSION_SEQUENCE: QuarterId[] = [
+  "clarte",
+  "creation",
+  "decision",
+  "ethique",
+];
+
+const PROGRESSION_WITH_GOAL: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+
 type PathMarkerPlacement = { x: number; y: number; coord: TileCoord };
 
 type GeneratedWorld = {
@@ -2050,15 +2059,6 @@ type PathGate = {
   x: number;
   y: number;
 };
-
-const PROGRESSION_SEQUENCE: QuarterId[] = [
-  "clarte",
-  "creation",
-  "decision",
-  "ethique",
-];
-
-const PROGRESSION_WITH_GOAL: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
 
 const PATH_GATES: PathGate[] = [];
 function rebuildPathGates() {
