@@ -251,10 +251,12 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         badge: "Ville interactive",
       },
       layout: {
-        outerClassName: "flex flex-col px-0 pt-0 pb-0 md:px-6 md:pt-10 md:pb-16",
-        innerClassName: "flex-1 max-w-none w-full gap-0 md:gap-12",
+        outerClassName:
+          "flex min-h-[100dvh] flex-col overflow-hidden px-0 pt-0 pb-0 md:min-h-screen md:px-6 md:pt-10 md:pb-16",
+        innerClassName:
+          "flex flex-1 max-w-none w-full gap-0 md:gap-12",
         headerClassName: "hidden md:block",
-        contentClassName: "space-y-0 md:space-y-12",
+        contentClassName: "flex flex-1 flex-col space-y-0 md:space-y-12",
         withLandingGradient: false,
         useDynamicViewportHeight: true,
         withBasePadding: false,

@@ -40,6 +40,8 @@ type Progress = {
 
 const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
+const MIN_TILE_SIZE = 20;
+const MOBILE_VERTICAL_PADDING = 32;
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
 
@@ -1351,26 +1353,73 @@ function TilesetControls({
   );
 }
 
+function measureViewport(): { width: number; height: number } {
+  if (typeof window === "undefined") {
+    return { width: BASE_TILE_SIZE * 10, height: BASE_TILE_SIZE * 10 };
+  }
+
+  const viewport = window.visualViewport;
+  if (viewport) {
+    const width = viewport.width;
+    const height = viewport.height - viewport.offsetTop;
+    return { width, height };
+  }
+
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+function computeTileSize(): number {
+  if (typeof window === "undefined") {
+    return BASE_TILE_SIZE;
+  }
+
+  const { width, height } = measureViewport();
+  if (width <= 0 || height <= 0) {
+    return MIN_TILE_SIZE;
+  }
+
+  const availableHeight = Math.max(0, height - MOBILE_VERTICAL_PADDING);
+  const tileForWidth = width / GRID_W;
+  const tileForHeight = availableHeight / GRID_H;
+  const ideal = Math.floor(Math.min(tileForWidth, tileForHeight));
+  if (!Number.isFinite(ideal) || ideal <= 0) {
+    return MIN_TILE_SIZE;
+  }
+
+  return Math.max(MIN_TILE_SIZE, Math.min(BASE_TILE_SIZE, ideal));
+}
+
 function useResponsiveTileSize(): number {
-  const [size, setSize] = useState(BASE_TILE_SIZE);
+  const [size, setSize] = useState(() => computeTileSize());
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
+
     const recompute = () => {
-      const width = window.innerWidth;
-      if (width < 480) {
-        setSize(24);
-      } else if (width < 768) {
-        setSize(28);
-      } else {
-        setSize(BASE_TILE_SIZE);
-      }
+      const nextSize = computeTileSize();
+      setSize((current) => (current === nextSize ? current : nextSize));
     };
+
     recompute();
     window.addEventListener("resize", recompute);
-    return () => window.removeEventListener("resize", recompute);
+    window.addEventListener("orientationchange", recompute);
+
+    const viewport = window.visualViewport;
+    if (viewport) {
+      viewport.addEventListener("resize", recompute);
+      viewport.addEventListener("scroll", recompute);
+    }
+
+    return () => {
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("orientationchange", recompute);
+      if (viewport) {
+        viewport.removeEventListener("resize", recompute);
+        viewport.removeEventListener("scroll", recompute);
+      }
+    };
   }, []);
 
   return size;
