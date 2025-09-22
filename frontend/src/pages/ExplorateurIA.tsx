@@ -1375,12 +1375,14 @@ export function computeIslandEdgePlacements(
   return placements;
 }
 
-function smoothIslandShape(island: Set<CoordKey>, passes = 2) {
-  if (island.size === 0 || passes <= 0) {
+function smoothIslandShape(island: Set<CoordKey>) {
+  if (island.size === 0) {
     return;
   }
 
-  for (let pass = 0; pass < passes; pass++) {
+  const maxIterations = Math.max(1, island.size);
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
     const toRemove: CoordKey[] = [];
     for (const key of island) {
       const [x, y] = coordFromKey(key);
@@ -1399,7 +1401,7 @@ function smoothIslandShape(island: Set<CoordKey>, passes = 2) {
         toRemove.push(key);
       }
     }
-    if (toRemove.length === 0 || toRemove.length === island.size) {
+    if (toRemove.length === 0 || toRemove.length >= island.size) {
       break;
     }
     for (const key of toRemove) {
@@ -1588,7 +1590,7 @@ function generateWorld(): GeneratedWorld {
 
   const island = generateIslandCells(WORLD_WIDTH, WORLD_HEIGHT, rng);
   fillSmallLakesInIsland(island, WORLD_WIDTH, WORLD_HEIGHT);
-  smoothIslandShape(island, 2);
+  smoothIslandShape(island);
 
   for (const key of island) {
     const [x, y] = coordFromKey(key as CoordKey);
