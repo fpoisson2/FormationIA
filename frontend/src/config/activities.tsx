@@ -50,6 +50,7 @@ export interface ActivityLayoutOptions {
   contentAs?: keyof JSX.IntrinsicElements;
   withLandingGradient?: boolean;
   useDynamicViewportHeight?: boolean;
+  withBasePadding?: boolean;
 }
 
 export interface ActivityLayoutConfig
@@ -256,6 +257,7 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         contentClassName: "space-y-0 md:space-y-12",
         withLandingGradient: false,
         useDynamicViewportHeight: true,
+        withBasePadding: false,
       },
       card: {
         title: "L’Explorateur IA",
@@ -323,6 +325,7 @@ const SERIALIZABLE_LAYOUT_KEYS: Array<keyof ActivityLayoutOptions> = [
   "contentAs",
   "withLandingGradient",
   "useDynamicViewportHeight",
+  "withBasePadding",
 ];
 
 function resolveComponent(
@@ -653,6 +656,8 @@ function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
     contentClassName: definition.layout?.contentClassName,
     contentAs: definition.layout?.contentAs,
     withLandingGradient: definition.layout?.withLandingGradient,
+    useDynamicViewportHeight: definition.layout?.useDynamicViewportHeight,
+    withBasePadding: definition.layout?.withBasePadding,
   };
   return base;
 }
