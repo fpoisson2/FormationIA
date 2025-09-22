@@ -42,6 +42,7 @@ const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
+const MOBILE_MAX_TILE_SIZE = 44;
 type TileScaleMode = "contain" | "cover";
 
 const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
@@ -1369,7 +1370,10 @@ function measureViewport(): { width: number; height: number } {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
-function computeTileSize(mode: TileScaleMode = "contain"): number {
+function computeTileSize(
+  mode: TileScaleMode = "contain",
+  maxTileSize = BASE_TILE_SIZE
+): number {
   if (typeof window === "undefined") {
     return BASE_TILE_SIZE;
   }
@@ -1390,17 +1394,22 @@ function computeTileSize(mode: TileScaleMode = "contain"): number {
     return MIN_TILE_SIZE;
   }
 
+  const safeMax = Math.max(maxTileSize, MIN_TILE_SIZE);
+
   const fallback = Number.isFinite(containFit) && containFit > 0
     ? Math.min(MIN_TILE_SIZE, containFit)
     : MIN_TILE_SIZE;
-  const capped = Math.min(BASE_TILE_SIZE, rawFit);
+  const capped = Math.min(safeMax, rawFit);
   const normalized = Math.max(capped, fallback);
 
   return Math.round(normalized * 100) / 100;
 }
 
-function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
-  const [size, setSize] = useState(() => computeTileSize(mode));
+function useResponsiveTileSize(
+  mode: TileScaleMode = "contain",
+  maxTileSize = BASE_TILE_SIZE
+): number {
+  const [size, setSize] = useState(() => computeTileSize(mode, maxTileSize));
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1408,7 +1417,7 @@ function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
     }
 
     const recompute = () => {
-      const nextSize = computeTileSize(mode);
+      const nextSize = computeTileSize(mode, maxTileSize);
       setSize((current) => (current === nextSize ? current : nextSize));
     };
 
@@ -1430,7 +1439,7 @@ function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
         viewport.removeEventListener("scroll", recompute);
       }
     };
-  }, [mode]);
+  }, [mode, maxTileSize]);
 
   return size;
 }
@@ -3919,7 +3928,10 @@ export default function ExplorateurIA({
   isEditMode = false,
 }: ActivityProps) {
   const isMobile = useIsMobile();
-  const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain");
+  const tileSize = useResponsiveTileSize(
+    "contain",
+    isMobile ? MOBILE_MAX_TILE_SIZE : BASE_TILE_SIZE
+  );
   const cellSize = tileSize + TILE_GAP;
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
@@ -4532,7 +4544,9 @@ export default function ExplorateurIA({
           >
             <div
               className={
-                isMobile ? "flex h-full w-full" : "inline-block p-3"
+                isMobile
+                  ? "flex h-full w-full items-center justify-center"
+                  : "inline-block p-3"
               }
             >
               <div
