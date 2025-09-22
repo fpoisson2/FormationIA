@@ -419,6 +419,158 @@ const TILE_KIND = {
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
 
+type TerrainObjectDefinition = {
+  compatibleTerrains: readonly TileKind[];
+  atlasCategory: AtlasCategory;
+  atlasSubtype?: string;
+  weight: number;
+  fallback: TileCoord;
+};
+
+const TERRAIN_OBJECT_CATALOG = {
+  oakTree: {
+    compatibleTerrains: [
+      TILE_KIND.GRASS,
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_GRAY,
+    ] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 3,
+    fallback: atlas("mapTile_115.png"),
+  },
+  pineTree: {
+    compatibleTerrains: [
+      TILE_KIND.GRASS,
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_GRAY,
+      TILE_KIND.SNOW,
+    ] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 2,
+    fallback: atlas("mapTile_040.png"),
+  },
+  snowyTree: {
+    compatibleTerrains: [TILE_KIND.SNOW] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 4,
+    fallback: atlas("mapTile_110.png"),
+  },
+  deadTree: {
+    compatibleTerrains: [TILE_KIND.DIRT, TILE_KIND.DIRT_GRAY] as const,
+    atlasCategory: "object",
+    atlasSubtype: "tree",
+    weight: 1,
+    fallback: atlas("mapTile_120.png"),
+  },
+  cactusPlant: {
+    compatibleTerrains: [TILE_KIND.SAND] as const,
+    atlasCategory: "object",
+    atlasSubtype: "plant",
+    weight: 3,
+    fallback: atlas("mapTile_035.png"),
+  },
+  flowerShrub: {
+    compatibleTerrains: [TILE_KIND.GRASS, TILE_KIND.FIELD] as const,
+    atlasCategory: "object",
+    atlasSubtype: "flower",
+    weight: 2,
+    fallback: atlas("mapTile_054.png"),
+  },
+  mushroomPatch: {
+    compatibleTerrains: [TILE_KIND.GRASS, TILE_KIND.FIELD, TILE_KIND.SNOW] as const,
+    atlasCategory: "object",
+    atlasSubtype: "flower_whitebg",
+    weight: 1,
+    fallback: atlas("mapTile_104.png"),
+  },
+  smallRock: {
+    compatibleTerrains: [
+      TILE_KIND.GRASS,
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_GRAY,
+      TILE_KIND.SAND,
+      TILE_KIND.SNOW,
+    ] as const,
+    atlasCategory: "object",
+    atlasSubtype: "rock",
+    weight: 1,
+    fallback: atlas("mapTile_039.png"),
+  },
+} as const satisfies Record<string, TerrainObjectDefinition>;
+
+type TerrainObjectId = keyof typeof TERRAIN_OBJECT_CATALOG;
+
+type TerrainObjectPlacement = {
+  id: TerrainObjectId;
+  seed: number;
+};
+
+type TerrainObjectPoolEntry = {
+  id: TerrainObjectId;
+  weight?: number;
+};
+
+type TerrainObjectPool = {
+  density: number;
+  objects: readonly TerrainObjectPoolEntry[];
+};
+
+const TERRAIN_OBJECT_POOLS = {
+  [TILE_KIND.GRASS]: {
+    density: 0.35,
+    objects: [
+      { id: "oakTree", weight: 3 },
+      { id: "pineTree", weight: 2 },
+      { id: "flowerShrub", weight: 2 },
+      { id: "mushroomPatch" },
+      { id: "smallRock" },
+    ],
+  },
+  [TILE_KIND.DIRT]: {
+    density: 0.3,
+    objects: [
+      { id: "deadTree", weight: 2 },
+      { id: "oakTree" },
+      { id: "smallRock", weight: 2 },
+      { id: "mushroomPatch" },
+    ],
+  },
+  [TILE_KIND.DIRT_GRAY]: {
+    density: 0.28,
+    objects: [
+      { id: "deadTree", weight: 2 },
+      { id: "pineTree" },
+      { id: "smallRock", weight: 3 },
+    ],
+  },
+  [TILE_KIND.SAND]: {
+    density: 0.22,
+    objects: [
+      { id: "cactusPlant", weight: 3 },
+      { id: "smallRock", weight: 2 },
+    ],
+  },
+  [TILE_KIND.SNOW]: {
+    density: 0.32,
+    objects: [
+      { id: "snowyTree", weight: 3 },
+      { id: "pineTree", weight: 2 },
+      { id: "smallRock" },
+      { id: "mushroomPatch" },
+    ],
+  },
+  [TILE_KIND.FIELD]: {
+    density: 0.18,
+    objects: [
+      { id: "flowerShrub", weight: 2 },
+      { id: "mushroomPatch" },
+    ],
+  },
+} as const satisfies Partial<Record<TileKind, TerrainObjectPool>>;
+
 const LOWER_TERRAIN_TYPES = new Set<TileKind>([
   TILE_KIND.WATER,
   TILE_KIND.SAND,
@@ -486,12 +638,74 @@ function isLowerTerrainKind(kind: TileKind | null | undefined): boolean {
   return kind !== null && kind !== undefined && LOWER_TERRAIN_TYPES.has(kind);
 }
 
+function chooseTerrainObject(
+  tileKind: TileKind,
+  rng: () => number
+): TerrainObjectPlacement | null {
+  const pool = TERRAIN_OBJECT_POOLS[tileKind];
+  if (!pool) {
+    return null;
+  }
+
+  const density = Math.max(0, Math.min(1, pool.density));
+  if (density <= 0 || rng() >= density) {
+    return null;
+  }
+
+  const candidates = pool.objects
+    .map((entry) => {
+      const definition = TERRAIN_OBJECT_CATALOG[entry.id];
+      if (!definition) {
+        return null;
+      }
+      if (!definition.compatibleTerrains.includes(tileKind)) {
+        return null;
+      }
+      const weight = definition.weight * (entry.weight ?? 1);
+      if (weight <= 0) {
+        return null;
+      }
+      return { id: entry.id, weight };
+    })
+    .filter(
+      (candidate): candidate is { id: TerrainObjectId; weight: number } =>
+        candidate !== null
+    );
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const totalWeight = candidates.reduce((sum, candidate) => sum + candidate.weight, 0);
+  if (totalWeight <= 0) {
+    return null;
+  }
+
+  let selection = rng() * totalWeight;
+  for (const candidate of candidates) {
+    selection -= candidate.weight;
+    if (selection <= 0) {
+      return {
+        id: candidate.id,
+        seed: Math.floor(rng() * 0x100000000),
+      };
+    }
+  }
+
+  const fallbackCandidate = candidates[candidates.length - 1];
+  return {
+    id: fallbackCandidate.id,
+    seed: Math.floor(rng() * 0x100000000),
+  };
+}
+
 // Types pour la superposition de tuiles
 type TerrainTile = {
   base: TileKind;
   overlay?: TileKind;
   cliffConnections?: string[];
   edge?: IslandEdgePlacement;
+  object?: TerrainObjectPlacement;
 };
 
 function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
@@ -517,6 +731,9 @@ function applyTerrainThemeToWorld(
       tile.base = theme.base;
       if (tile.overlay && tile.overlay !== TILE_KIND.PATH) {
         delete tile.overlay;
+      }
+      if (tile.object) {
+        tile.object = undefined;
       }
       tile.edge = undefined;
       tile.cliffConnections = undefined;
@@ -1944,6 +2161,22 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
     }
     tile.base = TILE_KIND.SAND;
     tile.overlay = TILE_KIND.PATH;
+    tile.object = undefined;
+  }
+
+  for (let y = 0; y < WORLD_HEIGHT; y++) {
+    for (let x = 0; x < WORLD_WIDTH; x++) {
+      const tile = tiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      if (tile.base === TILE_KIND.WATER || tile.overlay === TILE_KIND.PATH) {
+        tile.object = undefined;
+        continue;
+      }
+      const placement = chooseTerrainObject(tile.base, rng);
+      tile.object = placement ?? undefined;
+    }
   }
 
   const landmarks = assignLandmarksFromPath(path);
@@ -2716,6 +2949,32 @@ function getPathTileCoord(x: number, y: number): TileCoord {
   return atlas("mapTile_126.png"); // Default: ligne droite nord-sud
 }
 
+function getTerrainObjectSprite(
+  placement: TerrainObjectPlacement,
+  tileset: Tileset
+): { coord: TileCoord; tileset: Tileset } | null {
+  const definition = TERRAIN_OBJECT_CATALOG[placement.id];
+  if (!definition) {
+    return null;
+  }
+
+  const coord =
+    getRandomTileByCategory(
+      definition.atlasCategory,
+      definition.atlasSubtype,
+      placement.seed
+    ) ?? definition.fallback;
+
+  if (!coord) {
+    return null;
+  }
+
+  const spriteTileset =
+    tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
+
+  return { coord, tileset: spriteTileset };
+}
+
 function getAtlasTile(
   tileKind: TileKind,
   ts: Tileset,
@@ -2790,6 +3049,10 @@ function TileWithTs({
     ? getAtlasTile(terrain.overlay, activeTileset, x, y)
     : null;
 
+  const objectSprite = terrain.object
+    ? getTerrainObjectSprite(terrain.object, activeTileset)
+    : null;
+
   const edgeOverlayCoord = edgePlacement?.touchesOutside
     ? getSandEdgeVariantCoord(
         baseVariantTiles ?? activeTileset.map.sand,
@@ -2801,6 +3064,7 @@ function TileWithTs({
   const overlays = [
     edgeOverlayCoord ? { coord: edgeOverlayCoord, tileset: baseRenderTileset } : null,
     overlayCoord ? { coord: overlayCoord, tileset: activeTileset } : null,
+    objectSprite,
   ].filter((entry): entry is { coord: TileCoord; tileset: Tileset } => Boolean(entry));
 
   return (
