@@ -215,7 +215,6 @@ function collectWalkableNumberTiles(): NumberTile[] {
 }
 
 const NUMBER_TILES = collectWalkableNumberTiles();
-const NUMBER_TILE_COORDS = NUMBER_TILES.map((item) => item.coord);
 const NUMBER_TILE_MAP = new Map<number, TileCoord>(
   NUMBER_TILES.map(({ value, coord }) => [value, coord])
 );
@@ -1601,13 +1600,13 @@ const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
   "ethique",
 ];
 
-type PathNumberPlacement = { x: number; y: number; coord: TileCoord };
+type PathMarkerPlacement = { x: number; y: number; coord: TileCoord };
 
 type GeneratedWorld = {
   tiles: TerrainTile[][];
   path: Coord[];
   landmarks: Record<QuarterId, { x: number; y: number }>;
-  numbers: PathNumberPlacement[];
+  markers: PathMarkerPlacement[];
 };
 
 function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; y: number }> {
@@ -1631,6 +1630,9 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
 
   return assignments;
 }
+
+const START_MARKER_COORD = atlas("mapTile_179.png");
+const GOAL_MARKER_COORD = atlas("mapTile_044.png");
 
 function generateWorld(): GeneratedWorld {
   const rng = createRng(WORLD_SEED);
@@ -1685,25 +1687,23 @@ function generateWorld(): GeneratedWorld {
     tile.overlay = TILE_KIND.PATH;
   }
 
-  const numbers: PathNumberPlacement[] = [];
-  const maxDigits = Math.min(NUMBER_TILE_COORDS.length, path.length);
-  if (maxDigits > 0) {
-    const indices = distributeIndices(path.length, maxDigits);
-    indices.forEach((rawIndex, digitIndex) => {
-      const coord = NUMBER_TILE_COORDS[digitIndex];
-      if (!coord) {
-        return;
-      }
-      const index = Math.min(Math.max(rawIndex, 0), path.length - 1);
-      const [x, y] = path[index] ?? path[0];
-      const spriteCoord = [...coord] as TileCoord;
-      numbers.push({ x, y, coord: spriteCoord });
-    });
+  const markers: PathMarkerPlacement[] = [];
+  let startMarker: [number, number] | null = null;
+  if (path.length > 0) {
+    const [startX, startY] = path[0];
+    startMarker = [startX, startY];
+    markers.push({ x: startX, y: startY, coord: START_MARKER_COORD });
+  }
+  if (path.length > 0) {
+    const [goalX, goalY] = path[path.length - 1];
+    if (!startMarker || goalX !== startMarker[0] || goalY !== startMarker[1]) {
+      markers.push({ x: goalX, y: goalY, coord: GOAL_MARKER_COORD });
+    }
   }
 
   const landmarks = assignLandmarksFromPath(path);
 
-  return { tiles, path, landmarks, numbers };
+  return { tiles, path, landmarks, markers };
 }
 
 // Générée une seule fois et mise en cache
@@ -1720,8 +1720,8 @@ const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
-const NUMBER_COORD_BY_KEY = new Map<string, TileCoord>(
-  generatedWorld.numbers.map((placement) => [
+const MARKER_COORD_BY_KEY = new Map<string, TileCoord>(
+  generatedWorld.markers.map((placement) => [
     `${placement.x}-${placement.y}`,
     placement.coord,
   ])
@@ -2269,14 +2269,14 @@ function TileWithTs({
   x,
   y,
   tileSize,
-  numberCoord,
+  markerCoord,
 }: {
   terrain: TerrainTile;
   ts: Tileset;
   x: number;
   y: number;
   tileSize: number;
-  numberCoord?: TileCoord | null;
+  markerCoord?: TileCoord | null;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
 
@@ -2299,7 +2299,7 @@ function TileWithTs({
       )
     : null;
 
-  const overlays = [edgeOverlayCoord, overlayCoord, numberCoord].filter(
+  const overlays = [edgeOverlayCoord, overlayCoord, markerCoord].filter(
     (coord): coord is TileCoord => Array.isArray(coord)
   );
 
@@ -3218,7 +3218,7 @@ export default function ExplorateurIA({
               >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
-                    const numberCoord = NUMBER_COORD_BY_KEY.get(`${x}-${y}`);
+                    const markerCoord = MARKER_COORD_BY_KEY.get(`${x}-${y}`);
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
                     return (
                       <div key={`${x}-${y}`} className="relative">
@@ -3228,7 +3228,7 @@ export default function ExplorateurIA({
                           x={x}
                           y={y}
                           tileSize={tileSize}
-                          numberCoord={numberCoord}
+                          markerCoord={markerCoord}
                         />
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
@@ -3240,11 +3240,7 @@ export default function ExplorateurIA({
                               <button
                                 key={building.id}
                                 onClick={() => setOpen(building.id)}
-                                className="absolute inset-1 rounded-lg border-2 flex items-center justify-center shadow"
-                                style={{
-                                  borderColor: building.color,
-                                  background: "rgba(255,255,255,0.9)",
-                                }}
+                                className="absolute inset-1 rounded-lg flex items-center justify-center shadow bg-white/90"
                                 title={building.label}
                               >
                                 <BuildingSprite
