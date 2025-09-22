@@ -49,6 +49,7 @@ export interface ActivityLayoutOptions {
   contentClassName?: string;
   contentAs?: keyof JSX.IntrinsicElements;
   withLandingGradient?: boolean;
+  useDynamicViewportHeight?: boolean;
 }
 
 export interface ActivityLayoutConfig
@@ -249,11 +250,12 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         badge: "Ville interactive",
       },
       layout: {
-        outerClassName: "min-h-[100dvh] px-0 pt-0 pb-0 md:px-6 md:pt-10 md:pb-16",
-        innerClassName: "max-w-none w-full gap-0 md:gap-12",
+        outerClassName: "flex flex-col px-0 pt-0 pb-0 md:px-6 md:pt-10 md:pb-16",
+        innerClassName: "flex-1 max-w-none w-full gap-0 md:gap-12",
         headerClassName: "hidden md:block",
         contentClassName: "space-y-0 md:space-y-12",
         withLandingGradient: false,
+        useDynamicViewportHeight: true,
       },
       card: {
         title: "L’Explorateur IA",
@@ -320,6 +322,7 @@ const SERIALIZABLE_LAYOUT_KEYS: Array<keyof ActivityLayoutOptions> = [
   "contentClassName",
   "contentAs",
   "withLandingGradient",
+  "useDynamicViewportHeight",
 ];
 
 function resolveComponent(

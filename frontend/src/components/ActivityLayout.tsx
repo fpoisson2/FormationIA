@@ -27,6 +27,7 @@ interface ActivityLayoutProps {
   contentAs?: ContentElement;
   titleAlign?: "left" | "center";
   withLandingGradient?: boolean;
+  useDynamicViewportHeight?: boolean;
   onHeaderEdit?: (field: 'eyebrow' | 'title' | 'subtitle' | 'badge', value: string) => void;
   activityConfig?: any;
   onSaveActivity?: (config: any) => void;
@@ -52,6 +53,7 @@ function ActivityLayout({
   activityConfig,
   onSaveActivity,
   withLandingGradient = true,
+  useDynamicViewportHeight = false,
 }: ActivityLayoutProps): JSX.Element {
   const { isEditMode, token } = useAdminAuth();
   const [isSaving, setIsSaving] = useState(false);
@@ -77,7 +79,8 @@ function ActivityLayout({
   return (
     <div
       className={combineClasses(
-        "min-h-screen px-6 pb-16 pt-10 text-[color:var(--brand-black)]",
+        useDynamicViewportHeight ? "min-h-[100dvh]" : "min-h-screen",
+        "px-6 pb-16 pt-10 text-[color:var(--brand-black)]",
         withLandingGradient ? "landing-gradient" : "",
         outerClassName
       )}
