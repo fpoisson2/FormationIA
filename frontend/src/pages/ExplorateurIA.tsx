@@ -1644,7 +1644,7 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
 }
 
 const START_MARKER_COORD = atlas("mapTile_179.png");
-const GOAL_MARKER_COORD = atlas("mapTile_044.png");
+const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 
 function generateWorld(): GeneratedWorld {
   const rng = createRng(WORLD_SEED);
@@ -1699,21 +1699,26 @@ function generateWorld(): GeneratedWorld {
     tile.overlay = TILE_KIND.PATH;
   }
 
-  const markers: PathMarkerPlacement[] = [];
-  let startMarker: [number, number] | null = null;
-  if (path.length > 0) {
-    const [startX, startY] = path[0];
-    startMarker = [startX, startY];
-    markers.push({ x: startX, y: startY, coord: START_MARKER_COORD });
-  }
+  const landmarks = assignLandmarksFromPath(path);
   if (path.length > 0) {
     const [goalX, goalY] = path[path.length - 1];
-    if (!startMarker || goalX !== startMarker[0] || goalY !== startMarker[1]) {
+    landmarks.mairie = { x: goalX, y: goalY };
+  }
+
+  const markers: PathMarkerPlacement[] = [];
+  const startCoord = path[0];
+  if (startCoord) {
+    const [startX, startY] = startCoord;
+    markers.push({ x: startX, y: startY, coord: START_MARKER_COORD });
+  }
+
+  const goalCoord = landmarks.mairie ?? FALLBACK_LANDMARKS.mairie;
+  if (goalCoord) {
+    const { x: goalX, y: goalY } = goalCoord;
+    if (!startCoord || goalX !== startCoord[0] || goalY !== startCoord[1]) {
       markers.push({ x: goalX, y: goalY, coord: GOAL_MARKER_COORD });
     }
   }
-
-  const landmarks = assignLandmarksFromPath(path);
 
   return { tiles, path, landmarks, markers };
 }
@@ -1778,10 +1783,16 @@ const buildings: Array<{
   };
 });
 
-const START = {
-  x: generatedWorld.landmarks.mairie?.x ?? FALLBACK_LANDMARKS.mairie.x,
-  y: generatedWorld.landmarks.mairie?.y ?? FALLBACK_LANDMARKS.mairie.y,
-};
+const START = (() => {
+  const firstStep = generatedWorld.path[0];
+  if (firstStep) {
+    const [x, y] = firstStep;
+    return { x, y };
+  }
+  const fallback =
+    generatedWorld.landmarks.mairie ?? FALLBACK_LANDMARKS.mairie;
+  return { x: fallback.x, y: fallback.y };
+})();
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
