@@ -654,6 +654,7 @@ type Tileset = {
 const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
 
 const BUILTIN_GROUND_VARIANTS = {
+  grass: deriveSandTilesFromAtlas("grass"),
   dirt: deriveSandTilesFromAtlas("dirt_brown"),
   dirtGray: deriveSandTilesFromAtlas("dirt_gray"),
   snow: deriveSandTilesFromAtlas("ice"),
@@ -1783,8 +1784,8 @@ const START_MARKER_COORD = atlas("mapTile_179.png");
 const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 const GATE_MARKER_COORD = atlas("mapTile_044.png");
 
-function generateWorld(): GeneratedWorld {
-  const rng = createRng(WORLD_SEED);
+function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
+  const rng = createRng(seed);
   const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
     Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
   );
@@ -1874,16 +1875,23 @@ const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
-const MARKER_COORD_BY_KEY = new Map<string, TileCoord>(
-  generatedWorld.markers.map((placement) => [
-    `${placement.x}-${placement.y}`,
-    placement.coord,
-  ])
-);
+const MARKER_COORD_BY_KEY = new Map<string, TileCoord>();
+function updateMarkerCoordCache(markers: PathMarkerPlacement[]) {
+  MARKER_COORD_BY_KEY.clear();
+  for (const placement of markers) {
+    MARKER_COORD_BY_KEY.set(`${placement.x}-${placement.y}`, placement.coord);
+  }
+}
+updateMarkerCoordCache(generatedWorld.markers);
 
-const PATH_INDEX_BY_COORD = new Map<CoordKey, number>(
-  generatedWorld.path.map(([x, y], index) => [coordKey(x, y), index] as const)
-);
+const PATH_INDEX_BY_COORD = new Map<CoordKey, number>();
+function updatePathIndexCache(path: Coord[]) {
+  PATH_INDEX_BY_COORD.clear();
+  path.forEach(([x, y], index) => {
+    PATH_INDEX_BY_COORD.set(coordKey(x, y), index);
+  });
+}
+updatePathIndexCache(generatedWorld.path);
 
 const BUILDING_META: Record<
   QuarterId,
@@ -1911,18 +1919,22 @@ const buildings: Array<{
   label: string;
   color: string;
   number?: number;
-}> = BUILDING_DISPLAY_ORDER.map((id) => {
-  const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
-  const meta = BUILDING_META[id];
-  return {
-    id,
-    x: landmark.x,
-    y: landmark.y,
-    label: meta.label,
-    color: meta.color,
-    number: meta.number,
-  };
-});
+}> = [];
+function rebuildBuildings() {
+  buildings.splice(0, buildings.length, ...BUILDING_DISPLAY_ORDER.map((id) => {
+    const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
+    const meta = BUILDING_META[id];
+    return {
+      id,
+      x: landmark.x,
+      y: landmark.y,
+      label: meta.label,
+      color: meta.color,
+      number: meta.number,
+    };
+  }));
+}
+rebuildBuildings();
 
 type PathGate = {
   stage: QuarterId;
@@ -1937,37 +1949,95 @@ const PROGRESSION_SEQUENCE: QuarterId[] = [
   "ethique",
 ];
 
-const PATH_GATES: PathGate[] = PROGRESSION_SEQUENCE.map((stage) => {
-  const building = buildings.find((candidate) => candidate.id === stage);
-  if (!building) {
-    return null;
+const PATH_GATES: PathGate[] = [];
+function rebuildPathGates() {
+  PATH_GATES.splice(0, PATH_GATES.length);
+  for (const stage of PROGRESSION_SEQUENCE) {
+    const building = buildings.find((candidate) => candidate.id === stage);
+    if (!building) {
+      continue;
+    }
+    const stageIndex = PATH_INDEX_BY_COORD.get(coordKey(building.x, building.y));
+    if (stageIndex === undefined) {
+      continue;
+    }
+    const gateCoord = generatedWorld.path[stageIndex + 1];
+    if (!gateCoord) {
+      continue;
+    }
+    PATH_GATES.push({ stage, x: gateCoord[0], y: gateCoord[1] });
   }
-  const stageIndex = PATH_INDEX_BY_COORD.get(coordKey(building.x, building.y));
-  if (stageIndex === undefined) {
-    return null;
-  }
-  const gateCoord = generatedWorld.path[stageIndex + 1];
-  if (!gateCoord) {
-    return null;
-  }
-  return { stage, x: gateCoord[0], y: gateCoord[1] };
-}).filter((gate): gate is PathGate => Boolean(gate));
+}
+rebuildPathGates();
 
 const GATE_BY_COORD = new Map<CoordKey, PathGate>();
-for (const gate of PATH_GATES) {
-  GATE_BY_COORD.set(coordKey(gate.x, gate.y), gate);
+function rebuildGateLookup() {
+  GATE_BY_COORD.clear();
+  for (const gate of PATH_GATES) {
+    GATE_BY_COORD.set(coordKey(gate.x, gate.y), gate);
+  }
 }
+rebuildGateLookup();
 
-const START = (() => {
+const START = { x: 0, y: 0 };
+function updateStartFromWorld() {
   const firstStep = generatedWorld.path[0];
   if (firstStep) {
-    const [x, y] = firstStep;
-    return { x, y };
+    START.x = firstStep[0];
+    START.y = firstStep[1];
+    return;
   }
   const fallback =
     generatedWorld.landmarks.mairie ?? FALLBACK_LANDMARKS.mairie;
-  return { x: fallback.x, y: fallback.y };
-})();
+  START.x = fallback.x;
+  START.y = fallback.y;
+}
+updateStartFromWorld();
+
+function randomWorldSeed(): number {
+  return Math.floor(Math.random() * 1_000_000) + 1;
+}
+
+function regenerateWorldInPlace(seed: number = randomWorldSeed()): {
+  seed: number;
+  start: { x: number; y: number };
+} {
+  const nextWorld = generateWorld(seed);
+
+  world.length = 0;
+  for (const row of nextWorld.tiles) {
+    world.push(row.map((tile) => ({ ...tile })));
+  }
+  generatedWorld.tiles = world;
+
+  generatedWorld.path.length = 0;
+  generatedWorld.path.push(...nextWorld.path);
+
+  generatedWorld.markers.length = 0;
+  generatedWorld.markers.push(...nextWorld.markers);
+
+  const landmarkKeys = Object.keys({ ...generatedWorld.landmarks }) as QuarterId[];
+  for (const key of landmarkKeys) {
+    const nextLandmark = nextWorld.landmarks[key] ?? FALLBACK_LANDMARKS[key];
+    generatedWorld.landmarks[key] = { x: nextLandmark.x, y: nextLandmark.y };
+  }
+
+  updateMarkerCoordCache(generatedWorld.markers);
+  updatePathIndexCache(generatedWorld.path);
+  rebuildBuildings();
+  rebuildPathGates();
+  rebuildGateLookup();
+  updateStartFromWorld();
+
+  if (_worldCache) {
+    _worldCache.tiles = world;
+    _worldCache.path = generatedWorld.path;
+    _worldCache.markers = generatedWorld.markers;
+    _worldCache.landmarks = generatedWorld.landmarks;
+  }
+
+  return { seed, start: { x: START.x, y: START.y } };
+}
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -2256,6 +2326,32 @@ function resolveEdgeDirection(orientation: EdgeOrientation): EdgeDirection | nul
   return EDGE_DIRECTION_SET.has(key) ? key : null;
 }
 
+const DIAGONAL_EDGE_NAMES = new Set([
+  "northeast",
+  "northwest",
+  "southeast",
+  "southwest",
+]);
+
+function isDiagonalEdgeOrientation(orientation: EdgeOrientation): boolean {
+  if (orientation.length === 0) {
+    return false;
+  }
+  if (orientation.length === 1) {
+    return DIAGONAL_EDGE_NAMES.has(orientation[0]);
+  }
+  if (orientation.length === 2) {
+    const values = new Set(orientation);
+    return (
+      (values.has("north") && values.has("east")) ||
+      (values.has("north") && values.has("west")) ||
+      (values.has("south") && values.has("east")) ||
+      (values.has("south") && values.has("west"))
+    );
+  }
+  return false;
+}
+
 function getSandEdgeVariantCoord(
   sandTiles: SandTiles,
   orientation: EdgeOrientation,
@@ -2282,11 +2378,14 @@ function getSandTileCoord(
   const sandTiles = overrides ?? ts.map.sand;
   const tile = world[y]?.[x];
   if (tile?.edge && !tile.edge.touchesOutside) {
-    const oriented = getSandEdgeVariantCoord(
-      sandTiles,
-      tile.edge.orientation,
-      tile.edge.variant
-    );
+    const orientation = tile.edge.orientation;
+    const prefersInterior =
+      tile.edge.variant !== "interior" && isDiagonalEdgeOrientation(orientation);
+    const variantToUse = prefersInterior ? "interior" : tile.edge.variant;
+    let oriented = getSandEdgeVariantCoord(sandTiles, orientation, variantToUse);
+    if (!oriented && prefersInterior) {
+      oriented = getSandEdgeVariantCoord(sandTiles, orientation, "exterior");
+    }
     if (oriented) {
       return oriented;
     }
@@ -2488,7 +2587,9 @@ function TileWithTs({
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
   const baseVariantTiles =
-    terrain.base === TILE_KIND.DIRT
+    terrain.base === TILE_KIND.GRASS
+      ? BUILTIN_GROUND_VARIANTS.grass
+      : terrain.base === TILE_KIND.DIRT
       ? BUILTIN_GROUND_VARIANTS.dirt
       : terrain.base === TILE_KIND.DIRT_GRAY
       ? BUILTIN_GROUND_VARIANTS.dirtGray
@@ -3204,7 +3305,7 @@ export default function ExplorateurIA({
   });
   const [celebrate, setCelebrate] = useState(false);
   const [tileset, setTileset] = useTileset();
-  const [, forceWorldRefresh] = useState(0);
+  const [worldVersion, forceWorldRefresh] = useState(0);
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
@@ -3247,7 +3348,7 @@ export default function ExplorateurIA({
       }
     }
     return active;
-  }, [isQuarterCompleted]);
+  }, [isQuarterCompleted, worldVersion]);
 
   const handleThemeChange = useCallback(
     (themeId: TerrainThemeId) => {
@@ -3265,6 +3366,20 @@ export default function ExplorateurIA({
     },
     [forceWorldRefresh, isEditMode]
   );
+
+  const handleRegenerateWorld = useCallback(() => {
+    if (!isEditMode) {
+      return;
+    }
+    const { start } = regenerateWorldInPlace();
+    const theme = TERRAIN_THEMES[selectedTheme];
+    if (theme) {
+      applyTerrainThemeToWorld(world, theme);
+    }
+    recomputeWorldMetadata(world);
+    setPlayer({ x: start.x, y: start.y });
+    forceWorldRefresh((value) => value + 1);
+  }, [forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,
@@ -3708,8 +3823,15 @@ export default function ExplorateurIA({
                   );
                 })}
               </div>
+              <button
+                type="button"
+                onClick={handleRegenerateWorld}
+                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
+              >
+                Régénérer la forme
+              </button>
               <p className="mt-3 text-xs text-slate-500">
-                Choisissez un style pour régénérer l'île entière avec un nouveau terrain. Le changement est visible immédiatement.
+                Choisissez un style pour changer l'apparence et utilisez le bouton pour régénérer la forme de l'île. Le changement est visible immédiatement.
               </p>
             </div>
           )}
