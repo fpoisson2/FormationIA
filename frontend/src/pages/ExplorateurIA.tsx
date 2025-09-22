@@ -716,6 +716,64 @@ function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
   return isLowerTerrainKind(tile.base);
 }
 
+function populateTerrainObjects(
+  tiles: TerrainTile[][],
+  rng: () => number
+) {
+  const height = tiles.length;
+  const width = tiles[0]?.length ?? 0;
+
+  const hasLower = (tx: number, ty: number) =>
+    tileHasLowerTerrain(tiles[ty]?.[tx] ?? null);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const tile = tiles[y]?.[x];
+      if (!tile) {
+        continue;
+      }
+      if (tile.base === TILE_KIND.WATER || tile.overlay === TILE_KIND.PATH) {
+        tile.object = undefined;
+        continue;
+      }
+      if (!tileHasLowerTerrain(tile)) {
+        const cliffConnections = computeCliffConnections(x, y, hasLower);
+        if (cliffConnections.size > 0) {
+          tile.object = undefined;
+          continue;
+        }
+      }
+      const placement = chooseTerrainObject(tile.base, rng);
+      tile.object = placement ?? undefined;
+    }
+  }
+}
+
+function createTerrainObjectSeed(
+  seed: number,
+  themeId?: TerrainThemeId
+): number {
+  if (!themeId) {
+    return seed >>> 0;
+  }
+  let hash = seed >>> 0;
+  for (let index = 0; index < themeId.length; index++) {
+    hash = Math.imul(hash ^ themeId.charCodeAt(index), 0x45d9f3b);
+    hash >>>= 0;
+  }
+  return hash >>> 0;
+}
+
+function repopulateTerrainObjects(
+  tiles: TerrainTile[][],
+  seed: number,
+  themeId?: TerrainThemeId
+) {
+  const adjustedSeed = createTerrainObjectSeed(seed, themeId);
+  const rng = createRng(adjustedSeed);
+  populateTerrainObjects(tiles, rng);
+}
+
 function applyTerrainThemeToWorld(
   tiles: TerrainTile[][],
   theme: TerrainThemeConfig
@@ -1968,6 +2026,7 @@ function distributeIndices(total: number, count: number): number[] {
 const WORLD_WIDTH = 25;
 const WORLD_HEIGHT = 25;
 const WORLD_SEED = 1247;
+let currentWorldSeed = WORLD_SEED;
 
 const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
   mairie: { x: 12, y: 12 },
@@ -2114,6 +2173,7 @@ const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 const GATE_MARKER_COORD = atlas("mapTile_044.png");
 
 function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
+  currentWorldSeed = seed >>> 0;
   const rng = createRng(seed);
   const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
     Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
@@ -2168,32 +2228,7 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
     tile.object = undefined;
   }
 
-  for (let y = 0; y < WORLD_HEIGHT; y++) {
-    for (let x = 0; x < WORLD_WIDTH; x++) {
-      const tile = tiles[y]?.[x];
-      if (!tile) {
-        continue;
-      }
-      if (tile.base === TILE_KIND.WATER || tile.overlay === TILE_KIND.PATH) {
-        tile.object = undefined;
-        continue;
-      }
-      const tileIsLower = tileHasLowerTerrain(tile);
-      const hasCliffNeighbor =
-        !tileIsLower &&
-        computeCliffConnections(
-          x,
-          y,
-          (tx, ty) => tileHasLowerTerrain(tiles[ty]?.[tx] ?? null)
-        ).size > 0;
-      if (hasCliffNeighbor) {
-        tile.object = undefined;
-        continue;
-      }
-      const placement = chooseTerrainObject(tile.base, rng);
-      tile.object = placement ?? undefined;
-    }
-  }
+  populateTerrainObjects(tiles, rng);
 
   const landmarks = assignLandmarksFromPath(path);
   if (path.length > 0) {
@@ -3714,6 +3749,7 @@ export default function ExplorateurIA({
       }
       setSelectedTheme(themeId);
       applyTerrainThemeToWorld(world, theme);
+      repopulateTerrainObjects(world, currentWorldSeed, themeId);
       recomputeWorldMetadata(world);
       forceWorldRefresh((value) => value + 1);
     },
@@ -3724,10 +3760,13 @@ export default function ExplorateurIA({
     if (!isEditMode) {
       return;
     }
-    const { start } = regenerateWorldInPlace();
+    const { seed, start } = regenerateWorldInPlace();
     const theme = TERRAIN_THEMES[selectedTheme];
     if (theme) {
       applyTerrainThemeToWorld(world, theme);
+      repopulateTerrainObjects(world, seed, selectedTheme);
+    } else {
+      repopulateTerrainObjects(world, seed);
     }
     recomputeWorldMetadata(world);
     setPlayer({ x: start.x, y: start.y });
