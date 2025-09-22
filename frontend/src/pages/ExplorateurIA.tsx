@@ -12,6 +12,13 @@ import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesh
 import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
+import {
+  CLARTE_QUESTIONS,
+  CREATION_POOL,
+  DECISIONS,
+  DILEMMAS,
+  type CreationSpec,
+} from "./explorateurIA/worlds/world1";
 
 // ---
 // "Explorateur IA" — Frontend React (module web auto-portant)
@@ -2804,32 +2811,6 @@ function Fireworks({ show }: { show: boolean }) {
   );
 }
 
-const CLARTE_QUESTIONS = [
-  {
-    q: "Quel est le meilleur énoncé pour obtenir un plan clair?",
-    options: [
-      {
-        id: "A",
-        text: "Écris un plan.",
-        explain: "Trop vague : objectifs, sections, longueur… manquent.",
-        score: 0,
-      },
-      {
-        id: "B",
-        text: "Donne un plan en 5 sections sur l'énergie solaire pour débutants, avec titres et 2 sous-points chacun.",
-        explain: "Précis, contraint et adapté au public cible.",
-        score: 100,
-      },
-      {
-        id: "C",
-        text: "Plan énergie solaire?",
-        explain: "Formulation télégraphique, ambiguë.",
-        score: 10,
-      },
-    ],
-  },
-];
-
 function ClarteQuiz({ onDone }: { onDone: (score: number) => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string>("");
@@ -2914,20 +2895,6 @@ function MiniAnimation({ strength }: { strength: number }) {
     </div>
   );
 }
-
-type CreationSpec = {
-  action: string | null;
-  media: string | null;
-  style: string | null;
-  theme: string | null;
-};
-
-const CREATION_POOL = {
-  action: ["créer", "rédiger", "composer"],
-  media: ["affiche", "article", "capsule audio"],
-  style: ["cartoon", "académique", "minimaliste"],
-  theme: ["énergie", "ville intelligente", "biodiversité"],
-};
 
 function CreationBuilder({ onDone }: { onDone: (spec: CreationSpec) => void }) {
   const [spec, setSpec] = useState<CreationSpec>({
@@ -3130,25 +3097,6 @@ function GeneratedPreview({ spec }: { spec: CreationSpec }) {
   );
 }
 
-const DECISIONS = [
-  {
-    prompt: "Votre équipe doit annoncer un projet. Choisissez une stratégie de communication:",
-    options: [
-      { id: "A", title: "A — Rapide", impact: "+ vitesse / – profondeur", next: 1 },
-      { id: "B", title: "B — Équilibrée", impact: "+ clarté / – temps", next: 1 },
-      { id: "C", title: "C — Personnalisée", impact: "+ pertinence / – effort", next: 1 },
-    ],
-  },
-  {
-    prompt: "Le public réagit. Ensuite?",
-    options: [
-      { id: "A", title: "A — FAQ automatisée", impact: "+ échelle / – nuance", next: null },
-      { id: "B", title: "B — Atelier interactif", impact: "+ engagement / – logistique", next: null },
-      { id: "C", title: "C — Messages ciblés", impact: "+ efficacité / – données", next: null },
-    ],
-  },
-];
-
 function DecisionPath({ onDone }: { onDone: (path: string[]) => void }) {
   const [step, setStep] = useState(0);
   const [path, setPath] = useState<string[]>([]);
@@ -3192,55 +3140,6 @@ function DecisionPath({ onDone }: { onDone: (path: string[]) => void }) {
     </div>
   );
 }
-
-const DILEMMAS = [
-  {
-    s: "Un outil génère un résumé contenant des stéréotypes.",
-    options: [
-      {
-        id: "ignorer",
-        label: "Ignorer",
-        fb: "Risque d'amplifier le biais et de diffuser une erreur.",
-        score: 0,
-      },
-      {
-        id: "corriger",
-        label: "Corriger et justifier",
-        fb: "Bonne pratique: signalez et corrigez les biais.",
-        score: 100,
-      },
-      {
-        id: "expliquer",
-        label: "Demander des explications",
-        fb: "Utile, mais sans correction le risque demeure.",
-        score: 60,
-      },
-    ],
-  },
-  {
-    s: "Un modèle révèle des données sensibles dans un exemple.",
-    options: [
-      {
-        id: "ignorer",
-        label: "Ignorer",
-        fb: "Non-conforme à la protection des données.",
-        score: 0,
-      },
-      {
-        id: "corriger",
-        label: "Supprimer et anonymiser",
-        fb: "Conforme aux bonnes pratiques.",
-        score: 100,
-      },
-      {
-        id: "expliquer",
-        label: "Demander justification",
-        fb: "Insuffisant sans retrait immédiat.",
-        score: 40,
-      },
-    ],
-  },
-];
 
 function EthicsDilemmas({ onDone }: { onDone: (score: number) => void }) {
   const [index, setIndex] = useState(0);
