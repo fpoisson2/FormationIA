@@ -1525,6 +1525,76 @@ function smoothIslandShape(island: Set<CoordKey>) {
   }
 }
 
+function pruneNarrowSpurs(island: Set<CoordKey>, maxLength = 3) {
+  if (island.size === 0 || maxLength <= 0) {
+    return;
+  }
+
+  let changed = false;
+  do {
+    changed = false;
+    const neighborMap = buildNeighborMap(island);
+    const visited = new Set<CoordKey>();
+    const toRemove = new Set<CoordKey>();
+
+    for (const [key, neighbors] of neighborMap.entries()) {
+      if (visited.has(key) || neighbors.length !== 1) {
+        continue;
+      }
+
+      const chain: CoordKey[] = [];
+      let current: CoordKey | null = key;
+      let previous: CoordKey | null = null;
+      let shouldRemove = false;
+
+      while (current) {
+        chain.push(current);
+        visited.add(current);
+
+        const nextNeighbors = neighborMap.get(current) ?? [];
+        const degree = nextNeighbors.length;
+        const candidates = nextNeighbors.filter((candidate) => candidate !== previous);
+
+        if (chain.length > maxLength) {
+          shouldRemove = false;
+          break;
+        }
+
+        if (candidates.length !== 1) {
+          if (chain.length <= maxLength && degree >= 2) {
+            shouldRemove = true;
+          }
+          break;
+        }
+
+        previous = current;
+        current = candidates[0] ?? null;
+
+        if (current && chain.includes(current)) {
+          shouldRemove = false;
+          break;
+        }
+      }
+
+      if (shouldRemove) {
+        for (let index = 0; index < chain.length - 1; index++) {
+          const cell = chain[index];
+          if (cell) {
+            toRemove.add(cell);
+          }
+        }
+      }
+    }
+
+    if (toRemove.size > 0) {
+      changed = true;
+      for (const key of toRemove) {
+        island.delete(key);
+      }
+    }
+  } while (changed);
+}
+
 function buildNeighborMap(cells: Set<CoordKey>): Map<CoordKey, CoordKey[]> {
   const neighborMap = new Map<CoordKey, CoordKey[]>();
   for (const key of cells) {
@@ -1743,6 +1813,7 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   const island = generateIslandCells(WORLD_WIDTH, WORLD_HEIGHT, rng);
   fillSmallLakesInIsland(island, WORLD_WIDTH, WORLD_HEIGHT);
   smoothIslandShape(island);
+  pruneNarrowSpurs(island);
 
   for (const key of island) {
     const [x, y] = coordFromKey(key as CoordKey);
@@ -1886,6 +1957,15 @@ function rebuildBuildings() {
 }
 rebuildBuildings();
 
+const BUILDING_BY_COORD = new Map<CoordKey, QuarterId>();
+function rebuildBuildingLookup() {
+  BUILDING_BY_COORD.clear();
+  for (const building of buildings) {
+    BUILDING_BY_COORD.set(coordKey(building.x, building.y), building.id);
+  }
+}
+rebuildBuildingLookup();
+
 type PathGate = {
   stage: QuarterId;
   x: number;
@@ -1899,23 +1979,94 @@ const PROGRESSION_SEQUENCE: QuarterId[] = [
   "ethique",
 ];
 
+const PROGRESSION_WITH_GOAL: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+
 const PATH_GATES: PathGate[] = [];
 function rebuildPathGates() {
   PATH_GATES.splice(0, PATH_GATES.length);
-  for (const stage of PROGRESSION_SEQUENCE) {
-    const building = buildings.find((candidate) => candidate.id === stage);
-    if (!building) {
+  const buildingById = new Map(buildings.map((entry) => [entry.id, entry] as const));
+
+  for (let index = 0; index < PROGRESSION_SEQUENCE.length; index++) {
+    const stage = PROGRESSION_SEQUENCE[index];
+    const currentBuilding = buildingById.get(stage);
+    const nextStage = PROGRESSION_WITH_GOAL[index + 1];
+    const nextBuilding = nextStage ? buildingById.get(nextStage) : undefined;
+
+    if (!currentBuilding || !nextBuilding) {
       continue;
     }
-    const stageIndex = PATH_INDEX_BY_COORD.get(coordKey(building.x, building.y));
-    if (stageIndex === undefined) {
+
+    const stageIndex = PATH_INDEX_BY_COORD.get(
+      coordKey(currentBuilding.x, currentBuilding.y)
+    );
+    const nextIndex = PATH_INDEX_BY_COORD.get(
+      coordKey(nextBuilding.x, nextBuilding.y)
+    );
+
+    if (
+      stageIndex === undefined ||
+      nextIndex === undefined ||
+      stageIndex === nextIndex
+    ) {
       continue;
     }
-    const gateCoord = generatedWorld.path[stageIndex + 1];
+
+    const step = stageIndex < nextIndex ? 1 : -1;
+    let gateCoord: Coord | undefined;
+
+    for (let pathIndex = stageIndex + step; pathIndex !== nextIndex; pathIndex += step) {
+      const candidate = generatedWorld.path[pathIndex];
+      if (!candidate) {
+        break;
+      }
+      const candidateKey = coordKey(candidate[0], candidate[1]);
+      if (!BUILDING_BY_COORD.has(candidateKey)) {
+        gateCoord = candidate;
+        break;
+      }
+    }
+
     if (!gateCoord) {
-      continue;
+      const fallbackIndex = stageIndex + step;
+      if (fallbackIndex >= 0 && fallbackIndex < generatedWorld.path.length) {
+        gateCoord = generatedWorld.path[fallbackIndex];
+      } else {
+        gateCoord = [currentBuilding.x, currentBuilding.y];
+      }
     }
-    PATH_GATES.push({ stage, x: gateCoord[0], y: gateCoord[1] });
+
+    if (gateCoord) {
+      let gateKey = coordKey(gateCoord[0], gateCoord[1]);
+      if (BUILDING_BY_COORD.get(gateKey) === "mairie") {
+        const gateIndex = PATH_INDEX_BY_COORD.get(gateKey);
+        if (gateIndex !== undefined) {
+          const previousIndex = gateIndex - step;
+          if (previousIndex >= 0 && previousIndex < generatedWorld.path.length) {
+            const previousCoord = generatedWorld.path[previousIndex];
+            const previousKey = coordKey(previousCoord[0], previousCoord[1]);
+            if (BUILDING_BY_COORD.get(previousKey) !== "mairie") {
+              gateCoord = previousCoord;
+              gateKey = previousKey;
+            } else {
+              gateCoord = [currentBuilding.x, currentBuilding.y];
+              gateKey = coordKey(gateCoord[0], gateCoord[1]);
+            }
+          } else {
+            gateCoord = [currentBuilding.x, currentBuilding.y];
+            gateKey = coordKey(gateCoord[0], gateCoord[1]);
+          }
+        } else {
+          gateCoord = [currentBuilding.x, currentBuilding.y];
+          gateKey = coordKey(gateCoord[0], gateCoord[1]);
+        }
+      }
+
+      if (BUILDING_BY_COORD.get(gateKey) === "mairie") {
+        gateCoord = [currentBuilding.x, currentBuilding.y];
+      }
+
+      PATH_GATES.push({ stage, x: gateCoord[0], y: gateCoord[1] });
+    }
   }
 }
 rebuildPathGates();
@@ -1975,6 +2126,7 @@ function regenerateWorldInPlace(seed: number = randomWorldSeed()): {
   updateMarkerCoordCache(generatedWorld.markers);
   updatePathIndexCache(generatedWorld.path);
   rebuildBuildings();
+  rebuildBuildingLookup();
   rebuildPathGates();
   rebuildGateLookup();
   updateStartFromWorld();
