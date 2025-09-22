@@ -5,9 +5,7 @@ import {
   useRef,
   useState,
   type DragEvent,
-  type MouseEvent,
   type ReactNode,
-  type TouchEvent,
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
@@ -302,9 +300,9 @@ const FALLBACK_SAND_TILES: SandTiles = {
   },
 };
 
-function deriveSandTilesFromAtlas(): SandTiles {
+function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
   const sandEntries = Array.from(MAP_PACK_ATLAS.values()).filter(
-    (entry) => entry.category === "terrain" && entry.subtype === "sand"
+    (entry) => entry.category === "terrain" && entry.subtype === subtype
   );
 
   const derived: SandTiles = {
@@ -407,6 +405,9 @@ const TILE_KIND = {
   TREE: 4,
   FLOWER: 5,
   FIELD: 6,
+  DIRT: 7,
+  DIRT_GRAY: 8,
+  SNOW: 9,
 } as const;
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
@@ -417,54 +418,42 @@ const LOWER_TERRAIN_TYPES = new Set<TileKind>([
   TILE_KIND.FIELD,
 ]);
 
-type TerrainBrushConfig = {
+type TerrainThemeConfig = {
   label: string;
   base: TileKind;
-  overlay?: TileKind;
 };
 
-const TERRAIN_BRUSHES = {
-  path: {
-    label: "Chemin",
-    base: TILE_KIND.SAND,
-    overlay: TILE_KIND.PATH,
-  },
+const TERRAIN_THEMES = {
   sand: {
     label: "Sable",
     base: TILE_KIND.SAND,
   },
   grass: {
-    label: "Herbe",
+    label: "Gazon",
     base: TILE_KIND.GRASS,
   },
-  water: {
-    label: "Eau",
-    base: TILE_KIND.WATER,
+  dirt: {
+    label: "Terre",
+    base: TILE_KIND.DIRT,
   },
-  field: {
-    label: "Champ cultivé",
-    base: TILE_KIND.FIELD,
+  dirtGray: {
+    label: "Terre grise",
+    base: TILE_KIND.DIRT_GRAY,
   },
-  tree: {
-    label: "Arbre",
-    base: TILE_KIND.TREE,
+  snow: {
+    label: "Neige",
+    base: TILE_KIND.SNOW,
   },
-  flower: {
-    label: "Fleurs",
-    base: TILE_KIND.FLOWER,
-  },
-} as const satisfies Record<string, TerrainBrushConfig>;
+} as const satisfies Record<string, TerrainThemeConfig>;
 
-type TerrainBrushKey = keyof typeof TERRAIN_BRUSHES;
+type TerrainThemeId = keyof typeof TERRAIN_THEMES;
 
-const TERRAIN_BRUSH_ORDER: TerrainBrushKey[] = [
-  "path",
+const TERRAIN_THEME_ORDER: TerrainThemeId[] = [
   "sand",
   "grass",
-  "water",
-  "field",
-  "tree",
-  "flower",
+  "dirt",
+  "dirtGray",
+  "snow",
 ];
 
 const DIAGONAL_CONNECTIONS = new Set<string>([
@@ -506,39 +495,26 @@ function tileHasLowerTerrain(tile: TerrainTile | undefined | null): boolean {
   return isLowerTerrainKind(tile.base);
 }
 
-function applyTerrainBrush(
+function applyTerrainThemeToWorld(
   tiles: TerrainTile[][],
-  x: number,
-  y: number,
-  brush: TerrainBrushConfig
-): boolean {
-  const row = tiles[y];
-  if (!row) {
-    return false;
+  theme: TerrainThemeConfig
+) {
+  for (const row of tiles) {
+    for (const tile of row) {
+      if (!tile) {
+        continue;
+      }
+      if (tile.base === TILE_KIND.WATER) {
+        continue;
+      }
+      tile.base = theme.base;
+      if (tile.overlay && tile.overlay !== TILE_KIND.PATH) {
+        delete tile.overlay;
+      }
+      tile.edge = undefined;
+      tile.cliffConnections = undefined;
+    }
   }
-  const tile = row[x];
-  if (!tile) {
-    return false;
-  }
-
-  const targetBase = brush.base;
-  const targetOverlay = brush.overlay ?? null;
-  const currentOverlay = tile.overlay ?? null;
-
-  if (tile.base === targetBase && currentOverlay === targetOverlay) {
-    return false;
-  }
-
-  tile.base = targetBase;
-  if (targetOverlay === null) {
-    delete tile.overlay;
-  } else {
-    tile.overlay = targetOverlay;
-  }
-  tile.edge = undefined;
-  tile.cliffConnections = undefined;
-
-  return true;
 }
 
 function recomputeWorldMetadata(worldTiles: TerrainTile[][]) {
@@ -676,6 +652,12 @@ type Tileset = {
 };
 
 const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
+
+const BUILTIN_GROUND_VARIANTS = {
+  dirt: deriveSandTilesFromAtlas("dirt_brown"),
+  dirtGray: deriveSandTilesFromAtlas("dirt_gray"),
+  snow: deriveSandTilesFromAtlas("ice"),
+} as const satisfies Record<string, SandTiles>;
 
 function cloneSandTiles(source: SandTiles): SandTiles {
   const clonedEdges = EDGE_DIRECTIONS.reduce((acc, direction) => {
@@ -2275,7 +2257,7 @@ function resolveEdgeDirection(orientation: EdgeOrientation): EdgeDirection | nul
 }
 
 function getSandEdgeVariantCoord(
-  ts: Tileset,
+  sandTiles: SandTiles,
   orientation: EdgeOrientation,
   variant: EdgeVariantType
 ): TileCoord | null {
@@ -2283,7 +2265,7 @@ function getSandEdgeVariantCoord(
   if (!direction) {
     return null;
   }
-  const bucket = ts.map.sand.edges[direction];
+  const bucket = sandTiles.edges[direction];
   if (!bucket) {
     return null;
   }
@@ -2291,11 +2273,17 @@ function getSandEdgeVariantCoord(
   return preferred ?? bucket.exterior ?? bucket.interior ?? null;
 }
 
-function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
+function getSandTileCoord(
+  x: number,
+  y: number,
+  ts: Tileset,
+  overrides?: SandTiles
+): TileCoord {
+  const sandTiles = overrides ?? ts.map.sand;
   const tile = world[y]?.[x];
   if (tile?.edge && !tile.edge.touchesOutside) {
     const oriented = getSandEdgeVariantCoord(
-      ts,
+      sandTiles,
       tile.edge.orientation,
       tile.edge.variant
     );
@@ -2310,7 +2298,7 @@ function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
   const eastWater = tileLayersAt(x + 1, y).base === TILE_KIND.WATER;
 
   const pickFallback = (direction: EdgeDirection): TileCoord | null => {
-    const variant = ts.map.sand.edges[direction];
+    const variant = sandTiles.edges[direction];
     if (!variant) {
       return null;
     }
@@ -2342,7 +2330,7 @@ function getSandTileCoord(x: number, y: number, ts: Tileset): TileCoord {
     return pickFallback("west") ?? ts.map.sand.center;
   }
 
-  return ts.map.sand.center;
+  return sandTiles.center;
 }
 
 function getWaterTileCoord(x: number, y: number, ts: Tileset): TileCoord {
@@ -2463,6 +2451,12 @@ function getAtlasTile(
       return getWaterTileCoord(x, y, ts);
     case TILE_KIND.SAND:
       return getSandTileCoord(x, y, ts);
+    case TILE_KIND.DIRT:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirt);
+    case TILE_KIND.DIRT_GRAY:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirtGray);
+    case TILE_KIND.SNOW:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.snow);
     case TILE_KIND.FIELD:
       return ts.map.farmland;
     case TILE_KIND.TREE:
@@ -2493,6 +2487,15 @@ function TileWithTs({
   tileSize: number;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
+  const baseVariantTiles =
+    terrain.base === TILE_KIND.DIRT
+      ? BUILTIN_GROUND_VARIANTS.dirt
+      : terrain.base === TILE_KIND.DIRT_GRAY
+      ? BUILTIN_GROUND_VARIANTS.dirtGray
+      : terrain.base === TILE_KIND.SNOW
+      ? BUILTIN_GROUND_VARIANTS.snow
+      : null;
+  const baseRenderTileset = baseVariantTiles ? DEFAULT_ATLAS : activeTileset;
 
   const edgePlacement = terrain.edge;
   const shouldUseWaterBase = edgePlacement?.touchesOutside ?? false;
@@ -2507,24 +2510,29 @@ function TileWithTs({
 
   const edgeOverlayCoord = edgePlacement?.touchesOutside
     ? getSandEdgeVariantCoord(
-        activeTileset,
+        baseVariantTiles ?? activeTileset.map.sand,
         edgePlacement.orientation,
         edgePlacement.variant
       )
     : null;
 
-  const overlays = [edgeOverlayCoord, overlayCoord].filter(
-    (coord): coord is TileCoord => Array.isArray(coord)
-  );
+  const overlays = [
+    edgeOverlayCoord ? { coord: edgeOverlayCoord, tileset: baseRenderTileset } : null,
+    overlayCoord ? { coord: overlayCoord, tileset: activeTileset } : null,
+  ].filter((entry): entry is { coord: TileCoord; tileset: Tileset } => Boolean(entry));
 
   return (
     <div className="relative">
       {baseCoord && (
-        <SpriteFromAtlas ts={activeTileset} coord={baseCoord} scale={tileSize} />
+        <SpriteFromAtlas ts={baseRenderTileset} coord={baseCoord} scale={tileSize} />
       )}
-      {overlays.map((coord, index) => (
+      {overlays.map((entry, index) => (
         <div key={index} className="absolute inset-0">
-          <SpriteFromAtlas ts={activeTileset} coord={coord} scale={tileSize} />
+          <SpriteFromAtlas
+            ts={entry.tileset}
+            coord={entry.coord}
+            scale={tileSize}
+          />
         </div>
       ))}
     </div>
@@ -3197,7 +3205,7 @@ export default function ExplorateurIA({
   const [celebrate, setCelebrate] = useState(false);
   const [tileset, setTileset] = useTileset();
   const [, forceWorldRefresh] = useState(0);
-  const [selectedBrush, setSelectedBrush] = useState<TerrainBrushKey>("path");
+  const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -3241,48 +3249,21 @@ export default function ExplorateurIA({
     return active;
   }, [isQuarterCompleted]);
 
-  const handleTerrainEdit = useCallback(
-    (x: number, y: number) => {
+  const handleThemeChange = useCallback(
+    (themeId: TerrainThemeId) => {
       if (!isEditMode) {
         return;
       }
-      const brush = TERRAIN_BRUSHES[selectedBrush];
-      if (!brush) {
+      const theme = TERRAIN_THEMES[themeId];
+      if (!theme) {
         return;
       }
-      const changed = applyTerrainBrush(world, x, y, brush);
-      if (!changed) {
-        return;
-      }
+      setSelectedTheme(themeId);
+      applyTerrainThemeToWorld(world, theme);
       recomputeWorldMetadata(world);
       forceWorldRefresh((value) => value + 1);
     },
-    [isEditMode, selectedBrush, forceWorldRefresh]
-  );
-
-  const handleEditPointer = useCallback(
-    (
-      event: MouseEvent<HTMLDivElement> | TouchEvent<HTMLDivElement>,
-      x: number,
-      y: number
-    ) => {
-      if (!isEditMode) {
-        return;
-      }
-
-      if ("button" in event && event.type === "mousedown" && event.button !== 0) {
-        return;
-      }
-
-      if ("buttons" in event && event.type === "mouseenter" && event.buttons !== 1) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      handleTerrainEdit(x, y);
-    },
-    [handleTerrainEdit, isEditMode]
+    [forceWorldRefresh, isEditMode]
   );
 
   const { markCompleted } = useActivityCompletion({
@@ -3544,13 +3525,7 @@ export default function ExplorateurIA({
                     const tileBlocked = activeGateKeys.has(tileKey);
 
                     return (
-                      <div
-                        key={`${x}-${y}`}
-                        className="relative"
-                        onMouseDownCapture={(event) => handleEditPointer(event, x, y)}
-                        onMouseEnter={(event) => handleEditPointer(event, x, y)}
-                        onTouchStartCapture={(event) => handleEditPointer(event, x, y)}
-                      >
+                      <div key={`${x}-${y}`} className="relative">
                         <TileWithTs
                           terrain={terrain}
                           ts={tileset}
@@ -3709,30 +3684,32 @@ export default function ExplorateurIA({
           {isEditMode && (
             <div className="rounded-2xl border bg-white p-4 shadow">
               <div className="text-xs uppercase tracking-wide text-slate-500">
-                Édition du terrain
+                Terrain
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                {TERRAIN_BRUSH_ORDER.map((key) => {
-                  const brush = TERRAIN_BRUSHES[key];
-                  const isActive = selectedBrush === key;
+                {TERRAIN_THEME_ORDER.map((key) => {
+                  const theme = TERRAIN_THEMES[key];
+                  const isActive = selectedTheme === key;
                   return (
                     <button
                       key={key}
-                      onClick={() => setSelectedBrush(key)}
+                      type="button"
+                      onClick={() => handleThemeChange(key)}
                       className={classNames(
                         "rounded-xl border px-3 py-2 text-left transition",
                         isActive
                           ? "border-emerald-400 bg-emerald-50 text-emerald-700"
                           : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
                       )}
+                      aria-pressed={isActive}
                     >
-                      {brush.label}
+                      {theme.label}
                     </button>
                   );
                 })}
               </div>
               <p className="mt-3 text-xs text-slate-500">
-                Maintenez le clic pour peindre plusieurs cases. Les modifications sont visibles immédiatement.
+                Choisissez un style pour régénérer l'île entière avec un nouveau terrain. Le changement est visible immédiatement.
               </p>
             </div>
           )}
