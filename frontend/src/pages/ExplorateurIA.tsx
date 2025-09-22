@@ -205,7 +205,7 @@ function collectWalkableNumberTiles(): NumberTile[] {
       continue;
     }
     const value = Number.parseInt(match[1] ?? "", 10);
-    if (Number.isNaN(value)) {
+    if (Number.isNaN(value) || value >= 10) {
       continue;
     }
     numbers.push({ value, coord: atlas(entry.name) });
@@ -1622,11 +1622,23 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     return assignments;
   }
 
-  const indices = distributeIndices(path.length, LANDMARK_ASSIGNMENT_ORDER.length);
-  LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
-    const [x, y] = path[indices[index]];
-    assignments[id] = { x, y };
-  });
+  const interiorIndices = path
+    .map((_, index) => index)
+    .filter((index) => index > 0 && index < path.length - 1);
+
+  const pickFrom = (indices: number[]) => {
+    const distributed = distributeIndices(indices.length, LANDMARK_ASSIGNMENT_ORDER.length);
+    LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
+      const [x, y] = path[indices[distributed[index]]];
+      assignments[id] = { x, y };
+    });
+  };
+
+  if (interiorIndices.length >= LANDMARK_ASSIGNMENT_ORDER.length) {
+    pickFrom(interiorIndices);
+  } else {
+    pickFrom(path.map((_, index) => index));
+  }
 
   return assignments;
 }
@@ -1729,9 +1741,9 @@ const MARKER_COORD_BY_KEY = new Map<string, TileCoord>(
 
 const BUILDING_META: Record<
   QuarterId,
-  { label: string; color: string; number: number }
+  { label: string; color: string; number?: number }
 > = {
-  mairie: { label: "Mairie (Bilan)", color: "#ffd166", number: 5 },
+  mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
   clarte: { label: "Quartier Clarté", color: "#06d6a0", number: 1 },
   creation: { label: "Quartier Création", color: "#118ab2", number: 2 },
   decision: { label: "Quartier Décision", color: "#ef476f", number: 3 },
@@ -1752,7 +1764,7 @@ const buildings: Array<{
   y: number;
   label: string;
   color: string;
-  number: number;
+  number?: number;
 }> = BUILDING_DISPLAY_ORDER.map((id) => {
   const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
   const meta = BUILDING_META[id];
@@ -2269,14 +2281,12 @@ function TileWithTs({
   x,
   y,
   tileSize,
-  markerCoord,
 }: {
   terrain: TerrainTile;
   ts: Tileset;
   x: number;
   y: number;
   tileSize: number;
-  markerCoord?: TileCoord | null;
 }) {
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
 
@@ -2299,7 +2309,7 @@ function TileWithTs({
       )
     : null;
 
-  const overlays = [edgeOverlayCoord, overlayCoord, markerCoord].filter(
+  const overlays = [edgeOverlayCoord, overlayCoord].filter(
     (coord): coord is TileCoord => Array.isArray(coord)
   );
 
@@ -3218,6 +3228,8 @@ export default function ExplorateurIA({
               >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
+                    const activeTileset =
+                      tileset.mode === "atlas" && tileset.url ? tileset : DEFAULT_ATLAS;
                     const markerCoord = MARKER_COORD_BY_KEY.get(`${x}-${y}`);
                     const highlight = HIGHLIGHT_TILES.has(terrain.base);
                     return (
@@ -3228,8 +3240,16 @@ export default function ExplorateurIA({
                           x={x}
                           y={y}
                           tileSize={tileSize}
-                          markerCoord={markerCoord}
                         />
+                        {markerCoord && (
+                          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                            <SpriteFromAtlas
+                              ts={activeTileset}
+                              coord={markerCoord}
+                              scale={tileSize}
+                            />
+                          </div>
+                        )}
                         {highlight && (
                           <div className="absolute inset-0 rounded bg-amber-200/30" />
                         )}
@@ -3240,7 +3260,7 @@ export default function ExplorateurIA({
                               <button
                                 key={building.id}
                                 onClick={() => setOpen(building.id)}
-                                className="absolute inset-1 rounded-lg flex items-center justify-center shadow bg-white/90"
+                                className="absolute inset-0 z-10 flex items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
                                 title={building.label}
                               >
                                 <BuildingSprite
