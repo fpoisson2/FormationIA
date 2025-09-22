@@ -755,7 +755,11 @@ function recomputeWorldMetadata(worldTiles: TerrainTile[][]) {
       if (!tile) {
         continue;
       }
-      tile.cliffConnections = connections.length > 0 ? connections : undefined;
+      const hasConnections = connections.length > 0;
+      if (hasConnections && !tileHasLowerTerrain(tile) && tile.object) {
+        tile.object = undefined;
+      }
+      tile.cliffConnections = hasConnections ? connections : undefined;
     }
   }
 
@@ -2171,6 +2175,18 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
         continue;
       }
       if (tile.base === TILE_KIND.WATER || tile.overlay === TILE_KIND.PATH) {
+        tile.object = undefined;
+        continue;
+      }
+      const tileIsLower = tileHasLowerTerrain(tile);
+      const hasCliffNeighbor =
+        !tileIsLower &&
+        computeCliffConnections(
+          x,
+          y,
+          (tx, ty) => tileHasLowerTerrain(tiles[ty]?.[tx] ?? null)
+        ).size > 0;
+      if (hasCliffNeighbor) {
         tile.object = undefined;
         continue;
       }
