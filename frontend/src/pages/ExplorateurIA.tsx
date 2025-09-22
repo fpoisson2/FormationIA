@@ -2871,15 +2871,21 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
 
 function MobileArrowControls({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   const buttonClass =
-    "flex h-14 w-14 items-center justify-center rounded-full bg-slate-900/35 text-white text-2xl shadow-lg backdrop-blur-md transition active:scale-95";
+    "flex h-12 w-12 items-center justify-center rounded-full bg-slate-900/40 text-white text-xl shadow-lg backdrop-blur-md transition active:scale-95";
   const handle = (dx: number, dy: number) => () => {
     onMove(dx, dy);
   };
 
   return (
-    <div className="pointer-events-none absolute inset-0">
-      <div className="pointer-events-auto absolute bottom-5 left-5 rounded-3xl bg-slate-900/20 p-4 shadow-lg backdrop-blur-sm">
-        <div className="grid grid-cols-3 gap-3">
+    <div
+      className="pointer-events-none absolute inset-0 flex items-end justify-end"
+      style={{
+        paddingRight: "calc(16px + env(safe-area-inset-right))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
+      }}
+    >
+      <div className="pointer-events-auto rounded-3xl bg-slate-900/25 p-3 shadow-lg backdrop-blur-sm">
+        <div className="grid grid-cols-3 gap-2">
           <div />
           <button
             type="button"
