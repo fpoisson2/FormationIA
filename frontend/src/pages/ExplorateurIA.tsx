@@ -564,8 +564,9 @@ const TILE_KIND = {
   FLOWER: 5,
   FIELD: 6,
   DIRT: 7,
-  DIRT_GRAY: 8,
-  SNOW: 9,
+  DIRT_BROWN: 8,
+  DIRT_GRAY: 9,
+  SNOW: 10,
 } as const;
 
 type TileKind = (typeof TILE_KIND)[keyof typeof TILE_KIND];
@@ -584,6 +585,7 @@ const TERRAIN_OBJECT_CATALOG = {
     compatibleTerrains: [
       TILE_KIND.GRASS,
       TILE_KIND.DIRT,
+      TILE_KIND.DIRT_BROWN,
       TILE_KIND.DIRT_GRAY,
     ] as const,
     atlasCategory: "object",
@@ -595,6 +597,7 @@ const TERRAIN_OBJECT_CATALOG = {
     compatibleTerrains: [
       TILE_KIND.GRASS,
       TILE_KIND.DIRT,
+      TILE_KIND.DIRT_BROWN,
       TILE_KIND.DIRT_GRAY,
     ] as const,
     atlasCategory: "object",
@@ -611,7 +614,11 @@ const TERRAIN_OBJECT_CATALOG = {
     fallback: atlas("mapTile_109.png"),
   },
   deadTree: {
-    compatibleTerrains: [TILE_KIND.DIRT, TILE_KIND.DIRT_GRAY] as const,
+    compatibleTerrains: [
+      TILE_KIND.DIRT,
+      TILE_KIND.DIRT_BROWN,
+      TILE_KIND.DIRT_GRAY,
+    ] as const,
     atlasCategory: "object",
     atlasSubtype: "tree",
     weight: 1,
@@ -642,6 +649,7 @@ const TERRAIN_OBJECT_CATALOG = {
     compatibleTerrains: [
       TILE_KIND.GRASS,
       TILE_KIND.DIRT,
+      TILE_KIND.DIRT_BROWN,
       TILE_KIND.DIRT_GRAY,
       TILE_KIND.SAND,
       TILE_KIND.SNOW,
@@ -706,6 +714,15 @@ const TERRAIN_OBJECT_POOLS = {
       { id: "mushroomPatch" },
     ],
   },
+  [TILE_KIND.DIRT_BROWN]: {
+    density: 0.3,
+    objects: [
+      { id: "deadTree", weight: 2 },
+      { id: "oakTree" },
+      { id: "smallRock", weight: 2 },
+      { id: "mushroomPatch" },
+    ],
+  },
   [TILE_KIND.DIRT_GRAY]: {
     density: 0.28,
     objects: [
@@ -762,6 +779,10 @@ const TERRAIN_THEMES = {
     label: "Terre",
     base: TILE_KIND.DIRT,
   },
+  dirtBrown: {
+    label: "Terre brune",
+    base: TILE_KIND.DIRT_BROWN,
+  },
   dirtGray: {
     label: "Terre grise",
     base: TILE_KIND.DIRT_GRAY,
@@ -778,6 +799,7 @@ const TERRAIN_THEME_ORDER: TerrainThemeId[] = [
   "sand",
   "grass",
   "dirt",
+  "dirtBrown",
   "dirtGray",
   "snow",
 ];
@@ -1108,7 +1130,8 @@ const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
 
 const BUILTIN_GROUND_VARIANTS = {
   grass: deriveSandTilesFromAtlas("grass"),
-  dirt: deriveSandTilesFromAtlas("dirt_brown"),
+  dirt: deriveSandTilesFromAtlas("dirt"),
+  dirtBrown: deriveSandTilesFromAtlas("dirt_brown"),
   dirtGray: deriveSandTilesFromAtlas("dirt_gray"),
   snow: deriveSandTilesFromAtlas("ice"),
 } as const satisfies Record<string, SandTiles>;
@@ -3564,6 +3587,8 @@ function getAtlasTile(
       return getSandTileCoord(x, y, ts);
     case TILE_KIND.DIRT:
       return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirt);
+    case TILE_KIND.DIRT_BROWN:
+      return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirtBrown);
     case TILE_KIND.DIRT_GRAY:
       return getSandTileCoord(x, y, ts, BUILTIN_GROUND_VARIANTS.dirtGray);
     case TILE_KIND.SNOW:
@@ -3603,6 +3628,8 @@ function TileWithTs({
       ? BUILTIN_GROUND_VARIANTS.grass
       : terrain.base === TILE_KIND.DIRT
       ? BUILTIN_GROUND_VARIANTS.dirt
+      : terrain.base === TILE_KIND.DIRT_BROWN
+      ? BUILTIN_GROUND_VARIANTS.dirtBrown
       : terrain.base === TILE_KIND.DIRT_GRAY
       ? BUILTIN_GROUND_VARIANTS.dirtGray
       : terrain.base === TILE_KIND.SNOW
