@@ -12,6 +12,7 @@ import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesh
 import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
 import {
   StepSequenceRenderer,
   type StepSequenceRenderWrapperProps,
@@ -102,6 +103,26 @@ const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
+const DESKTOP_TILE_MAX_SIZE = BASE_TILE_SIZE * 4;
+const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
+const MUSIC_PREFERENCE_STORAGE_KEY = "explorateur-ia:music-enabled";
+const NON_TYPABLE_INPUT_TYPES = new Set([
+  "button",
+  "checkbox",
+  "color",
+  "date",
+  "datetime-local",
+  "file",
+  "hidden",
+  "image",
+  "month",
+  "radio",
+  "range",
+  "reset",
+  "submit",
+  "time",
+  "week",
+]);
 type TileScaleMode = "contain" | "cover";
 
 type AtlasCategory = "" | "terrain" | "path" | "object" | "character" | "ui";
@@ -121,6 +142,86 @@ type AtlasEntry = {
   overlay: boolean;
   transparent: boolean;
 };
+
+function getStoredMusicPreference(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  try {
+    const stored = window.localStorage.getItem(
+      MUSIC_PREFERENCE_STORAGE_KEY
+    );
+    if (stored === null) {
+      return true;
+    }
+    const normalized = stored.trim().toLowerCase();
+    if (["off", "false", "0"].includes(normalized)) {
+      return false;
+    }
+    if (["on", "true", "1"].includes(normalized)) {
+      return true;
+    }
+    return true;
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("Explorateur IA: unable to read music preference", error);
+    }
+    return true;
+  }
+}
+
+function persistMusicPreference(enabled: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      MUSIC_PREFERENCE_STORAGE_KEY,
+      enabled ? "on" : "off"
+    );
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("Explorateur IA: unable to store music preference", error);
+    }
+  }
+}
+
+function isTextualInputTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) {
+    return false;
+  }
+  let element: HTMLElement | null = target;
+  while (element) {
+    if (element.isContentEditable) {
+      return true;
+    }
+    if (element instanceof HTMLInputElement) {
+      const type = element.type?.toLowerCase() ?? "text";
+      if (!NON_TYPABLE_INPUT_TYPES.has(type)) {
+        return true;
+      }
+    } else if (
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    ) {
+      return true;
+    } else {
+      const role = element.getAttribute("role");
+      if (
+        role &&
+        ["textbox", "searchbox", "combobox", "spinbutton"].includes(
+          role.toLowerCase()
+        )
+      ) {
+        return true;
+      }
+    }
+    element = element.parentElement;
+  }
+  return false;
+}
 
 function parseBooleanAttribute(value: string | null | undefined): boolean {
   if (!value) {
@@ -1337,77 +1438,50 @@ function SpriteFromAtlas({
   );
 }
 
-function TilesetControls({
-  ts,
-  setTs,
+function TerrainThemeOptions({
+  selectedTheme,
+  onSelectTheme,
+  onRegenerate,
 }: {
-  ts: Tileset;
-  setTs: (t: Tileset) => void;
+  selectedTheme: TerrainThemeId;
+  onSelectTheme: (theme: TerrainThemeId) => void;
+  onRegenerate: () => void;
 }) {
-  const [url, setUrl] = useState(ts.url ?? mapPackAtlas);
-  const [size, setSize] = useState(ts.size ?? DEFAULT_TILE_SIZE);
-
-  const apply = (mode: TilesetMode) => {
-    if (mode === "builtin") {
-      setTs({ mode: "builtin", size, map: ts.map });
-    } else {
-      setTs({ mode: "atlas", url: url || mapPackAtlas, size, map: ts.map });
-    }
-  };
-
   return (
-    <div className="space-y-2 text-xs">
-      <div className="flex items-center justify-between">
-        <span>Mode tileset</span>
-        <div className="flex gap-1">
-          <button
-            className={
-              ts.mode === "builtin"
-                ? "px-2 py-1 rounded bg-slate-800 text-white"
-                : "px-2 py-1 rounded bg-slate-100"
-            }
-            onClick={() => apply("builtin")}
-          >
-            builtin
-          </button>
-          <button
-            className={
-              ts.mode === "atlas"
-                ? "px-2 py-1 rounded bg-slate-800 text-white"
-                : "px-2 py-1 rounded bg-slate-100"
-            }
-            onClick={() => apply("atlas")}
-          >
-            atlas
-          </button>
-        </div>
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        {TERRAIN_THEME_ORDER.map((key) => {
+          const theme = TERRAIN_THEMES[key];
+          const isActive = selectedTheme === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onSelectTheme(key)}
+              className={classNames(
+                "rounded-xl border px-3 py-2 text-left transition",
+                isActive
+                  ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                  : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
+              )}
+              aria-pressed={isActive}
+            >
+              {theme.label}
+            </button>
+          );
+        })}
       </div>
-      <div className="grid grid-cols-1 gap-2">
-        <label className="flex items-center gap-2">
-          URL
-          <input
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="/assets/tileset.png"
-            className="flex-1 px-2 py-1 border rounded"
-          />
-        </label>
-        <label className="flex items-center gap-2">
-          Tile size
-          <input
-            type="number"
-            value={size}
-            onChange={(event) =>
-              setSize(parseInt(event.target.value || "16", 10))
-            }
-            className="w-20 px-2 py-1 border rounded"
-          />
-        </label>
-        <p className="text-slate-500">
-          Dépose un atlas PNG (64×64) dans public/assets et renseigne l'URL. Pack
-          recommandé: Kenney (CC0) Map Pack.
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={onRegenerate}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
+      >
+        Régénérer la forme
+      </button>
+      <p className="text-xs text-slate-500">
+        Choisissez un style pour changer l'apparence et utilisez le bouton pour
+        régénérer la forme de l'île. Le changement est visible immédiatement.
+      </p>
     </div>
   );
 }
@@ -1427,7 +1501,10 @@ function measureViewport(): { width: number; height: number } {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
-function computeTileSize(mode: TileScaleMode = "contain"): number {
+function computeTileSize(
+  mode: TileScaleMode = "contain",
+  maxSize = BASE_TILE_SIZE
+): number {
   if (typeof window === "undefined") {
     return BASE_TILE_SIZE;
   }
@@ -1451,14 +1528,29 @@ function computeTileSize(mode: TileScaleMode = "contain"): number {
   const fallback = Number.isFinite(containFit) && containFit > 0
     ? Math.min(MIN_TILE_SIZE, containFit)
     : MIN_TILE_SIZE;
-  const capped = Math.min(BASE_TILE_SIZE, rawFit);
+  const capped = Math.min(maxSize, rawFit);
   const normalized = Math.max(capped, fallback);
+  const fallbackSize = Math.max(1, Math.round(fallback));
 
-  return Math.round(normalized * 100) / 100;
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return fallbackSize > 0 ? fallbackSize : MIN_TILE_SIZE;
+  }
+
+  const quantized = Math.round(normalized);
+
+  if (!Number.isFinite(quantized) || quantized <= 0) {
+    return fallbackSize > 0 ? fallbackSize : MIN_TILE_SIZE;
+  }
+
+  return quantized;
 }
 
-function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
-  const [size, setSize] = useState(() => computeTileSize(mode));
+function useResponsiveTileSize(
+  mode: TileScaleMode = "contain",
+  options?: { maxSize?: number }
+): number {
+  const { maxSize = BASE_TILE_SIZE } = options ?? {};
+  const [size, setSize] = useState(() => computeTileSize(mode, maxSize));
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1466,7 +1558,7 @@ function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
     }
 
     const recompute = () => {
-      const nextSize = computeTileSize(mode);
+      const nextSize = computeTileSize(mode, maxSize);
       setSize((current) => (current === nextSize ? current : nextSize));
     };
 
@@ -1488,7 +1580,7 @@ function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
         viewport.removeEventListener("scroll", recompute);
       }
     };
-  }, [mode]);
+  }, [maxSize, mode]);
 
   return size;
 }
@@ -2887,46 +2979,6 @@ function getTileNameFromCoord(coord: TileCoord): string | null {
   return null;
 }
 
-function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
-  return (
-    <div className="grid grid-cols-3 gap-2 select-none">
-      <div />
-      <button
-        onClick={() => onMove(0, -1)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
-        aria-label="Haut"
-      >
-        ▲
-      </button>
-      <div />
-      <button
-        onClick={() => onMove(-1, 0)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
-        aria-label="Gauche"
-      >
-        ◀
-      </button>
-      <div />
-      <button
-        onClick={() => onMove(1, 0)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
-        aria-label="Droite"
-      >
-        ▶
-      </button>
-      <div />
-      <button
-        onClick={() => onMove(0, 1)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm col-start-2"
-        aria-label="Bas"
-      >
-        ▼
-      </button>
-      <div />
-    </div>
-  );
-}
-
 function MobileArrowControls({
   onMove,
   containerRef,
@@ -2935,7 +2987,7 @@ function MobileArrowControls({
   containerRef?: Ref<HTMLDivElement>;
 }) {
   const buttonClass =
-    "flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/40 text-white text-lg shadow-lg backdrop-blur-md transition active:scale-95";
+    "flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/40 text-white text-lg shadow-lg backdrop-blur-md transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 hover:bg-slate-900/50 active:scale-95";
   const handle = (dx: number, dy: number) => () => {
     onMove(dx, dy);
   };
@@ -4059,9 +4111,13 @@ export default function ExplorateurIA({
   stepSequence,
   setStepSequence,
 }: ActivityProps) {
+  const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
-  const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain");
+  const tileSize = useResponsiveTileSize("cover", {
+    maxSize: isMobile ? BASE_TILE_SIZE : DESKTOP_TILE_MAX_SIZE,
+  });
   const cellSize = tileSize + TILE_GAP;
+  const [isTerrainModalOpen, setTerrainModalOpen] = useState(false);
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
   const [mobilePrompt, setMobilePrompt] = useState<QuarterId | null>(null);
@@ -4076,12 +4132,14 @@ export default function ExplorateurIA({
   }, [stepSequence]);
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
-  const [tileset, setTileset] = useTileset();
+  const [tileset] = useTileset();
   const [worldVersion, forceWorldRefresh] = useState(0);
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
-  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
+  const [isMusicEnabled, setIsMusicEnabled] = useState(() =>
+    getStoredMusicPreference()
+  );
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isMusicSupported, setIsMusicSupported] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4096,6 +4154,40 @@ export default function ExplorateurIA({
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+
+  const canToggleEditMode = useMemo(() => {
+    if (adminStatus !== "authenticated") {
+      return false;
+    }
+    const roles = (adminUser?.roles ?? []).map((role) =>
+      role.toLowerCase().trim()
+    );
+    return roles.some((role) => ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number]));
+  }, [adminStatus, adminUser?.roles]);
+
+  const handleToggleEditMode = useCallback(() => {
+    if (!canToggleEditMode) {
+      return;
+    }
+    setEditMode(!isEditMode);
+  }, [canToggleEditMode, isEditMode, setEditMode]);
+
+  const handleOpenTerrainModal = useCallback(() => {
+    if (!isEditMode) {
+      return;
+    }
+    setTerrainModalOpen(true);
+  }, [isEditMode]);
+
+  const handleCloseTerrainModal = useCallback(() => {
+    setTerrainModalOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setTerrainModalOpen(false);
+    }
+  }, [isEditMode]);
 
   const isQuarterCompleted = useCallback(
     (id: QuarterId) => {
@@ -4203,6 +4295,73 @@ export default function ExplorateurIA({
     onCompleted: () => navigateToActivities(),
   });
 
+  const attemptPlayMusic = useCallback(() => {
+    if (!isMusicEnabled || isMusicPlaying) {
+      return;
+    }
+    const theme = audioRef.current;
+    if (!theme || !theme.isSupported) {
+      return;
+    }
+    void theme
+      .start()
+      .then(() => setIsMusicPlaying(true))
+      .catch(() => {
+        setIsMusicPlaying(false);
+        // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
+      });
+  }, [isMusicEnabled, isMusicPlaying]);
+
+  const toggleMusic = () => {
+    if (!isMusicSupported) {
+      return;
+    }
+    setIsMusicEnabled((value) => !value);
+  };
+
+  const move = useCallback(
+    (dx: number, dy: number): boolean => {
+      let moved = false;
+      setPlayer((current) => {
+        const nx = current.x + dx;
+        const ny = current.y + dy;
+        const gate = GATE_BY_COORD.get(coordKey(nx, ny));
+        if (gate && !isQuarterCompleted(gate.stage)) {
+          setBlockedStage(gate.stage);
+          return current;
+        }
+        if (!isWalkable(nx, ny, current.x, current.y)) {
+          return current;
+        }
+        if (isMusicEnabled) {
+          attemptPlayMusic();
+        }
+        setWalkStep((step) => step + 1);
+        moved = true;
+        return { x: nx, y: ny };
+      });
+      return moved;
+    },
+    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
+  );
+
+  const buildingAt = useCallback((x: number, y: number) => {
+    return buildings.find((building) => building.x === x && building.y === y) || null;
+  }, []);
+
+  const openIfOnBuilding = useCallback(() => {
+    const hit = buildingAt(player.x, player.y);
+    if (!hit) {
+      setMobilePrompt(null);
+      return;
+    }
+    if (isMobile && !isEditMode) {
+      setMobilePrompt(hit.id);
+      return;
+    }
+    setOpen(hit.id);
+  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -4220,9 +4379,35 @@ export default function ExplorateurIA({
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
       const key = event.key.toLowerCase();
-      if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(key)) {
-        event.preventDefault();
+      const target = event.target as EventTarget | null;
+      const typingTarget = isTextualInputTarget(target);
+      const overlayOpen = open !== null || isTerrainModalOpen || isInventoryOpen;
+
+      if (
+        [
+          "arrowup",
+          "arrowdown",
+          "arrowleft",
+          "arrowright",
+          "w",
+          "a",
+          "s",
+          "d",
+        ].includes(key)
+      ) {
+        if (
+          typingTarget ||
+          overlayOpen ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey
+        ) {
+          return;
+        }
         const delta:
           | [number, number]
           | null = key === "arrowup" || key === "w"
@@ -4235,18 +4420,45 @@ export default function ExplorateurIA({
           ? [1, 0]
           : null;
         if (delta) {
+          event.preventDefault();
           move(delta[0], delta[1]);
         }
+        return;
       }
+
       if (key === "enter") {
+        if (typingTarget || overlayOpen) {
+          return;
+        }
         const hit = buildingAt(player.x, player.y);
-        if (hit) setOpen(hit.id);
+        if (hit) {
+          event.preventDefault();
+          setOpen(hit.id);
+        }
+        return;
       }
-      if (key === "escape") setOpen(null);
+
+      if (key === "escape") {
+        if (typingTarget) {
+          return;
+        }
+        if (open !== null) {
+          event.preventDefault();
+          setOpen(null);
+        }
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [player]);
+  }, [
+    buildingAt,
+    isInventoryOpen,
+    isTerrainModalOpen,
+    move,
+    open,
+    player.x,
+    player.y,
+  ]);
 
   useEffect(() => {
     const container = worldContainerRef.current;
@@ -4302,22 +4514,9 @@ export default function ExplorateurIA({
     return () => window.clearTimeout(timeout);
   }, [blockedStage]);
 
-  const attemptPlayMusic = useCallback(() => {
-    if (!isMusicEnabled || isMusicPlaying) {
-      return;
-    }
-    const theme = audioRef.current;
-    if (!theme || !theme.isSupported) {
-      return;
-    }
-    void theme
-      .start()
-      .then(() => setIsMusicPlaying(true))
-      .catch(() => {
-        setIsMusicPlaying(false);
-        // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
-      });
-  }, [isMusicEnabled, isMusicPlaying]);
+  useEffect(() => {
+    persistMusicPreference(isMusicEnabled);
+  }, [isMusicEnabled]);
 
   useEffect(() => {
     if (!isMusicSupported) {
@@ -4337,56 +4536,6 @@ export default function ExplorateurIA({
       });
     }
   }, [attemptPlayMusic, isMusicEnabled, isMusicPlaying, isMusicSupported]);
-
-  const toggleMusic = () => {
-    if (!isMusicSupported) {
-      return;
-    }
-    setIsMusicEnabled((value) => !value);
-  };
-
-  const move = useCallback(
-    (dx: number, dy: number): boolean => {
-      let moved = false;
-      setPlayer((current) => {
-        const nx = current.x + dx;
-        const ny = current.y + dy;
-        const gate = GATE_BY_COORD.get(coordKey(nx, ny));
-        if (gate && !isQuarterCompleted(gate.stage)) {
-          setBlockedStage(gate.stage);
-          return current;
-        }
-        if (!isWalkable(nx, ny, current.x, current.y)) {
-          return current;
-        }
-        if (isMusicEnabled) {
-          attemptPlayMusic();
-        }
-        setWalkStep((step) => step + 1);
-        moved = true;
-        return { x: nx, y: ny };
-      });
-      return moved;
-    },
-    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
-  );
-
-  const buildingAt = useCallback((x: number, y: number) => {
-    return buildings.find((building) => building.x === x && building.y === y) || null;
-  }, []);
-
-  const openIfOnBuilding = useCallback(() => {
-    const hit = buildingAt(player.x, player.y);
-    if (!hit) {
-      setMobilePrompt(null);
-      return;
-    }
-    if (isMobile && !isEditMode) {
-      setMobilePrompt(hit.id);
-      return;
-    }
-    setOpen(hit.id);
-  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
 
   const findWalkPath = useCallback(
     (fromX: number, fromY: number, toX: number, toY: number): Coord[] => {
@@ -4603,6 +4752,7 @@ export default function ExplorateurIA({
         } satisfies ExplorateurProgress;
       });
       setOpen(null);
+      setBlockedStage(null);
       setCelebrate(true);
       setTimeout(() => setCelebrate(false), 1800);
     },
@@ -4762,7 +4912,7 @@ export default function ExplorateurIA({
     [buildingAt, player.x, player.y]
   );
 
-  const showMobileControls = isMobile && !isEditMode && !open;
+  const showMobileControls = !isEditMode && !open;
 
   const mobilePromptBuilding = useMemo(() => {
     if (!mobilePrompt) {
@@ -4805,7 +4955,7 @@ export default function ExplorateurIA({
   }, []);
 
   useEffect(() => {
-    if (!isMobile || isEditMode) {
+    if (isEditMode) {
       setMobilePrompt(null);
       return;
     }
@@ -4818,58 +4968,70 @@ export default function ExplorateurIA({
     } else {
       setMobilePrompt(null);
     }
-  }, [at, isAutoWalking, isEditMode, isMobile, open]);
+  }, [at, isAutoWalking, isEditMode, open]);
 
   return (
     <div
       className={classNames(
-        "relative w-full",
-        isMobile
-          ? "flex flex-1 h-full min-h-[100dvh] flex-col overflow-hidden"
-          : "space-y-6"
+        "relative flex h-full min-h-[100dvh] w-full flex-1 flex-col overflow-hidden",
+        !isMobile && "gap-6"
       )}
     >
       <Fireworks show={celebrate} />
-      <div
-        className={
-          isMobile
-            ? "grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0"
-            : "grid w-full gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]"
-        }
-      >
-        <div
-          className={
-            isMobile
-              ? "relative flex min-h-0 flex-1 flex-col"
-              : "relative flex flex-col rounded-2xl border bg-white p-4 shadow"
-          }
-        >
+      <div className="grid min-h-0 w-full flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0">
+        <div className="relative flex min-h-0 flex-1 flex-col">
           {!isMobile && (
             <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
               <span className="tracking-wide uppercase">Tiny Town</span>
             </div>
           )}
-          <div
-            className={classNames(
-              "relative w-full",
-              isMobile ? "flex-1 min-h-0" : "mt-4 max-w-full"
-            )}
-          >
+          <div className="relative w-full flex-1 min-h-0">
             <div
-              className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3"
+              className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex flex-wrap items-start justify-between gap-3"
             >
-              <button
-                type="button"
-                onClick={navigateToActivities}
-                className={classNames(
-                  "pointer-events-auto flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
-                  isMobile ? "active:scale-95" : "hover:bg-slate-100"
+              <div className="pointer-events-auto flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={navigateToActivities}
+                  className={classNames(
+                    "flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                    isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                  )}
+                  title="Retour aux activités"
+                >
+                  <span aria-hidden="true">←</span>
+                  <span className="sr-only">Revenir à la liste des activités</span>
+                </button>
+                {canToggleEditMode && (
+                  <button
+                    type="button"
+                    onClick={handleToggleEditMode}
+                    className={classNames(
+                      "flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold shadow-sm backdrop-blur",
+                      isEditMode
+                        ? "border-red-500/30 bg-red-50 text-red-700"
+                        : "border-orange-400/30 bg-orange-50 text-orange-700",
+                      isMobile ? "active:scale-95" : "hover:bg-white/90"
+                    )}
+                    aria-pressed={isEditMode}
+                  >
+                    {isEditMode ? "Quitter l'édition" : "Mode édition"}
+                  </button>
                 )}
-                title="Retour aux activités"
-              >
-                <span aria-hidden="true">←</span>
-                <span className="sr-only">Revenir à la liste des activités</span>
-              </button>
+                {isEditMode && (
+                  <button
+                    type="button"
+                    onClick={handleOpenTerrainModal}
+                    className={classNames(
+                      "flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                      isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                    )}
+                  >
+                    <span aria-hidden="true">🗺️</span>
+                    <span>Terrain</span>
+                  </button>
+                )}
+              </div>
               <div className="pointer-events-auto flex flex-col items-end gap-2">
                 <button
                   type="button"
@@ -4914,30 +5076,19 @@ export default function ExplorateurIA({
             </div>
             <div
               ref={worldContainerRef}
-              className={classNames(
-                "relative touch-manipulation",
-                isMobile
-                  ? "flex-1 min-h-0 h-full w-full overflow-hidden"
-                  : "max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
-              )}
-              style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
+              className="relative flex h-full w-full flex-1 min-h-0 overflow-auto overscroll-contain scroll-smooth touch-manipulation"
             >
               <div
-                className={
-                  isMobile ? "flex h-full w-full" : "inline-block p-3"
-                }
+                className={classNames(
+                  "grid min-w-max",
+                  isMobile && "h-full w-full"
+                )}
+                style={{
+                  gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
+                  gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
+                  gap: TILE_GAP,
+                }}
               >
-                <div
-                  className={classNames(
-                    "grid",
-                    isMobile ? "h-full w-full min-w-max" : "min-w-max"
-                  )}
-                  style={{
-                    gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
-                    gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
-                    gap: TILE_GAP,
-                  }}
-                >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
                     const activeTileset =
@@ -5042,7 +5193,6 @@ export default function ExplorateurIA({
                     );
                   })
                 )}
-                </div>
               </div>
             </div>
             {showMobileControls && (
@@ -5057,159 +5207,27 @@ export default function ExplorateurIA({
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
             @keyframes prompt-pop { 0%{ transform: translateY(18px) scale(0.92); opacity: 0; } 60%{ transform: translateY(-6px) scale(1.04); opacity: 1; } 100%{ transform: translateY(0) scale(1); opacity: 1; } }
           `}</style>
-          {!isMobile && (
-            <div className="mt-3 flex items-center justify-between text-sm">
-              <div>
-                {at ? (
-                  <span>
-                    Vous êtes devant: <span className="font-semibold">{at.label}</span>
-                  </span>
-                ) : (
-                  <span>Explorez la ville et entrez dans un quartier.</span>
-                )}
-              </div>
-              <button
-                onClick={openIfOnBuilding}
-                className="w-full rounded-lg border bg-slate-100 px-3 py-2 sm:w-auto"
-              >
-                Entrer
-              </button>
-            </div>
-          )}
         </div>
-        {!isMobile && (
-          <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Progression
-            </div>
-            <ul className="mt-2 text-sm space-y-2">
-              {buildings.map((building) => (
-                <li key={building.id} className="flex items-center justify-between gap-3">
-                  {(() => {
-                    const key = coordKey(building.x, building.y);
-                    const tileBlocked = activeGateKeys.has(key);
-                    const gate = GATE_BY_COORD.get(key);
-                    const lockMessageStage = gate?.stage ?? building.id;
-                    const isLocked = tileBlocked && !isQuarterCompleted(building.id);
-                    return (
-                      <button
-                        onClick={() => {
-                          if (isLocked) {
-                            setBlockedStage(lockMessageStage);
-                            return;
-                          }
-                          setOpen(building.id);
-                        }}
-                        disabled={isLocked}
-                        className={classNames(
-                          "text-left",
-                          isLocked
-                            ? "cursor-not-allowed opacity-60"
-                            : "hover:underline"
-                        )}
-                        style={{ color: building.color }}
-                      >
-                        {building.label}
-                      </button>
-                    );
-                  })()}
-                  <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50">
-                    {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
-                    {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
-                    {building.id === "decision" && (progress.decision.done ? "OK" : "À faire")}
-                    {building.id === "ethique" && (progress.ethique.done ? "OK" : "À faire")}
-                    {building.id === "mairie" && (progress.mairie.done ? "OK" : "À faire")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Contrôles
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <DPad onMove={move} />
-              <div className="text-xs text-slate-600 space-y-1">
-                <p>Entrer: Ouvrir</p>
-                <p>Échap: Fermer</p>
-                <p>Clic: Accès direct</p>
-              </div>
-            </div>
-            {blockedStage && (
-              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
-                Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
-              </div>
-            )}
-          </div>
-          {isEditMode && (
-            <div className="rounded-2xl border bg-white p-4 shadow">
-              <div className="text-xs uppercase tracking-wide text-slate-500">
-                Terrain
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                {TERRAIN_THEME_ORDER.map((key) => {
-                  const theme = TERRAIN_THEMES[key];
-                  const isActive = selectedTheme === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => handleThemeChange(key)}
-                      className={classNames(
-                        "rounded-xl border px-3 py-2 text-left transition",
-                        isActive
-                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
-                      )}
-                      aria-pressed={isActive}
-                    >
-                      {theme.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={handleRegenerateWorld}
-                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
-              >
-                Régénérer la forme
-              </button>
-              <p className="mt-3 text-xs text-slate-500">
-                Choisissez un style pour changer l'apparence et utilisez le bouton pour régénérer la forme de l'île. Le changement est visible immédiatement.
-              </p>
-            </div>
-          )}
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Tileset
-            </div>
-            <TilesetControls ts={tileset} setTs={setTileset} />
-          </div>
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Export
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={downloadJSON}
-                className="px-3 py-2 rounded-xl bg-slate-800 text-white"
-              >
-                JSON
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="px-3 py-2 rounded-xl bg-slate-100 border"
-              >
-                PDF
-              </button>
-            </div>
-          </div>
-          </aside>
-        )}
+
       </div>
+
+      <Modal
+        open={isEditMode && isTerrainModalOpen}
+        onClose={handleCloseTerrainModal}
+        title="Configuration du terrain"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Ajustez le type de terrain pour modifier l'apparence de la carte ou
+            régénérez sa forme.
+          </p>
+          <TerrainThemeOptions
+            selectedTheme={selectedTheme}
+            onSelectTheme={handleThemeChange}
+            onRegenerate={handleRegenerateWorld}
+          />
+        </div>
+      </Modal>
 
       <Modal
         open={isInventoryOpen}
@@ -5229,10 +5247,6 @@ export default function ExplorateurIA({
           renderStepWrapper={renderQuarterStep}
         />
       ) : null}
-
-      <footer className="hidden text-center text-xs text-slate-500 md:block">
-        Module web auto-portant — aucune saisie de texte requise. © Explorateur IA
-      </footer>
     </div>
   );
 }
