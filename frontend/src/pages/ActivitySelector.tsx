@@ -42,6 +42,9 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   form: "Formulaire",
   "rich-content": "Contenu riche",
   video: "Vidéo",
+  "workshop-context": "Atelier · Contexte",
+  "workshop-comparison": "Atelier · Comparaison",
+  "workshop-synthesis": "Atelier · Synthèse",
 };
 
 const NOOP = () => {};

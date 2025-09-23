@@ -15,8 +15,8 @@ import { useAdminAuth } from "../providers/AdminAuthProvider";
 import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
-import WorkshopExperience from "../pages/WorkshopExperience";
 import { StepSequenceActivity, type StepDefinition } from "../modules/step-sequence";
+import type { ModelConfig } from "../config";
 const LazyExplorateurIA = lazy(() => import("../pages/ExplorateurIA"));
 
 const ExplorateurIALoader: ComponentType<ActivityProps> = (props) => (
@@ -30,6 +30,20 @@ const ExplorateurIALoader: ComponentType<ActivityProps> = (props) => (
     <LazyExplorateurIA {...props} />
   </React.Suspense>
 );
+
+const WORKSHOP_DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
+
+const WORKSHOP_DEFAULT_CONFIG_A: ModelConfig = {
+  model: "gpt-5-nano",
+  verbosity: "medium",
+  thinking: "minimal",
+};
+
+const WORKSHOP_DEFAULT_CONFIG_B: ModelConfig = {
+  model: "gpt-5-mini",
+  verbosity: "high",
+  thinking: "high",
+};
 
 export interface ActivityHeaderConfig {
   eyebrow: string;
@@ -86,7 +100,7 @@ export interface ActivityProps {
 }
 
 export const COMPONENT_REGISTRY = {
-  "workshop-experience": WorkshopExperience,
+  "workshop-experience": StepSequenceActivity,
   "prompt-dojo": PromptDojo,
   "clarity-path": ClarityPath,
   "clarte-dabord": ClarteDabord,
@@ -113,8 +127,8 @@ interface ActivityCatalogEntry {
 
 export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
   atelier: {
-    componentKey: "workshop-experience",
-    path: "/atelier/*",
+    componentKey: "step-sequence",
+    path: "/atelier",
     defaults: {
       completionId: "atelier",
       enabled: true,
@@ -141,9 +155,35 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         ],
         cta: {
           label: "Lancer l’atelier",
-          to: "/atelier/etape-1",
+          to: "/atelier",
         },
       },
+      stepSequence: [
+        {
+          id: "workshop-prepare-context",
+          component: "workshop-context",
+          config: {
+            defaultText: WORKSHOP_DEFAULT_TEXT,
+          },
+        },
+        {
+          id: "workshop-compare-models",
+          component: "workshop-comparison",
+          config: {
+            contextStepId: "workshop-prepare-context",
+            defaultConfigA: WORKSHOP_DEFAULT_CONFIG_A,
+            defaultConfigB: WORKSHOP_DEFAULT_CONFIG_B,
+          },
+        },
+        {
+          id: "workshop-synthesis",
+          component: "workshop-synthesis",
+          config: {
+            contextStepId: "workshop-prepare-context",
+            comparisonStepId: "workshop-compare-models",
+          },
+        },
+      ],
     },
   },
   "prompt-dojo": {

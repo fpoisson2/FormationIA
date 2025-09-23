@@ -781,7 +781,7 @@ DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
         "id": "atelier",
         "title": "Atelier comparatif IA",
         "description": "Comparer deux configurations de modèle et produire une synthèse finale.",
-        "route": "/atelier/etape-1",
+        "route": "/atelier",
         "scoreMaximum": 1.0,
     },
     {
