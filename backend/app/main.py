@@ -1240,9 +1240,15 @@ def submit_stage(
     session: LTISession | None = Depends(_optional_lti_session),
     _: None = Depends(_require_api_key),
 ) -> JSONResponse:
-    mission = _get_mission_by_id(payload.mission_id)
-    stages = mission.get("stages") or []
-    if payload.stage_index >= len(stages):
+    mission: dict[str, Any] | None = None
+    try:
+        mission = _get_mission_by_id(payload.mission_id)
+    except HTTPException as exc:  # pragma: no cover - simple guardrail
+        if exc.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+
+    stages = mission.get("stages") or [] if mission else []
+    if mission and payload.stage_index >= len(stages):
         raise HTTPException(status_code=400, detail="Indice de manche invalide pour cette mission.")
 
     raw_run_id = (payload.run_id or "").strip()

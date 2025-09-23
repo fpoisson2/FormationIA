@@ -828,23 +828,6 @@ export function SimulationChatStep({
   return (
     <div className="flex flex-col gap-8 lg:flex-row">
       <div className="flex-1 space-y-8">
-        <header className="space-y-3">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <span className="brand-chip">
-                {stageCount > 0
-                  ? `Manche ${Math.min(stageIndex + 1, stageCount)} / ${stageCount}`
-                  : "Aucune manche"}
-              </span>
-              <h2 className="text-2xl font-semibold text-[color:var(--brand-black)]">
-                {activeConfig.title}
-              </h2>
-              <p className="max-w-2xl text-sm text-[color:var(--brand-charcoal)]/80">
-                {activeConfig.help}
-              </p>
-            </div>
-          </div>
-        </header>
 
         <section className="space-y-6">
           <div className="rounded-3xl border border-white/70 bg-white/90 p-6 shadow-sm">
