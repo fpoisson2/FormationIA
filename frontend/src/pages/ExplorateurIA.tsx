@@ -43,6 +43,53 @@ type Progress = {
   visited: QuarterId[];
 };
 
+type RewardStage = Exclude<QuarterId, "mairie">;
+
+type InventoryDefinition = {
+  stage: RewardStage;
+  title: string;
+  description: string;
+  hint: string;
+  icon: string;
+};
+
+type InventoryEntry = InventoryDefinition & { obtained: boolean };
+
+const INVENTORY_ITEMS: InventoryDefinition[] = [
+  {
+    stage: "clarte",
+    title: "Boussole de clarté",
+    description:
+      "Une boussole calibrée pour pointer vers les consignes les plus limpides.",
+    hint: "Réussissez le défi Clarté pour l'ajouter à votre sac.",
+    icon: "🧭",
+  },
+  {
+    stage: "creation",
+    title: "Palette synthétique",
+    description:
+      "Un set modulable pour combiner styles, médias et tonalités à la demande.",
+    hint: "Terminez le défi Création pour débloquer cet outil.",
+    icon: "🎨",
+  },
+  {
+    stage: "decision",
+    title: "Balance d'arbitrage",
+    description:
+      "Une balance portative qui révèle instantanément impacts et compromis.",
+    hint: "Gagnez le défi Décision pour la remporter.",
+    icon: "⚖️",
+  },
+  {
+    stage: "ethique",
+    title: "Lanterne déontique",
+    description:
+      "Une lanterne qui éclaire les zones d'ombre pour garder le cap éthique.",
+    hint: "Relevez le défi Éthique pour la récupérer.",
+    icon: "🕯️",
+  },
+];
+
 const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
@@ -4069,6 +4116,66 @@ function BadgeView({
   );
 }
 
+function InventoryView({ items }: { items: InventoryEntry[] }) {
+  const collected = items.reduce((total, item) => total + (item.obtained ? 1 : 0), 0);
+  const total = items.length;
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+        <div className="text-sm font-semibold text-emerald-800">
+          {collected} objet{collected > 1 ? "s" : ""} collecté{collected > 1 ? "s" : ""} sur {total}
+        </div>
+        <p className="mt-1 text-sm text-emerald-900/80">
+          Chaque quartier réussi ajoute un objet unique à votre sac d'explorateur.
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {items.map((item) => (
+          <div
+            key={item.stage}
+            className={classNames(
+              "rounded-2xl border p-4 shadow-sm transition",
+              item.obtained
+                ? "border-emerald-200 bg-white"
+                : "border-dashed border-slate-300 bg-slate-50"
+            )}
+          >
+            <div className="flex items-start justify-between">
+              <div className="text-3xl" aria-hidden="true">
+                {item.icon}
+              </div>
+              <span
+                className={classNames(
+                  "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
+                  item.obtained
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-200 text-slate-600"
+                )}
+              >
+                {item.obtained ? "Acquis" : "À débloquer"}
+              </span>
+            </div>
+            <div className="mt-3">
+              <div className="text-base font-semibold text-slate-800">
+                {item.title}
+              </div>
+              <p
+                className={classNames(
+                  "mt-2 text-sm",
+                  item.obtained ? "text-slate-600" : "text-slate-500"
+                )}
+              >
+                {item.obtained ? item.description : item.hint}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ExplorateurIA({
   completionId,
   navigateToActivities,
@@ -4088,6 +4195,7 @@ export default function ExplorateurIA({
     visited: [],
   });
   const [celebrate, setCelebrate] = useState(false);
+  const [isInventoryOpen, setInventoryOpen] = useState(false);
   const [tileset, setTileset] = useTileset();
   const [worldVersion, forceWorldRefresh] = useState(0);
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
@@ -4143,6 +4251,21 @@ export default function ExplorateurIA({
     }
     return active;
   }, [isQuarterCompleted, worldVersion]);
+
+  const inventoryEntries = useMemo<InventoryEntry[]>(
+    () =>
+      INVENTORY_ITEMS.map((item) => ({
+        ...item,
+        obtained: isQuarterCompleted(item.stage),
+      })),
+    [isQuarterCompleted]
+  );
+  const inventoryCollected = inventoryEntries.reduce(
+    (total, item) => total + (item.obtained ? 1 : 0),
+    0
+  );
+  const inventoryTotal = inventoryEntries.length;
+  const inventoryProgressLabel = `${inventoryCollected}/${inventoryTotal}`;
 
   const handleThemeChange = useCallback(
     (themeId: TerrainThemeId) => {
@@ -4645,7 +4768,12 @@ export default function ExplorateurIA({
   );
 
   const handleOpenInventory = useCallback(() => {
-    console.info("[ExplorateurIA] Inventaire à implémenter ultérieurement");
+    setOpen(null);
+    setInventoryOpen(true);
+  }, []);
+
+  const handleCloseInventory = useCallback(() => {
+    setInventoryOpen(false);
   }, []);
 
   useEffect(() => {
@@ -4723,11 +4851,17 @@ export default function ExplorateurIA({
                     isMobile ? "active:scale-95" : "hover:bg-slate-100"
                   )}
                   title="Ouvrir l’inventaire"
+                  aria-label={`Ouvrir l’inventaire (${inventoryProgressLabel} objets collectés)`}
                 >
                   <span aria-hidden="true" className="text-base leading-none">
                     🎒
                   </span>
-                  <span>Inventaire</span>
+                  <span className="flex items-baseline gap-1">
+                    <span>Inventaire</span>
+                    <span className="text-xs font-semibold text-emerald-600">
+                      {inventoryProgressLabel}
+                    </span>
+                  </span>
                 </button>
                 {isMusicSupported && (
                   <button
@@ -5048,6 +5182,14 @@ export default function ExplorateurIA({
           </aside>
         )}
       </div>
+
+      <Modal
+        open={isInventoryOpen}
+        onClose={handleCloseInventory}
+        title="Inventaire d’explorateur"
+      >
+        <InventoryView items={inventoryEntries} />
+      </Modal>
 
       <Modal
         open={open === "clarte"}
