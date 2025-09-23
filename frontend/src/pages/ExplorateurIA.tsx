@@ -325,6 +325,7 @@ type EdgeVariantType = "interior" | "exterior";
 type SandEdgeVariant = {
   exterior: TileCoord;
   interior?: TileCoord;
+  cliff?: TileCoord;
 };
 
 type SandTiles = {
@@ -340,6 +341,7 @@ type SandEdgeCandidate = {
 type SandEdgeCandidateMap = {
   exterior: SandEdgeCandidate;
   interior?: SandEdgeCandidate;
+  cliff?: SandEdgeCandidate;
 };
 
 const EDGE_DIRECTION_SET = new Set<EdgeDirection>(EDGE_DIRECTIONS);
@@ -428,7 +430,10 @@ function computeCenterCandidatePriority(entry: AtlasEntry): number {
   return 0;
 }
 
-function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
+function deriveSandTilesFromAtlas(
+  subtype = "sand",
+  fallbackTiles: SandTiles = FALLBACK_SAND_TILES
+): SandTiles {
   const sandEntries = Array.from(MAP_PACK_ATLAS.values()).filter(
     (entry) => entry.category === "terrain" && entry.subtype === subtype
   );
@@ -437,13 +442,16 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
     center: SandEdgeCandidate;
     edges: Record<EdgeDirection, SandEdgeCandidateMap>;
   } = {
-    center: createSandEdgeCandidate(FALLBACK_SAND_TILES.center),
+    center: createSandEdgeCandidate(fallbackTiles.center),
     edges: EDGE_DIRECTIONS.reduce((acc, direction) => {
-      const fallback = FALLBACK_SAND_TILES.edges[direction];
+      const fallback = fallbackTiles.edges[direction];
       acc[direction] = {
         exterior: createSandEdgeCandidate(fallback.exterior),
         ...(fallback.interior
           ? { interior: createSandEdgeCandidate(fallback.interior) }
+          : {}),
+        ...(fallback.cliff
+          ? { cliff: createSandEdgeCandidate(fallback.cliff) }
           : {}),
       };
       return acc;
@@ -478,8 +486,9 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
     }
 
     const isInterior = entry.tags.includes("coin_interieur");
+    const isCliff = entry.tags.includes("falaise");
     const isEdgeCandidate =
-      isInterior || entry.tags.includes("bordure") || entry.tags.includes("falaise");
+      isInterior || entry.tags.includes("bordure") || isCliff;
     if (!isEdgeCandidate) {
       continue;
     }
@@ -493,6 +502,17 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
       const existing = bucket.interior;
       if (!existing || candidate.priority > existing.priority) {
         bucket.interior = candidate;
+      }
+      if (isCliff) {
+        const existingCliff = bucket.cliff;
+        if (!existingCliff || candidate.priority > existingCliff.priority) {
+          bucket.cliff = candidate;
+        }
+      }
+    } else if (isCliff && !entry.tags.includes("bordure")) {
+      const existing = bucket.cliff;
+      if (!existing || candidate.priority > existing.priority) {
+        bucket.cliff = candidate;
       }
     } else if (candidate.priority > bucket.exterior.priority) {
       bucket.exterior = candidate;
@@ -508,6 +528,7 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
         ...(bucket.interior
           ? { interior: cloneTileCoord(bucket.interior.coord) }
           : {}),
+        ...(bucket.cliff ? { cliff: cloneTileCoord(bucket.cliff.coord) } : {}),
       };
       return acc;
     }, {} as Record<EdgeDirection, SandEdgeVariant>),
@@ -1091,7 +1112,9 @@ type GrassDirection = Exclude<GrassVariantKey, "center">;
 
 type GrassTiles = { center: TileCoord } & Partial<Record<GrassDirection, TileCoord>>;
 
-type PartialSandEdgeVariant = Partial<Record<"exterior" | "interior", TileCoord>>;
+type PartialSandEdgeVariant = Partial<
+  Record<"exterior" | "interior" | "cliff", TileCoord>
+>;
 
 type PartialSandTiles = {
   center?: TileCoord;
@@ -1128,11 +1151,17 @@ type Tileset = {
 
 const DERIVED_SAND_TILES = deriveSandTilesFromAtlas();
 
+const DERIVED_DIRT_TILES = (() => {
+  const derived = deriveSandTilesFromAtlas("dirt");
+  derived.edges.east.exterior = atlas("mapTile_088.png");
+  return derived;
+})();
+
 const BUILTIN_GROUND_VARIANTS = {
   grass: deriveSandTilesFromAtlas("grass"),
-  dirt: deriveSandTilesFromAtlas("dirt"),
-  dirtBrown: deriveSandTilesFromAtlas("dirt_brown"),
-  dirtGray: deriveSandTilesFromAtlas("dirt_gray"),
+  dirt: DERIVED_DIRT_TILES,
+  dirtBrown: deriveSandTilesFromAtlas("dirt_brown", DERIVED_DIRT_TILES),
+  dirtGray: deriveSandTilesFromAtlas("dirt_gray", DERIVED_DIRT_TILES),
   snow: deriveSandTilesFromAtlas("ice"),
 } as const satisfies Record<string, SandTiles>;
 
@@ -1144,6 +1173,7 @@ function cloneSandTiles(source: SandTiles): SandTiles {
       ...(variant.interior
         ? { interior: [...variant.interior] as TileCoord }
         : {}),
+      ...(variant.cliff ? { cliff: [...variant.cliff] as TileCoord } : {}),
     };
     return acc;
   }, {} as Record<EdgeDirection, SandEdgeVariant>);
@@ -1297,6 +1327,15 @@ function mergeSandTiles(partial: PartialSandTiles | undefined, base: SandTiles):
       );
     } else if (baseVariant.interior) {
       mergedVariant.interior = [...baseVariant.interior] as TileCoord;
+    }
+
+    if (partialVariant?.cliff) {
+      mergedVariant.cliff = normalizeCoord(
+        partialVariant.cliff as TileCoord,
+        baseVariant.cliff ?? exterior
+      );
+    } else if (baseVariant.cliff) {
+      mergedVariant.cliff = [...baseVariant.cliff] as TileCoord;
     }
 
     acc[direction] = mergedVariant;
@@ -3353,7 +3392,8 @@ function isDiagonalEdgeOrientation(orientation: EdgeOrientation): boolean {
 function getSandEdgeVariantCoord(
   sandTiles: SandTiles,
   orientation: EdgeOrientation,
-  variant: EdgeVariantType
+  variant: EdgeVariantType,
+  preferCliff = false
 ): TileCoord | null {
   const direction = resolveEdgeDirection(orientation);
   if (!direction) {
@@ -3363,8 +3403,11 @@ function getSandEdgeVariantCoord(
   if (!bucket) {
     return null;
   }
+  if (preferCliff && bucket.cliff) {
+    return bucket.cliff;
+  }
   const preferred = variant === "interior" ? bucket.interior : bucket.exterior;
-  return preferred ?? bucket.exterior ?? bucket.interior ?? null;
+  return preferred ?? bucket.exterior ?? bucket.interior ?? bucket.cliff ?? null;
 }
 
 function getSandTileCoord(
@@ -3656,7 +3699,8 @@ function TileWithTs({
     ? getSandEdgeVariantCoord(
         baseVariantTiles ?? activeTileset.map.sand,
         edgePlacement.orientation,
-        edgePlacement.variant
+        edgePlacement.variant,
+        true
       )
     : null;
 
