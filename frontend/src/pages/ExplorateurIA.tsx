@@ -4636,6 +4636,10 @@ export default function ExplorateurIA({
     [cancelAutoWalk, move]
   );
 
+  const handleOpenInventory = useCallback(() => {
+    console.info("[ExplorateurIA] Inventaire à implémenter ultérieurement");
+  }, []);
+
   useEffect(() => {
     if (!isMobile || isEditMode) {
       setMobilePrompt(null);
@@ -4682,49 +4686,86 @@ export default function ExplorateurIA({
             </div>
           )}
           <div
-            ref={worldContainerRef}
             className={classNames(
-              "relative touch-manipulation",
-              isMobile
-                ? "flex-1 min-h-0 h-full w-full overflow-hidden"
-                : "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
+              "relative w-full",
+              isMobile ? "flex-1 min-h-0" : "mt-4 max-w-full"
             )}
-            style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
-            {isMusicSupported && (
+            <div
+              className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3"
+            >
               <button
                 type="button"
-                onClick={toggleMusic}
+                onClick={navigateToActivities}
                 className={classNames(
-                  "absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                  "pointer-events-auto flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
                   isMobile ? "active:scale-95" : "hover:bg-slate-100"
                 )}
-                aria-pressed={isMusicPlaying}
-                aria-label={
-                  isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
-                }
-                title={isMusicPlaying ? "Pause" : "Lecture"}
+                title="Retour aux activités"
               >
-                <span aria-hidden="true">{isMusicPlaying ? "⏸" : "♫"}</span>
-                <span>{isMusicPlaying ? "Pause" : "Musique"}</span>
+                <span aria-hidden="true">←</span>
+                <span className="sr-only">Revenir à la liste des activités</span>
               </button>
-            )}
+              <div className="pointer-events-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenInventory}
+                  className={classNames(
+                    "flex items-center justify-center rounded-full border bg-white/90 p-2 text-base font-semibold text-slate-700 shadow-sm backdrop-blur",
+                    isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                  )}
+                  title="Ouvrir l’inventaire"
+                >
+                  <span aria-hidden="true">🎒</span>
+                  <span className="sr-only">Ouvrir l’inventaire</span>
+                </button>
+                {isMusicSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleMusic}
+                    className={classNames(
+                      "flex items-center justify-center rounded-full border bg-white/90 p-2 text-base font-semibold text-slate-700 shadow-sm backdrop-blur",
+                      isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                    )}
+                    aria-pressed={isMusicPlaying}
+                    title={
+                      isMusicPlaying ? "Couper la musique" : "Activer la musique"
+                    }
+                  >
+                    <span className="sr-only">
+                      {isMusicPlaying ? "Couper la musique" : "Activer la musique"}
+                    </span>
+                    <span aria-hidden="true">{isMusicPlaying ? "🔊" : "🔇"}</span>
+                  </button>
+                )}
+              </div>
+            </div>
             <div
-              className={
-                isMobile ? "flex h-full w-full" : "inline-block p-3"
-              }
+              ref={worldContainerRef}
+              className={classNames(
+                "relative touch-manipulation",
+                isMobile
+                  ? "flex-1 min-h-0 h-full w-full overflow-hidden"
+                  : "max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
+              )}
+              style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
             >
               <div
-                className={classNames(
-                  "grid",
-                  isMobile ? "h-full w-full min-w-max" : "min-w-max"
-                )}
-                style={{
-                  gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
-                  gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
-                  gap: TILE_GAP,
-                }}
+                className={
+                  isMobile ? "flex h-full w-full" : "inline-block p-3"
+                }
               >
+                <div
+                  className={classNames(
+                    "grid",
+                    isMobile ? "h-full w-full min-w-max" : "min-w-max"
+                  )}
+                  style={{
+                    gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
+                    gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
+                    gap: TILE_GAP,
+                  }}
+                >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
                     const activeTileset =
@@ -4829,6 +4870,7 @@ export default function ExplorateurIA({
                     );
                   })
                 )}
+                </div>
               </div>
             </div>
             {showMobileControls && (
