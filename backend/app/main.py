@@ -298,6 +298,33 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Mission introuvable.")
 
 
+def _normalize_activities_payload(
+    activities: list[Any], *, error_status: int
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, raw_activity in enumerate(activities, start=1):
+        if not isinstance(raw_activity, dict):
+            raise HTTPException(
+                status_code=error_status,
+                detail="Chaque activité doit être un objet JSON.",
+            )
+        try:
+            validated = ActivityPayload.model_validate(raw_activity)
+        except ValidationError as exc:
+            detail = f"Activité #{index} invalide."
+            for error in exc.errors():
+                loc = error.get("loc", ())
+                if loc and loc[0] == "stepSequence":
+                    detail = (
+                        f"Activité #{index}: stepSequence contient une étape invalide: "
+                        f"{error.get('msg')}"
+                    )
+                    break
+            raise HTTPException(status_code=error_status, detail=detail) from exc
+        normalized.append(validated.model_dump(by_alias=True, exclude_none=True))
+    return normalized
+
+
 def _load_activities_config() -> dict[str, Any]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
     if not ACTIVITIES_CONFIG_PATH.exists():
@@ -336,6 +363,8 @@ def _load_activities_config() -> dict[str, Any]:
             detail="activities_config.json doit contenir une configuration valide.",
         )
 
+    activities = _normalize_activities_payload(activities, error_status=500)
+
     config: dict[str, Any] = {"activities": activities}
     if activity_selector_header is not None:
         config["activitySelectorHeader"] = activity_selector_header
@@ -352,7 +381,9 @@ def _save_activities_config(config: dict[str, Any]) -> None:
             detail="activities doit être un tableau d'activités.",
         )
 
-    payload: dict[str, Any] = {"activities": activities}
+    normalized_activities = _normalize_activities_payload(activities, error_status=400)
+
+    payload: dict[str, Any] = {"activities": normalized_activities}
     header = config.get("activitySelectorHeader")
     if header is not None:
         if not isinstance(header, dict):
@@ -676,10 +707,24 @@ class ActivitySelectorHeader(BaseModel):
     badge: str | None = None
 
 
+class StepDefinitionPayload(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+
+    type: str = Field(..., min_length=1)
+
+
+class ActivityPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="allow")
+
+    step_sequence: list[StepDefinitionPayload] | None = Field(
+        default=None, alias="stepSequence"
+    )
+
+
 class ActivityConfigRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
-    activities: list[dict[str, Any]] = Field(..., min_items=1)
+    activities: list[ActivityPayload] = Field(..., min_items=1)
     activity_selector_header: ActivitySelectorHeader | None = Field(
         default=None, alias="activitySelectorHeader"
     )
