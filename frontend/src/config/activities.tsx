@@ -299,12 +299,12 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
       },
       layout: {
         outerClassName:
-          "flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden px-0 pt-0 pb-0 lg:h-auto lg:min-h-screen lg:px-6 lg:pt-10 lg:pb-16",
+          "flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden px-0 pt-0 pb-0",
         innerClassName:
-          "flex h-full min-h-0 flex-1 w-full max-w-none gap-0 lg:h-auto lg:gap-12",
-        headerClassName: "hidden lg:block",
+          "flex h-full min-h-0 flex-1 w-full max-w-none gap-0",
+        headerClassName: "hidden",
         contentClassName:
-          "flex h-full min-h-0 flex-1 flex-col space-y-0 lg:h-auto lg:space-y-12",
+          "flex h-full min-h-0 flex-1 flex-col space-y-0",
         withLandingGradient: false,
         useDynamicViewportHeight: true,
         withBasePadding: false,

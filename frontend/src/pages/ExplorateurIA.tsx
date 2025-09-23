@@ -12,6 +12,7 @@ import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesh
 import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
 import {
   StepSequenceRenderer,
   type StepSequenceRenderWrapperProps,
@@ -102,6 +103,8 @@ const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
+const DESKTOP_TILE_MAX_SIZE = 48;
+const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
 type TileScaleMode = "contain" | "cover";
 
 type AtlasCategory = "" | "terrain" | "path" | "object" | "character" | "ui";
@@ -1337,6 +1340,54 @@ function SpriteFromAtlas({
   );
 }
 
+function TerrainThemeOptions({
+  selectedTheme,
+  onSelectTheme,
+  onRegenerate,
+}: {
+  selectedTheme: TerrainThemeId;
+  onSelectTheme: (theme: TerrainThemeId) => void;
+  onRegenerate: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        {TERRAIN_THEME_ORDER.map((key) => {
+          const theme = TERRAIN_THEMES[key];
+          const isActive = selectedTheme === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onSelectTheme(key)}
+              className={classNames(
+                "rounded-xl border px-3 py-2 text-left transition",
+                isActive
+                  ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                  : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
+              )}
+              aria-pressed={isActive}
+            >
+              {theme.label}
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={onRegenerate}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
+      >
+        Régénérer la forme
+      </button>
+      <p className="text-xs text-slate-500">
+        Choisissez un style pour changer l'apparence et utilisez le bouton pour
+        régénérer la forme de l'île. Le changement est visible immédiatement.
+      </p>
+    </div>
+  );
+}
+
 function TilesetControls({
   ts,
   setTs,
@@ -1427,7 +1478,10 @@ function measureViewport(): { width: number; height: number } {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
-function computeTileSize(mode: TileScaleMode = "contain"): number {
+function computeTileSize(
+  mode: TileScaleMode = "contain",
+  maxSize = BASE_TILE_SIZE
+): number {
   if (typeof window === "undefined") {
     return BASE_TILE_SIZE;
   }
@@ -1451,14 +1505,18 @@ function computeTileSize(mode: TileScaleMode = "contain"): number {
   const fallback = Number.isFinite(containFit) && containFit > 0
     ? Math.min(MIN_TILE_SIZE, containFit)
     : MIN_TILE_SIZE;
-  const capped = Math.min(BASE_TILE_SIZE, rawFit);
+  const capped = Math.min(maxSize, rawFit);
   const normalized = Math.max(capped, fallback);
 
   return Math.round(normalized * 100) / 100;
 }
 
-function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
-  const [size, setSize] = useState(() => computeTileSize(mode));
+function useResponsiveTileSize(
+  mode: TileScaleMode = "contain",
+  options?: { maxSize?: number }
+): number {
+  const { maxSize = BASE_TILE_SIZE } = options ?? {};
+  const [size, setSize] = useState(() => computeTileSize(mode, maxSize));
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1466,7 +1524,7 @@ function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
     }
 
     const recompute = () => {
-      const nextSize = computeTileSize(mode);
+      const nextSize = computeTileSize(mode, maxSize);
       setSize((current) => (current === nextSize ? current : nextSize));
     };
 
@@ -1488,7 +1546,7 @@ function useResponsiveTileSize(mode: TileScaleMode = "contain"): number {
         viewport.removeEventListener("scroll", recompute);
       }
     };
-  }, [mode]);
+  }, [maxSize, mode]);
 
   return size;
 }
@@ -4059,9 +4117,13 @@ export default function ExplorateurIA({
   stepSequence,
   setStepSequence,
 }: ActivityProps) {
+  const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
-  const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain");
+  const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain", {
+    maxSize: isMobile ? BASE_TILE_SIZE : DESKTOP_TILE_MAX_SIZE,
+  });
   const cellSize = tileSize + TILE_GAP;
+  const [isTerrainModalOpen, setTerrainModalOpen] = useState(false);
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
   const [mobilePrompt, setMobilePrompt] = useState<QuarterId | null>(null);
@@ -4096,6 +4158,40 @@ export default function ExplorateurIA({
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+
+  const canToggleEditMode = useMemo(() => {
+    if (adminStatus !== "authenticated") {
+      return false;
+    }
+    const roles = (adminUser?.roles ?? []).map((role) =>
+      role.toLowerCase().trim()
+    );
+    return roles.some((role) => ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number]));
+  }, [adminStatus, adminUser?.roles]);
+
+  const handleToggleEditMode = useCallback(() => {
+    if (!canToggleEditMode) {
+      return;
+    }
+    setEditMode(!isEditMode);
+  }, [canToggleEditMode, isEditMode, setEditMode]);
+
+  const handleOpenTerrainModal = useCallback(() => {
+    if (!isEditMode) {
+      return;
+    }
+    setTerrainModalOpen(true);
+  }, [isEditMode]);
+
+  const handleCloseTerrainModal = useCallback(() => {
+    setTerrainModalOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setTerrainModalOpen(false);
+    }
+  }, [isEditMode]);
 
   const isQuarterCompleted = useCallback(
     (id: QuarterId) => {
@@ -4837,39 +4933,59 @@ export default function ExplorateurIA({
             : "grid w-full gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]"
         }
       >
-        <div
-          className={
-            isMobile
-              ? "relative flex min-h-0 flex-1 flex-col"
-              : "relative flex flex-col rounded-2xl border bg-white p-4 shadow"
-          }
-        >
+        <div className="relative flex min-h-0 flex-1 flex-col">
           {!isMobile && (
             <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
               <span className="tracking-wide uppercase">Tiny Town</span>
             </div>
           )}
-          <div
-            className={classNames(
-              "relative w-full",
-              isMobile ? "flex-1 min-h-0" : "mt-4 max-w-full"
-            )}
-          >
+          <div className="relative w-full flex-1 min-h-0">
             <div
-              className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3"
+              className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex flex-wrap items-start justify-between gap-3"
             >
-              <button
-                type="button"
-                onClick={navigateToActivities}
-                className={classNames(
-                  "pointer-events-auto flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
-                  isMobile ? "active:scale-95" : "hover:bg-slate-100"
+              <div className="pointer-events-auto flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={navigateToActivities}
+                  className={classNames(
+                    "flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                    isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                  )}
+                  title="Retour aux activités"
+                >
+                  <span aria-hidden="true">←</span>
+                  <span className="sr-only">Revenir à la liste des activités</span>
+                </button>
+                {canToggleEditMode && (
+                  <button
+                    type="button"
+                    onClick={handleToggleEditMode}
+                    className={classNames(
+                      "flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold shadow-sm backdrop-blur",
+                      isEditMode
+                        ? "border-red-500/30 bg-red-50 text-red-700"
+                        : "border-orange-400/30 bg-orange-50 text-orange-700",
+                      isMobile ? "active:scale-95" : "hover:bg-white/90"
+                    )}
+                    aria-pressed={isEditMode}
+                  >
+                    {isEditMode ? "Quitter l'édition" : "Mode édition"}
+                  </button>
                 )}
-                title="Retour aux activités"
-              >
-                <span aria-hidden="true">←</span>
-                <span className="sr-only">Revenir à la liste des activités</span>
-              </button>
+                {isEditMode && (
+                  <button
+                    type="button"
+                    onClick={handleOpenTerrainModal}
+                    className={classNames(
+                      "flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                      isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                    )}
+                  >
+                    <span aria-hidden="true">🗺️</span>
+                    <span>Terrain</span>
+                  </button>
+                )}
+              </div>
               <div className="pointer-events-auto flex flex-col items-end gap-2">
                 <button
                   type="button"
@@ -4914,24 +5030,11 @@ export default function ExplorateurIA({
             </div>
             <div
               ref={worldContainerRef}
-              className={classNames(
-                "relative touch-manipulation",
-                isMobile
-                  ? "flex-1 min-h-0 h-full w-full overflow-hidden"
-                  : "max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
-              )}
-              style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
+              className="relative flex h-full w-full flex-1 min-h-0 overflow-hidden touch-manipulation"
             >
-              <div
-                className={
-                  isMobile ? "flex h-full w-full" : "inline-block p-3"
-                }
-              >
+              <div className="flex h-full w-full">
                 <div
-                  className={classNames(
-                    "grid",
-                    isMobile ? "h-full w-full min-w-max" : "min-w-max"
-                  )}
+                  className="grid h-full w-full min-w-max"
                   style={{
                     gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
                     gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
@@ -5148,38 +5251,13 @@ export default function ExplorateurIA({
               <div className="text-xs uppercase tracking-wide text-slate-500">
                 Terrain
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                {TERRAIN_THEME_ORDER.map((key) => {
-                  const theme = TERRAIN_THEMES[key];
-                  const isActive = selectedTheme === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => handleThemeChange(key)}
-                      className={classNames(
-                        "rounded-xl border px-3 py-2 text-left transition",
-                        isActive
-                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
-                      )}
-                      aria-pressed={isActive}
-                    >
-                      {theme.label}
-                    </button>
-                  );
-                })}
+              <div className="mt-3">
+                <TerrainThemeOptions
+                  selectedTheme={selectedTheme}
+                  onSelectTheme={handleThemeChange}
+                  onRegenerate={handleRegenerateWorld}
+                />
               </div>
-              <button
-                type="button"
-                onClick={handleRegenerateWorld}
-                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
-              >
-                Régénérer la forme
-              </button>
-              <p className="mt-3 text-xs text-slate-500">
-                Choisissez un style pour changer l'apparence et utilisez le bouton pour régénérer la forme de l'île. Le changement est visible immédiatement.
-              </p>
             </div>
           )}
           <div className="rounded-2xl border bg-white p-4 shadow">
@@ -5210,6 +5288,24 @@ export default function ExplorateurIA({
           </aside>
         )}
       </div>
+
+      <Modal
+        open={isEditMode && isTerrainModalOpen}
+        onClose={handleCloseTerrainModal}
+        title="Configuration du terrain"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Ajustez le type de terrain pour modifier l'apparence de la carte ou
+            régénérez sa forme.
+          </p>
+          <TerrainThemeOptions
+            selectedTheme={selectedTheme}
+            onSelectTheme={handleThemeChange}
+            onRegenerate={handleRegenerateWorld}
+          />
+        </div>
+      </Modal>
 
       <Modal
         open={isInventoryOpen}
