@@ -5049,27 +5049,8 @@ export default function ExplorateurIA({
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
             @keyframes prompt-pop { 0%{ transform: translateY(18px) scale(0.92); opacity: 0; } 60%{ transform: translateY(-6px) scale(1.04); opacity: 1; } 100%{ transform: translateY(0) scale(1); opacity: 1; } }
           `}</style>
-          {!isMobile && (
-            <div className="mt-3 flex items-center justify-between text-sm">
-              <div>
-                {at ? (
-                  <span>
-                    Vous êtes devant: <span className="font-semibold">{at.label}</span>
-                  </span>
-                ) : (
-                  <span>Explorez la ville et entrez dans un quartier.</span>
-                )}
-              </div>
-              <button
-                onClick={openIfOnBuilding}
-                className="w-full rounded-lg border bg-slate-100 px-3 py-2 sm:w-auto"
-              >
-                Entrer
-              </button>
-            </div>
-          )}
         </div>
-        
+
       </div>
 
       <Modal
@@ -5108,10 +5089,6 @@ export default function ExplorateurIA({
           renderStepWrapper={renderQuarterStep}
         />
       ) : null}
-
-      <footer className="hidden text-center text-xs text-slate-500 md:block">
-        Module web auto-portant — aucune saisie de texte requise. © Explorateur IA
-      </footer>
     </div>
   );
 }
