@@ -20,6 +20,10 @@ import {
   DILEMMAS,
   type CreationSpec,
 } from "./explorateurIA/worlds/world1";
+import {
+  createChiptuneTheme,
+  type ChiptuneTheme,
+} from "./explorateurIA/audio/chiptuneTheme";
 
 // ---
 // "Explorateur IA" — Frontend React (module web auto-portant)
@@ -44,8 +48,6 @@ const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
 type TileScaleMode = "contain" | "cover";
-
-const BACKGROUND_THEME_URL = "/explorateur_theme.wav";
 
 type AtlasCategory = "" | "terrain" | "path" | "object" | "character" | "ui";
 
@@ -4092,9 +4094,10 @@ export default function ExplorateurIA({
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [isMusicSupported, setIsMusicSupported] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
   const firstScrollRef = useRef(true);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<ChiptuneTheme | null>(null);
   const completionTriggered = useRef(false);
   const autoWalkQueue = useRef<Coord[]>([]);
   const autoWalkTarget = useRef<Coord | null>(null);
@@ -4184,13 +4187,14 @@ export default function ExplorateurIA({
     if (typeof window === "undefined") {
       return;
     }
-    const audio = new Audio(BACKGROUND_THEME_URL);
-    audio.loop = true;
-    audio.volume = 0.35;
-    audioRef.current = audio;
+    const theme = createChiptuneTheme();
+    audioRef.current = theme;
+    setIsMusicSupported(theme.isSupported);
     return () => {
-      audio.pause();
+      theme.dispose();
       audioRef.current = null;
+      setIsMusicSupported(false);
+      setIsMusicPlaying(false);
     };
   }, []);
 
@@ -4284,31 +4288,37 @@ export default function ExplorateurIA({
     if (isMusicPlaying) {
       return;
     }
-    const audio = audioRef.current;
-    if (!audio) {
+    const theme = audioRef.current;
+    if (!theme || !theme.isSupported) {
       return;
     }
-    audio.loop = true;
-    audio.volume = 0.35;
-    void audio.play().then(() => setIsMusicPlaying(true)).catch(() => {
-      // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
-    });
+    void theme
+      .start()
+      .then(() => setIsMusicPlaying(true))
+      .catch(() => {
+        // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
+      });
   }, [isMusicPlaying]);
 
   const toggleMusic = () => {
-    const audio = audioRef.current;
-    if (!audio) {
+    if (!isMusicSupported) {
+      return;
+    }
+    const theme = audioRef.current;
+    if (!theme || !theme.isSupported) {
       return;
     }
     if (isMusicPlaying) {
-      audio.pause();
-      setIsMusicPlaying(false);
-    } else {
-      audio.loop = true;
-      audio.volume = 0.35;
-      void audio.play().then(() => setIsMusicPlaying(true)).catch(() => {
-        // L'utilisateur devra réessayer en cas de blocage navigateur.
+      void theme.stop().finally(() => {
+        setIsMusicPlaying(false);
       });
+    } else {
+      void theme
+        .start()
+        .then(() => setIsMusicPlaying(true))
+        .catch(() => {
+          // L'utilisateur devra réessayer en cas de blocage navigateur.
+        });
     }
   };
 
@@ -4669,17 +4679,6 @@ export default function ExplorateurIA({
           {!isMobile && (
             <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
               <span className="tracking-wide uppercase">Tiny Town</span>
-              <button
-                onClick={toggleMusic}
-                className="rounded-full border bg-white px-2 py-[2px] text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                aria-pressed={isMusicPlaying}
-                aria-label={
-                  isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
-                }
-                title={isMusicPlaying ? "Pause" : "Lecture"}
-              >
-                {isMusicPlaying ? "⏸" : "♫"}
-              </button>
             </div>
           )}
           <div
@@ -4692,6 +4691,24 @@ export default function ExplorateurIA({
             )}
             style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
+            {isMusicSupported && (
+              <button
+                type="button"
+                onClick={toggleMusic}
+                className={classNames(
+                  "absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                  isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                )}
+                aria-pressed={isMusicPlaying}
+                aria-label={
+                  isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
+                }
+                title={isMusicPlaying ? "Pause" : "Lecture"}
+              >
+                <span aria-hidden="true">{isMusicPlaying ? "⏸" : "♫"}</span>
+                <span>{isMusicPlaying ? "Pause" : "Musique"}</span>
+              </button>
+            )}
             <div
               className={
                 isMobile ? "flex h-full w-full" : "inline-block p-3"
