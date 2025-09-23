@@ -1432,8 +1432,19 @@ function computeTileSize(
     : MIN_TILE_SIZE;
   const capped = Math.min(maxSize, rawFit);
   const normalized = Math.max(capped, fallback);
+  const fallbackSize = Math.max(1, Math.round(fallback));
 
-  return Math.round(normalized * 100) / 100;
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return fallbackSize > 0 ? fallbackSize : MIN_TILE_SIZE;
+  }
+
+  const quantized = Math.round(normalized);
+
+  if (!Number.isFinite(quantized) || quantized <= 0) {
+    return fallbackSize > 0 ? fallbackSize : MIN_TILE_SIZE;
+  }
+
+  return quantized;
 }
 
 function useResponsiveTileSize(
@@ -4915,17 +4926,19 @@ export default function ExplorateurIA({
             </div>
             <div
               ref={worldContainerRef}
-              className="relative flex h-full w-full flex-1 min-h-0 overflow-hidden touch-manipulation"
+              className="relative flex h-full w-full flex-1 min-h-0 overflow-auto overscroll-contain scroll-smooth touch-manipulation"
             >
-              <div className="flex h-full w-full">
-                <div
-                  className="grid h-full w-full min-w-max"
-                  style={{
-                    gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
-                    gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
-                    gap: TILE_GAP,
-                  }}
-                >
+              <div
+                className={classNames(
+                  "grid min-w-max",
+                  isMobile && "h-full w-full"
+                )}
+                style={{
+                  gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
+                  gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
+                  gap: TILE_GAP,
+                }}
+              >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
                     const activeTileset =
@@ -5030,7 +5043,6 @@ export default function ExplorateurIA({
                     );
                   })
                 )}
-                </div>
               </div>
             </div>
             {showMobileControls && (
