@@ -16,6 +16,7 @@ import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
 import WorkshopExperience from "../pages/WorkshopExperience";
+import { StepSequenceActivity } from "../modules/step-sequence";
 const LazyExplorateurIA = lazy(() => import("../pages/ExplorateurIA"));
 
 const ExplorateurIALoader: ComponentType<ActivityProps> = (props) => (
@@ -89,6 +90,7 @@ export const COMPONENT_REGISTRY = {
   "clarity-path": ClarityPath,
   "clarte-dabord": ClarteDabord,
   "explorateur-ia": ExplorateurIALoader,
+  "step-sequence": StepSequenceActivity,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
 
 export type ActivityComponentKey = keyof typeof COMPONENT_REGISTRY;

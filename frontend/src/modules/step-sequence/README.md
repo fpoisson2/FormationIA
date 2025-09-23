@@ -54,3 +54,15 @@ function ConfirmationStep() {
   );
 }
 ```
+
+## Activité clé en main
+
+Le module expose également un composant `StepSequenceActivity` utilisable via le registre global des activités. Il attend une configuration de métadonnées respectant la forme suivante :
+
+```ts
+type StepSequenceActivityConfig = {
+  steps: StepDefinition[];
+};
+```
+
+Les étapes peuvent provenir directement des props ou de la clé `steps` de ces métadonnées. Lorsque la dernière étape appelle `onAdvance`, le callback `onComplete` fourni à l’activité est déclenché avec les `payloads` agrégés par identifiant d’étape.
