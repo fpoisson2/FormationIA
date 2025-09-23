@@ -3,6 +3,11 @@ import { useContext } from "react";
 import { getStepComponent, registerStepComponent, STEP_COMPONENT_REGISTRY } from "./registry";
 import { StepSequenceRenderer } from "./StepSequenceRenderer";
 import type { StepSequenceRendererProps } from "./StepSequenceRenderer";
+import { StepSequenceActivity } from "./StepSequenceActivity";
+import type {
+  StepSequenceActivityConfig,
+  StepSequenceActivityProps,
+} from "./StepSequenceActivity";
 import {
   StepSequenceContext,
   type StepComponentProps,
@@ -30,6 +35,7 @@ export function useStepSequence(): StepSequenceContextValue {
 }
 
 export {
+  StepSequenceActivity,
   StepSequenceRenderer,
   StepSequenceContext,
   STEP_COMPONENT_REGISTRY,
@@ -38,6 +44,8 @@ export {
 };
 
 export type {
+  StepSequenceActivityConfig,
+  StepSequenceActivityProps,
   StepDefinition,
   StepComponentProps,
   StepRegistry,
