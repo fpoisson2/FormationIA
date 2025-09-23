@@ -103,7 +103,7 @@ const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
-const DESKTOP_TILE_MAX_SIZE = BASE_TILE_SIZE * 2;
+const DESKTOP_TILE_MAX_SIZE = BASE_TILE_SIZE * 4;
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
 type TileScaleMode = "contain" | "cover";
 
@@ -2878,7 +2878,7 @@ function MobileArrowControls({
   containerRef?: Ref<HTMLDivElement>;
 }) {
   const buttonClass =
-    "flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/40 text-white text-lg shadow-lg backdrop-blur-md transition active:scale-95";
+    "flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/40 text-white text-lg shadow-lg backdrop-blur-md transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 hover:bg-slate-900/50 active:scale-95";
   const handle = (dx: number, dy: number) => () => {
     onMove(dx, dy);
   };
@@ -4004,7 +4004,7 @@ export default function ExplorateurIA({
 }: ActivityProps) {
   const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
-  const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain", {
+  const tileSize = useResponsiveTileSize("cover", {
     maxSize: isMobile ? BASE_TILE_SIZE : DESKTOP_TILE_MAX_SIZE,
   });
   const cellSize = tileSize + TILE_GAP;
@@ -4743,7 +4743,7 @@ export default function ExplorateurIA({
     [buildingAt, player.x, player.y]
   );
 
-  const showMobileControls = isMobile && !isEditMode && !open;
+  const showMobileControls = !isEditMode && !open;
 
   const mobilePromptBuilding = useMemo(() => {
     if (!mobilePrompt) {
@@ -4786,7 +4786,7 @@ export default function ExplorateurIA({
   }, []);
 
   useEffect(() => {
-    if (!isMobile || isEditMode) {
+    if (isEditMode) {
       setMobilePrompt(null);
       return;
     }
@@ -4799,7 +4799,7 @@ export default function ExplorateurIA({
     } else {
       setMobilePrompt(null);
     }
-  }, [at, isAutoWalking, isEditMode, isMobile, open]);
+  }, [at, isAutoWalking, isEditMode, open]);
 
   return (
     <div
