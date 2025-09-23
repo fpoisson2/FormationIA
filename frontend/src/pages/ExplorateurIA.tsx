@@ -474,10 +474,13 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
     (entry) => entry.category === "terrain" && entry.subtype === subtype
   );
 
+  const exteriorPriorities = new Map<EdgeDirection, number>();
+
   const derived: SandTiles = {
     center: [...FALLBACK_SAND_TILES.center] as TileCoord,
     edges: EDGE_DIRECTIONS.reduce((acc, direction) => {
       const fallback = FALLBACK_SAND_TILES.edges[direction];
+      exteriorPriorities.set(direction, -1);
       acc[direction] = {
         exterior: [...fallback.exterior] as TileCoord,
         ...(fallback.interior
@@ -503,7 +506,8 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
       continue;
     }
 
-    const bucket = derived.edges[orientationKey as EdgeDirection];
+    const direction = orientationKey as EdgeDirection;
+    const bucket = derived.edges[direction];
     if (!bucket) {
       continue;
     }
@@ -518,7 +522,16 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
     if (isInterior) {
       bucket.interior = atlas(entry.name);
     } else {
-      bucket.exterior = atlas(entry.name);
+      const priority = entry.tags.includes("bordure")
+        ? 2
+        : entry.tags.includes("falaise")
+        ? 1
+        : 0;
+      const currentPriority = exteriorPriorities.get(direction) ?? -1;
+      if (priority >= currentPriority) {
+        bucket.exterior = atlas(entry.name);
+        exteriorPriorities.set(direction, priority);
+      }
     }
   }
 
