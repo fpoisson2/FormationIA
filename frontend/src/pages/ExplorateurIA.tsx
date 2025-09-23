@@ -4295,6 +4295,73 @@ export default function ExplorateurIA({
     onCompleted: () => navigateToActivities(),
   });
 
+  const attemptPlayMusic = useCallback(() => {
+    if (!isMusicEnabled || isMusicPlaying) {
+      return;
+    }
+    const theme = audioRef.current;
+    if (!theme || !theme.isSupported) {
+      return;
+    }
+    void theme
+      .start()
+      .then(() => setIsMusicPlaying(true))
+      .catch(() => {
+        setIsMusicPlaying(false);
+        // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
+      });
+  }, [isMusicEnabled, isMusicPlaying]);
+
+  const toggleMusic = () => {
+    if (!isMusicSupported) {
+      return;
+    }
+    setIsMusicEnabled((value) => !value);
+  };
+
+  const move = useCallback(
+    (dx: number, dy: number): boolean => {
+      let moved = false;
+      setPlayer((current) => {
+        const nx = current.x + dx;
+        const ny = current.y + dy;
+        const gate = GATE_BY_COORD.get(coordKey(nx, ny));
+        if (gate && !isQuarterCompleted(gate.stage)) {
+          setBlockedStage(gate.stage);
+          return current;
+        }
+        if (!isWalkable(nx, ny, current.x, current.y)) {
+          return current;
+        }
+        if (isMusicEnabled) {
+          attemptPlayMusic();
+        }
+        setWalkStep((step) => step + 1);
+        moved = true;
+        return { x: nx, y: ny };
+      });
+      return moved;
+    },
+    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
+  );
+
+  const buildingAt = useCallback((x: number, y: number) => {
+    return buildings.find((building) => building.x === x && building.y === y) || null;
+  }, []);
+
+  const openIfOnBuilding = useCallback(() => {
+    const hit = buildingAt(player.x, player.y);
+    if (!hit) {
+      setMobilePrompt(null);
+      return;
+    }
+    if (isMobile && !isEditMode) {
+      setMobilePrompt(hit.id);
+      return;
+    }
+    setOpen(hit.id);
+  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -4451,23 +4518,6 @@ export default function ExplorateurIA({
     persistMusicPreference(isMusicEnabled);
   }, [isMusicEnabled]);
 
-  const attemptPlayMusic = useCallback(() => {
-    if (!isMusicEnabled || isMusicPlaying) {
-      return;
-    }
-    const theme = audioRef.current;
-    if (!theme || !theme.isSupported) {
-      return;
-    }
-    void theme
-      .start()
-      .then(() => setIsMusicPlaying(true))
-      .catch(() => {
-        setIsMusicPlaying(false);
-        // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
-      });
-  }, [isMusicEnabled, isMusicPlaying]);
-
   useEffect(() => {
     if (!isMusicSupported) {
       return;
@@ -4486,56 +4536,6 @@ export default function ExplorateurIA({
       });
     }
   }, [attemptPlayMusic, isMusicEnabled, isMusicPlaying, isMusicSupported]);
-
-  const toggleMusic = () => {
-    if (!isMusicSupported) {
-      return;
-    }
-    setIsMusicEnabled((value) => !value);
-  };
-
-  const move = useCallback(
-    (dx: number, dy: number): boolean => {
-      let moved = false;
-      setPlayer((current) => {
-        const nx = current.x + dx;
-        const ny = current.y + dy;
-        const gate = GATE_BY_COORD.get(coordKey(nx, ny));
-        if (gate && !isQuarterCompleted(gate.stage)) {
-          setBlockedStage(gate.stage);
-          return current;
-        }
-        if (!isWalkable(nx, ny, current.x, current.y)) {
-          return current;
-        }
-        if (isMusicEnabled) {
-          attemptPlayMusic();
-        }
-        setWalkStep((step) => step + 1);
-        moved = true;
-        return { x: nx, y: ny };
-      });
-      return moved;
-    },
-    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
-  );
-
-  const buildingAt = useCallback((x: number, y: number) => {
-    return buildings.find((building) => building.x === x && building.y === y) || null;
-  }, []);
-
-  const openIfOnBuilding = useCallback(() => {
-    const hit = buildingAt(player.x, player.y);
-    if (!hit) {
-      setMobilePrompt(null);
-      return;
-    }
-    if (isMobile && !isEditMode) {
-      setMobilePrompt(hit.id);
-      return;
-    }
-    setOpen(hit.id);
-  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
 
   const findWalkPath = useCallback(
     (fromX: number, fromY: number, toX: number, toY: number): Coord[] => {
