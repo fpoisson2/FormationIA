@@ -343,7 +343,9 @@ export interface ActivityConfig {
   activitySelectorHeader?: ActivitySelectorHeaderConfig;
 }
 
-export interface ActivityConfigResponse extends ActivityConfig {}
+export interface ActivityConfigResponse extends ActivityConfig {
+  usesDefaultFallback?: boolean;
+}
 
 export interface SaveActivityConfigResponse {
   ok: boolean;

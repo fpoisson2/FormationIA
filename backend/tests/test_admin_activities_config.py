@@ -95,3 +95,34 @@ def test_admin_save_activities_rejects_invalid_step_sequence(tmp_path, monkeypat
         app.dependency_overrides.clear()
 
     assert not config_path.exists(), "La configuration invalide ne doit pas être enregistrée"
+
+
+def test_admin_can_remove_all_activities(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/admin/activities", json={"activities": []})
+            assert response.status_code == 200, response.text
+
+            admin_response = client.get("/api/admin/activities")
+            assert admin_response.status_code == 200
+            admin_payload = admin_response.json()
+            assert admin_payload["activities"] == []
+            assert admin_payload.get("usesDefaultFallback") is False
+
+            public_response = client.get("/api/activities-config")
+            assert public_response.status_code == 200
+            public_payload = public_response.json()
+            assert public_payload["activities"] == []
+            assert public_payload.get("usesDefaultFallback") is False
+    finally:
+        app.dependency_overrides.clear()
+
+    assert config_path.exists(), "Une configuration vide doit être persistée"
+    persisted = json.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["activities"] == []

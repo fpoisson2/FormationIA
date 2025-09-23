@@ -394,8 +394,25 @@ function ActivitySelector(): JSX.Element {
   );
 
   const buildEditableActivities = useCallback(
-    (storedActivities?: ActivityConfigEntry[] | null) => {
-      if (!storedActivities || storedActivities.length === 0) {
+    (
+      storedActivities?: ActivityConfigEntry[] | null,
+      options?: { includeMissingDefaults?: boolean }
+    ) => {
+      const includeMissingDefaults = options?.includeMissingDefaults ?? true;
+
+      if (storedActivities == null) {
+        if (!includeMissingDefaults) {
+          return [];
+        }
+        return defaultActivities.map((activity) =>
+          resolveActivityDefinition({ id: activity.id })
+        );
+      }
+
+      if (storedActivities.length === 0) {
+        if (!includeMissingDefaults) {
+          return [];
+        }
         return defaultActivities.map((activity) =>
           resolveActivityDefinition({ id: activity.id })
         );
@@ -418,9 +435,11 @@ function ActivitySelector(): JSX.Element {
         }
       }
 
-      for (const activity of defaultActivities) {
-        if (!seen.has(activity.id)) {
-          merged.push(resolveActivityDefinition({ id: activity.id }));
+      if (includeMissingDefaults) {
+        for (const activity of defaultActivities) {
+          if (!seen.has(activity.id)) {
+            merged.push(resolveActivityDefinition({ id: activity.id }));
+          }
         }
       }
 
@@ -578,6 +597,19 @@ function ActivitySelector(): JSX.Element {
     newActivities.splice(toIndex, 0, movedActivity);
     setEditableActivities(newActivities);
   };
+
+  const handleRemoveActivity = useCallback(
+    (activityId: string) => {
+      if (!isEditMode) return;
+
+      setEditableActivities((prev) =>
+        prev.filter((activity) => activity.id !== activityId)
+      );
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+    },
+    [isEditMode]
+  );
 
   const handleToggleActivityEnabled = (activityId: string, value: boolean) => {
     if (!isEditMode) return;
@@ -945,13 +977,13 @@ function ActivitySelector(): JSX.Element {
     setIsLoading(true);
     try {
       const response = await activitiesClient.getConfig();
-      if (response.activities && response.activities.length > 0) {
-        setEditableActivities(
-          buildEditableActivities(response.activities as ActivityConfigEntry[])
-        );
-      } else {
-        setEditableActivities(buildEditableActivities());
-      }
+      const rawActivities = Array.isArray(response.activities)
+        ? (response.activities as ActivityConfigEntry[])
+        : undefined;
+      const includeMissingDefaults = response.usesDefaultFallback !== false;
+      setEditableActivities(
+        buildEditableActivities(rawActivities, { includeMissingDefaults })
+      );
       const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
       setHeaderOverrides(savedHeader ?? {});
     } catch (error) {
@@ -1032,7 +1064,7 @@ function ActivitySelector(): JSX.Element {
                   {!isLoading && <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse"></span>}
                 </div>
                 <p className="text-sm leading-relaxed text-orange-800">
-                  Vous pouvez maintenant modifier les textes, réorganiser les activités par glisser-déposer ou avec les flèches, et ajouter ou supprimer des points clés.
+                  Vous pouvez maintenant modifier les textes, réorganiser les activités par glisser-déposer ou avec les flèches, ajouter ou supprimer des points clés et retirer des activités de la sélection.
                 </p>
               </div>
             </div>
@@ -1166,17 +1198,33 @@ function ActivitySelector(): JSX.Element {
               </div>
             ) : null}
             {isEditMode && (
-              <label className="absolute right-6 top-6 inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
-                <input
-                  type="checkbox"
-                  checked={activity.enabled !== false}
-                  onChange={(event) =>
-                    handleToggleActivityEnabled(activity.id, event.target.checked)
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                />
-                Visible
-              </label>
+              <div className="absolute right-6 top-6 flex flex-col items-end gap-2">
+                <label className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={activity.enabled !== false}
+                    onChange={(event) =>
+                      handleToggleActivityEnabled(activity.id, event.target.checked)
+                    }
+                    className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                  />
+                  Visible
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const shouldRemove = window.confirm(`Supprimer l’activité « ${activity.card.title} » ?`);
+                    if (shouldRemove) {
+                      handleRemoveActivity(activity.id);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white/80 px-3 py-1 text-xs font-medium text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
+                  aria-label={`Supprimer ${activity.card.title}`}
+                >
+                  Supprimer
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
             )}
             {isDisabled && (
               <span className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-full bg-red-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700 shadow-sm">
@@ -1307,6 +1355,11 @@ function ActivitySelector(): JSX.Element {
           </article>
         );
       })}
+        {activitiesToDisplay.length === 0 && !isEditMode ? (
+          <div className="col-span-full flex flex-col items-center justify-center rounded-3xl border border-dashed border-gray-300 bg-white/70 p-8 text-center text-sm text-gray-500">
+            Aucune activité n’est disponible pour le moment.
+          </div>
+        ) : null}
         {isEditMode ? (
           <button
             type="button"
