@@ -7,6 +7,7 @@ function joinClasses(...classes: Array<string | false | null | undefined>): stri
 interface ChatBubbleProps {
   role: "ai" | "user";
   title?: string;
+  roleLabel?: string;
   isStreaming?: boolean;
   children: ReactNode;
   bubbleClassName?: string;
@@ -32,6 +33,7 @@ const ROLE_META = {
 function ChatBubble({
   role,
   title,
+  roleLabel,
   isStreaming = false,
   children,
   bubbleClassName,
@@ -41,6 +43,7 @@ function ChatBubble({
   const meta = ROLE_META[role];
   const appliedBubble = bubbleClassName ?? meta.bubble;
   const appliedChip = chipClassName ?? meta.chip;
+  const appliedLabel = roleLabel && roleLabel.trim().length > 0 ? roleLabel : meta.label;
 
   return (
     <div className={joinClasses("flex", meta.container, containerClassName)}>
@@ -57,7 +60,7 @@ function ChatBubble({
             appliedChip
           )}
         >
-          {meta.label}
+          {appliedLabel}
           {title ? <span className="font-normal normal-case text-[0.65rem] opacity-80">{title}</span> : null}
         </span>
         <div className="mt-3 space-y-3 text-sm leading-relaxed">{children}</div>
