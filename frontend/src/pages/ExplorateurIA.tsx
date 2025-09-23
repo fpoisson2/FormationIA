@@ -332,6 +332,16 @@ type SandTiles = {
   edges: Record<EdgeDirection, SandEdgeVariant>;
 };
 
+type SandEdgeCandidate = {
+  coord: TileCoord;
+  priority: number;
+};
+
+type SandEdgeCandidateMap = {
+  exterior: SandEdgeCandidate;
+  interior?: SandEdgeCandidate;
+};
+
 const EDGE_DIRECTION_SET = new Set<EdgeDirection>(EDGE_DIRECTIONS);
 
 type EdgeOrientation = readonly string[];
@@ -368,28 +378,87 @@ const FALLBACK_SAND_TILES: SandTiles = {
   },
 };
 
+const cloneTileCoord = (coord: TileCoord): TileCoord =>
+  [...coord] as TileCoord;
+
+const createSandEdgeCandidate = (
+  coord: TileCoord,
+  priority = Number.NEGATIVE_INFINITY
+): SandEdgeCandidate => ({
+  coord: cloneTileCoord(coord),
+  priority,
+});
+
+function computeEdgeCandidatePriority(
+  entry: AtlasEntry,
+  isInterior: boolean
+): number {
+  const { tags } = entry;
+  if (isInterior) {
+    if (tags.includes("coin_interieur") && !tags.includes("falaise")) {
+      return 30_000_000 + entry.y * 1_000 + entry.x;
+    }
+    if (tags.includes("coin_interieur") && tags.includes("falaise")) {
+      return 25_000_000 + entry.y * 1_000 + entry.x;
+    }
+    if (tags.includes("bordure")) {
+      return 22_000_000 + entry.y * 1_000 + entry.x;
+    }
+    if (tags.includes("falaise")) {
+      return 12_000_000 + entry.y * 1_000 + entry.x;
+    }
+    return 0;
+  }
+  if (tags.includes("bordure")) {
+    return 30_000_000 + entry.y * 1_000 + entry.x;
+  }
+  if (tags.includes("falaise") && tags.includes("coin_interieur")) {
+    return 14_000_000 + entry.y * 1_000 + entry.x;
+  }
+  if (tags.includes("falaise")) {
+    return 10_000_000 + entry.y * 1_000 + entry.x;
+  }
+  return 0;
+}
+
+function computeCenterCandidatePriority(entry: AtlasEntry): number {
+  if (entry.tags.includes("material")) {
+    return entry.transparent ? 18 : 20;
+  }
+  return 0;
+}
+
 function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
   const sandEntries = Array.from(MAP_PACK_ATLAS.values()).filter(
     (entry) => entry.category === "terrain" && entry.subtype === subtype
   );
 
-  const derived: SandTiles = {
-    center: [...FALLBACK_SAND_TILES.center] as TileCoord,
+  const derived: {
+    center: SandEdgeCandidate;
+    edges: Record<EdgeDirection, SandEdgeCandidateMap>;
+  } = {
+    center: createSandEdgeCandidate(FALLBACK_SAND_TILES.center),
     edges: EDGE_DIRECTIONS.reduce((acc, direction) => {
       const fallback = FALLBACK_SAND_TILES.edges[direction];
       acc[direction] = {
-        exterior: [...fallback.exterior] as TileCoord,
+        exterior: createSandEdgeCandidate(fallback.exterior),
         ...(fallback.interior
-          ? { interior: [...fallback.interior] as TileCoord }
+          ? { interior: createSandEdgeCandidate(fallback.interior) }
           : {}),
       };
       return acc;
-    }, {} as Record<EdgeDirection, SandEdgeVariant>),
+    }, {} as Record<EdgeDirection, SandEdgeCandidateMap>),
   };
 
   for (const entry of sandEntries) {
     if (entry.tags.includes("material")) {
-      derived.center = atlas(entry.name);
+      const candidate = createSandEdgeCandidate(
+        atlas(entry.name),
+        computeCenterCandidatePriority(entry)
+      );
+      if (candidate.priority > derived.center.priority) {
+        derived.center = candidate;
+      }
       continue;
     }
 
@@ -402,7 +471,8 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
       continue;
     }
 
-    const bucket = derived.edges[orientationKey as EdgeDirection];
+    const direction = orientationKey as EdgeDirection;
+    const bucket = derived.edges[direction];
     if (!bucket) {
       continue;
     }
@@ -414,14 +484,34 @@ function deriveSandTilesFromAtlas(subtype = "sand"): SandTiles {
       continue;
     }
 
+    const candidate = createSandEdgeCandidate(
+      atlas(entry.name),
+      computeEdgeCandidatePriority(entry, isInterior)
+    );
+
     if (isInterior) {
-      bucket.interior = atlas(entry.name);
-    } else {
-      bucket.exterior = atlas(entry.name);
+      const existing = bucket.interior;
+      if (!existing || candidate.priority > existing.priority) {
+        bucket.interior = candidate;
+      }
+    } else if (candidate.priority > bucket.exterior.priority) {
+      bucket.exterior = candidate;
     }
   }
 
-  return derived;
+  return {
+    center: cloneTileCoord(derived.center.coord),
+    edges: EDGE_DIRECTIONS.reduce((acc, direction) => {
+      const bucket = derived.edges[direction];
+      acc[direction] = {
+        exterior: cloneTileCoord(bucket.exterior.coord),
+        ...(bucket.interior
+          ? { interior: cloneTileCoord(bucket.interior.coord) }
+          : {}),
+      };
+      return acc;
+    }, {} as Record<EdgeDirection, SandEdgeVariant>),
+  };
 }
 
 // Fonctions utilitaires pour rechercher les tuiles par métadonnées

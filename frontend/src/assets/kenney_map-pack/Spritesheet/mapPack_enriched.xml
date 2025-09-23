@@ -28,7 +28,7 @@
   <SubTexture name="mapTile_026.png" x="704" y="768" width="64" height="64" type="bordure" subtype="dirt_gray" desc="terre grise ouest" connections="west" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_027.png" x="704" y="704" width="64" height="64" type="material" subtype="dirt_gray" desc="terre grise" walkable="false" transparent="false" category="terrain" />
   <SubTexture name="mapTile_028.png" x="704" y="640" width="64" height="64" type="bordure" subtype="dirt_gray" desc="terre grise est" connections="east" walkable="false" transparent="true" category="terrain" />
-  <SubTexture name="mapTile_029.png" x="704" y="576" width="64" height="64" type="material" subtype="dirt_gray" desc="terre grise" walkable="false" transparent="false" category="terrain" />
+  <SubTexture name="mapTile_029.png" x="704" y="576" width="64" height="64" type="coin_interieur" subtype="dirt_gray" desc="terre grise coin intérieur nord-est" connections="northeast" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_030.png" x="704" y="512" width="64" height="64" type="coin_interieur" subtype="dirt_gray" desc="terre grise coin intérieur nord-ouest" connections="northwest" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_031.png" x="704" y="448" width="64" height="64" type="falaise" subtype="sand" desc="sable falaise sud-ouest" connections="southwest" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_032.png" x="704" y="384" width="64" height="64" type="falaise" subtype="sand" desc="sable falaise sud" connections="south" walkable="false" transparent="true" category="terrain" />
@@ -86,7 +86,7 @@
   <SubTexture name="mapTile_084.png" x="448" y="640" width="64" height="64" type="material" subtype="dirt_brown" desc="terre brune" walkable="false" transparent="false" category="terrain" />
   <SubTexture name="mapTile_085.png" x="448" y="576" width="64" height="64" type="coin_interieur" subtype="dirt_brown" desc="terre brune coin intérieur nord-ouest" connections="northwest" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_086.png" x="448" y="512" width="64" height="64" type="bordure" subtype="dirt" desc="terre ouest" connections="west" walkable="false" transparent="true" category="terrain" />
-  <SubTexture name="mapTile_087.png" x="448" y="448" width="64" height="64" type="material" subtype="farmland" desc="terre cultivée" walkable="false" transparent="false" category="terrain" />
+  <SubTexture name="mapTile_087.png" x="448" y="448" width="64" height="64" type="material" subtype="dirt" desc="terre" walkable="false" transparent="false" category="terrain" />
   <SubTexture name="mapTile_088.png" x="448" y="384" width="64" height="64" type="bordure" subtype="dirt" desc="terre sud" connections="south" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_089.png" x="448" y="320" width="64" height="64" type="coin_interieur" subtype="dirt" desc="terre coin intérieur nord-est" connections="northeast" walkable="false" transparent="true" category="terrain" />
   <SubTexture name="mapTile_090.png" x="448" y="256" width="64" height="64" type="coin_interieur" subtype="dirt" desc="terre coin intérieur nord-ouest" connections="northwest" walkable="false" transparent="true" category="terrain" />
