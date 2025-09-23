@@ -676,6 +676,14 @@ const TERRAIN_THEMES = {
 
 type TerrainThemeId = keyof typeof TERRAIN_THEMES;
 
+const TERRAIN_THEME_ORDER: TerrainThemeId[] = [
+  "sand",
+  "grass",
+  "dirt",
+  "dirtGray",
+  "snow",
+];
+
 const DIAGONAL_CONNECTIONS = new Set<string>([
   "northeast",
   "northwest",
@@ -1317,6 +1325,81 @@ function SpriteFromAtlas({
           transformOrigin: "top left",
         }}
       />
+    </div>
+  );
+}
+
+function TilesetControls({
+  ts,
+  setTs,
+}: {
+  ts: Tileset;
+  setTs: (t: Tileset) => void;
+}) {
+  const [url, setUrl] = useState(ts.url ?? mapPackAtlas);
+  const [size, setSize] = useState(ts.size ?? DEFAULT_TILE_SIZE);
+
+  const apply = (mode: TilesetMode) => {
+    if (mode === "builtin") {
+      setTs({ mode: "builtin", size, map: ts.map });
+    } else {
+      setTs({ mode: "atlas", url: url || mapPackAtlas, size, map: ts.map });
+    }
+  };
+
+  return (
+    <div className="space-y-2 text-xs">
+      <div className="flex items-center justify-between">
+        <span>Mode tileset</span>
+        <div className="flex gap-1">
+          <button
+            className={
+              ts.mode === "builtin"
+                ? "px-2 py-1 rounded bg-slate-800 text-white"
+                : "px-2 py-1 rounded bg-slate-100"
+            }
+            onClick={() => apply("builtin")}
+          >
+            builtin
+          </button>
+          <button
+            className={
+              ts.mode === "atlas"
+                ? "px-2 py-1 rounded bg-slate-800 text-white"
+                : "px-2 py-1 rounded bg-slate-100"
+            }
+            onClick={() => apply("atlas")}
+          >
+            atlas
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-2">
+        <label className="flex items-center gap-2">
+          URL
+          <input
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="/assets/tileset.png"
+            className="flex-1 px-2 py-1 border rounded"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          Tile size
+          <input
+            type="number"
+            value={size}
+            onChange={(event) =>
+              setSize(parseInt(event.target.value || "16", 10))
+            }
+            className="w-20 px-2 py-1 border rounded"
+          />
+        </label>
+        <p className="text-slate-500">
+          Dépose un atlas PNG (64×64) dans public/assets et renseigne l'URL. Pack
+          recommandé: Kenney (CC0) Map Pack.
+        </p>
+      </div>
     </div>
   );
 }
@@ -4114,6 +4197,8 @@ export default function ExplorateurIA({
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
   const [tileset, setTileset] = useTileset();
+  const [worldVersion, forceWorldRefresh] = useState(0);
+  const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
   const [isMusicEnabled, setIsMusicEnabled] = useState(true);
@@ -4165,7 +4250,7 @@ export default function ExplorateurIA({
       }
     }
     return active;
-  }, [isQuarterCompleted]);
+  }, [isQuarterCompleted, worldVersion]);
 
   const inventoryEntries = useMemo<InventoryEntry[]>(
     () =>
@@ -4181,6 +4266,41 @@ export default function ExplorateurIA({
   );
   const inventoryTotal = inventoryEntries.length;
   const inventoryProgressLabel = `${inventoryCollected}/${inventoryTotal}`;
+
+  const handleThemeChange = useCallback(
+    (themeId: TerrainThemeId) => {
+      if (!isEditMode) {
+        return;
+      }
+      const theme = TERRAIN_THEMES[themeId];
+      if (!theme) {
+        return;
+      }
+      setSelectedTheme(themeId);
+      applyTerrainThemeToWorld(world, theme);
+      repopulateTerrainObjects(world, currentWorldSeed, themeId);
+      recomputeWorldMetadata(world);
+      forceWorldRefresh((value) => value + 1);
+    },
+    [forceWorldRefresh, isEditMode]
+  );
+
+  const handleRegenerateWorld = useCallback(() => {
+    if (!isEditMode) {
+      return;
+    }
+    const { seed, start } = regenerateWorldInPlace();
+    const theme = TERRAIN_THEMES[selectedTheme];
+    if (theme) {
+      applyTerrainThemeToWorld(world, theme);
+      repopulateTerrainObjects(world, seed, selectedTheme);
+    } else {
+      repopulateTerrainObjects(world, seed);
+    }
+    recomputeWorldMetadata(world);
+    setPlayer({ x: start.x, y: start.y });
+    forceWorldRefresh((value) => value + 1);
+  }, [forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,
@@ -4687,7 +4807,12 @@ export default function ExplorateurIA({
         className={
           isMobile
             ? "grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0"
-            : "grid w-full gap-6"
+            : classNames(
+                "grid w-full gap-6",
+                isEditMode
+                  ? "md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]"
+                  : undefined,
+              )
         }
       >
         <div
@@ -4921,8 +5046,159 @@ export default function ExplorateurIA({
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
             @keyframes prompt-pop { 0%{ transform: translateY(18px) scale(0.92); opacity: 0; } 60%{ transform: translateY(-6px) scale(1.04); opacity: 1; } 100%{ transform: translateY(0) scale(1); opacity: 1; } }
           `}</style>
-          </div>
+          {!isMobile && isEditMode && (
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <div>
+                {at ? (
+                  <span>
+                    Vous êtes devant: <span className="font-semibold">{at.label}</span>
+                  </span>
+                ) : (
+                  <span>Explorez la ville et entrez dans un quartier.</span>
+                )}
+              </div>
+              <button
+                onClick={openIfOnBuilding}
+                className="w-full rounded-lg border bg-slate-100 px-3 py-2 sm:w-auto"
+              >
+                Entrer
+              </button>
+            </div>
+          )}
         </div>
+      </div>
+      {!isMobile && isEditMode && (
+        <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
+          <div className="rounded-2xl border bg-white p-4 shadow">
+            <div className="text-xs uppercase tracking-wide text-slate-500">
+              Progression
+            </div>
+            <ul className="mt-2 text-sm space-y-2">
+              {buildings.map((building) => (
+                <li key={building.id} className="flex items-center justify-between gap-3">
+                  {(() => {
+                    const key = coordKey(building.x, building.y);
+                    const tileBlocked = activeGateKeys.has(key);
+                    const gate = GATE_BY_COORD.get(key);
+                    const lockMessageStage = gate?.stage ?? building.id;
+                    const isLocked = tileBlocked && !isQuarterCompleted(building.id);
+                    return (
+                      <button
+                        onClick={() => {
+                          if (isLocked) {
+                            setBlockedStage(lockMessageStage);
+                            return;
+                          }
+                          setOpen(building.id);
+                        }}
+                        disabled={isLocked}
+                        className={classNames(
+                          "text-left",
+                          isLocked
+                            ? "cursor-not-allowed opacity-60"
+                            : "hover:underline"
+                        )}
+                        style={{ color: building.color }}
+                      >
+                        {building.label}
+                      </button>
+                    );
+                  })()}
+                  <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50">
+                    {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
+                    {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
+                    {building.id === "decision" && (progress.decision.done ? "OK" : "À faire")}
+                    {building.id === "ethique" && (progress.ethique.done ? "OK" : "À faire")}
+                    {building.id === "mairie" && "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow">
+            <div className="text-xs uppercase tracking-wide text-slate-500">
+              Contrôles
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <DPad onMove={move} />
+              <div className="text-xs text-slate-600 space-y-1">
+                <p>Entrer: Ouvrir</p>
+                <p>Échap: Fermer</p>
+                <p>Clic: Accès direct</p>
+              </div>
+            </div>
+            {blockedStage && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
+                Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
+              </div>
+            )}
+          </div>
+          {isEditMode && (
+            <div className="rounded-2xl border bg-white p-4 shadow">
+              <div className="text-xs uppercase tracking-wide text-slate-500">
+                Terrain
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                {TERRAIN_THEME_ORDER.map((key) => {
+                  const theme = TERRAIN_THEMES[key];
+                  const isActive = selectedTheme === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleThemeChange(key)}
+                      className={classNames(
+                        "rounded-xl border px-3 py-2 text-left transition",
+                        isActive
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
+                      )}
+                      aria-pressed={isActive}
+                    >
+                      {theme.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={handleRegenerateWorld}
+                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
+              >
+                Régénérer la forme
+              </button>
+              <p className="mt-3 text-xs text-slate-500">
+                Choisissez un style pour changer l'apparence et utilisez le bouton pour régénérer la forme de l'île. Le changement est visible immédiatement.
+              </p>
+            </div>
+          )}
+          <div className="rounded-2xl border bg-white p-4 shadow">
+            <div className="text-xs uppercase tracking-wide text-slate-500">
+              Tileset
+            </div>
+            <TilesetControls ts={tileset} setTs={setTileset} />
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow">
+            <div className="text-xs uppercase tracking-wide text-slate-500">
+              Export
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={downloadJSON}
+                className="px-3 py-2 rounded-xl bg-slate-800 text-white"
+              >
+                JSON
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="px-3 py-2 rounded-xl bg-slate-100 border"
+              >
+                PDF
+              </button>
+            </div>
+          </div>
+        </aside>
+      )}
 
       <Modal
         open={isInventoryOpen}
