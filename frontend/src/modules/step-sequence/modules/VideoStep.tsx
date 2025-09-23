@@ -14,7 +14,7 @@ import type Hls from "hls.js";
 import type { StepComponentProps } from "../types";
 import { StepSequenceContext } from "../types";
 
-export type VideoSourceType = "mp4" | "hls";
+export type VideoSourceType = "mp4" | "hls" | "youtube";
 
 export interface VideoSource {
   type: VideoSourceType;
@@ -58,7 +58,12 @@ function sanitizeSources(sources: unknown): VideoSource[] {
       }
       const source = item as Partial<VideoSource>;
       const url = typeof source.url === "string" ? source.url.trim() : "";
-      const type = source.type === "hls" ? "hls" : "mp4";
+      const type: VideoSourceType =
+        source.type === "hls"
+          ? "hls"
+          : source.type === "youtube"
+          ? "youtube"
+          : "mp4";
       if (!url) {
         return undefined;
       }
@@ -95,6 +100,203 @@ function sanitizeCaptions(captions: unknown): VideoCaption[] {
       } satisfies VideoCaption;
     })
     .filter((item): item is VideoCaption => Boolean(item));
+}
+
+interface ParsedYouTubeUrl {
+  videoId: string;
+  sourceUrl: URL;
+}
+
+const YOUTUBE_ALLOWED_PASSTHROUGH_PARAMS = new Set([
+  "si",
+  "pp",
+  "feature",
+  "widget_referrer",
+  "iv_load_policy",
+  "disablekb",
+  "fs",
+  "color",
+  "hl",
+  "cc_lang_pref",
+  "cc_load_policy",
+  "vq",
+  "autoplay",
+  "mute",
+  "controls",
+  "showinfo",
+  "origin",
+  "enablejsapi",
+]);
+
+function parseYouTubeUrl(url: string): ParsedYouTubeUrl | null {
+  if (!url) {
+    return null;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch (error) {
+    return null;
+  }
+
+  const normalizedHost = parsedUrl.hostname
+    .replace(/^www\./u, "")
+    .replace(/^m\./u, "")
+    .toLowerCase();
+
+  let videoId = "";
+  if (normalizedHost === "youtu.be") {
+    videoId = parsedUrl.pathname.replace(/^\//u, "").split("/")[0] ?? "";
+  } else if (
+    normalizedHost === "youtube.com" ||
+    normalizedHost === "youtube-nocookie.com" ||
+    normalizedHost.endsWith(".youtube.com")
+  ) {
+    if (parsedUrl.pathname === "/watch") {
+      videoId = parsedUrl.searchParams.get("v") ?? "";
+    } else if (parsedUrl.pathname.startsWith("/embed/")) {
+      videoId = parsedUrl.pathname.split("/")[2] ?? "";
+    } else if (parsedUrl.pathname.startsWith("/shorts/")) {
+      videoId = parsedUrl.pathname.split("/")[2] ?? "";
+    } else if (parsedUrl.pathname.startsWith("/live/")) {
+      videoId = parsedUrl.pathname.split("/")[2] ?? "";
+    }
+  }
+
+  const trimmedId = videoId.trim();
+  if (!trimmedId) {
+    return null;
+  }
+
+  if (!/^[a-zA-Z0-9_-]{6,}$/u.test(trimmedId)) {
+    return null;
+  }
+
+  return { videoId: trimmedId, sourceUrl: parsedUrl };
+}
+
+function parseYouTubeTimeValue(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/u.test(trimmed)) {
+    return Number.parseInt(trimmed, 10);
+  }
+
+  const timeMatch = trimmed.match(
+    /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/iu
+  );
+  if (!timeMatch) {
+    return null;
+  }
+
+  const hours = timeMatch[1] ? Number.parseInt(timeMatch[1], 10) : 0;
+  const minutes = timeMatch[2] ? Number.parseInt(timeMatch[2], 10) : 0;
+  const seconds = timeMatch[3] ? Number.parseInt(timeMatch[3], 10) : 0;
+  const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+  return totalSeconds > 0 ? totalSeconds : null;
+}
+
+const YOUTUBE_RESERVED_PARAMS = new Set([
+  "start",
+  "t",
+  "end",
+  "list",
+  "index",
+  "playlist",
+  "loop",
+  "playsinline",
+  "rel",
+  "modestbranding",
+]);
+
+interface BuildYouTubeEmbedOptions {
+  origin?: string | null;
+}
+
+function getYouTubeEmbedUrl(
+  url: string,
+  options?: BuildYouTubeEmbedOptions
+): string | null {
+  const parsed = parseYouTubeUrl(url);
+  if (!parsed) {
+    return null;
+  }
+
+  const { videoId, sourceUrl } = parsed;
+  const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
+  embedUrl.searchParams.set("rel", "0");
+  embedUrl.searchParams.set("playsinline", "1");
+  embedUrl.searchParams.set("modestbranding", "1");
+
+  const startFromStartParam = parseYouTubeTimeValue(
+    sourceUrl.searchParams.get("start")
+  );
+  const startFromTParam = parseYouTubeTimeValue(
+    sourceUrl.searchParams.get("t")
+  );
+  const startTime = startFromStartParam ?? startFromTParam;
+  if (startTime != null) {
+    embedUrl.searchParams.set("start", startTime.toString());
+  }
+
+  const endTime = parseYouTubeTimeValue(sourceUrl.searchParams.get("end"));
+  if (endTime != null) {
+    embedUrl.searchParams.set("end", endTime.toString());
+  }
+
+  const listParam = sourceUrl.searchParams.get("list");
+  if (listParam) {
+    embedUrl.searchParams.set("list", listParam);
+  }
+
+  const indexParam = sourceUrl.searchParams.get("index");
+  if (indexParam && /^\d+$/u.test(indexParam)) {
+    embedUrl.searchParams.set("index", indexParam);
+  }
+
+  const playlistParam = sourceUrl.searchParams.get("playlist");
+  if (playlistParam) {
+    embedUrl.searchParams.set("playlist", playlistParam);
+  }
+
+  const loopParam = sourceUrl.searchParams.get("loop");
+  if (loopParam === "1" || loopParam?.toLowerCase() === "true") {
+    embedUrl.searchParams.set("loop", "1");
+    if (!embedUrl.searchParams.has("playlist")) {
+      embedUrl.searchParams.set("playlist", videoId);
+    }
+  }
+
+  if (options?.origin) {
+    embedUrl.searchParams.set("origin", options.origin);
+  }
+
+  sourceUrl.searchParams.forEach((value, key) => {
+    if (!value) {
+      return;
+    }
+    if (YOUTUBE_RESERVED_PARAMS.has(key)) {
+      return;
+    }
+    if (!YOUTUBE_ALLOWED_PASSTHROUGH_PARAMS.has(key)) {
+      return;
+    }
+    if (key === "origin" && options?.origin) {
+      return;
+    }
+    embedUrl.searchParams.set(key, value);
+  });
+
+  return embedUrl.toString();
 }
 
 function formatExpectedDuration(duration?: number): string | null {
@@ -158,6 +360,21 @@ export function VideoStep({
   const { onChange, ...content } = typedConfig;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [autoplayFailed, setAutoplayFailed] = useState(false);
+  const [clientOrigin, setClientOrigin] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const { origin } = window.location;
+      if (origin && origin !== "null") {
+        setClientOrigin(origin);
+      }
+    } catch (error) {
+      setClientOrigin(null);
+    }
+  }, []);
 
   const notifyChange = useCallback(
     (nextContent: VideoStepContent) => {
@@ -175,6 +392,15 @@ export function VideoStep({
     () => content.sources.filter((source) => source.type === "mp4"),
     [content.sources]
   );
+  const youtubeSource = useMemo(
+    () => content.sources.find((source) => source.type === "youtube"),
+    [content.sources]
+  );
+  const youtubeSourceUrl = youtubeSource?.url ?? "";
+  const youtubeEmbedUrl = useMemo(
+    () => getYouTubeEmbedUrl(youtubeSourceUrl, { origin: clientOrigin }),
+    [clientOrigin, youtubeSourceUrl]
+  );
   const mp4Signature = useMemo(
     () => mp4Sources.map((source) => source.url).join("|"),
     [mp4Sources]
@@ -189,6 +415,10 @@ export function VideoStep({
   );
 
   useEffect(() => {
+    if (youtubeEmbedUrl) {
+      return undefined;
+    }
+
     const video = videoRef.current;
     if (!video) {
       return undefined;
@@ -250,9 +480,14 @@ export function VideoStep({
         video.load();
       }
     };
-  }, [hlsSource, mp4Signature]);
+  }, [hlsSource, mp4Signature, youtubeEmbedUrl]);
 
   useEffect(() => {
+    if (youtubeEmbedUrl) {
+      setAutoplayFailed(false);
+      return;
+    }
+
     const video = videoRef.current;
     if (!video || isEditModeFromContext) {
       return;
@@ -314,13 +549,19 @@ export function VideoStep({
     isEditModeFromContext,
     mp4Sources.length,
     sourceSignature,
+    youtubeEmbedUrl,
   ]);
 
   useEffect(() => {
+    if (youtubeEmbedUrl) {
+      setAutoplayFailed(false);
+      return;
+    }
+
     if (!isActive || isEditModeFromContext) {
       setAutoplayFailed(false);
     }
-  }, [isActive, isEditModeFromContext, sourceSignature]);
+  }, [isActive, isEditModeFromContext, sourceSignature, youtubeEmbedUrl]);
 
   useEffect(() => {
     return () => {
@@ -395,11 +636,28 @@ export function VideoStep({
     [effectiveOnAdvance]
   );
 
+  const mp4SourceValue = useMemo(() => mp4Sources[0]?.url ?? "", [mp4Sources]);
+  const hlsSourceValue = hlsSource?.url ?? "";
+  const youtubeSourceValue = youtubeSource?.url ?? "";
+  const hasVideoElementSource =
+    !youtubeEmbedUrl && (mp4Sources.length > 0 || Boolean(hlsSource));
+  const isAutoAdvanceSupported = !youtubeEmbedUrl;
+  const showYouTubeError = Boolean(youtubeSource) && !youtubeEmbedUrl;
+
   const handleVideoEnded = useCallback(() => {
-    if (!isEditModeFromContext && content.autoAdvanceOnEnd) {
+    if (
+      !isEditModeFromContext &&
+      content.autoAdvanceOnEnd &&
+      isAutoAdvanceSupported
+    ) {
       effectiveOnAdvance();
     }
-  }, [content.autoAdvanceOnEnd, effectiveOnAdvance, isEditModeFromContext]);
+  }, [
+    content.autoAdvanceOnEnd,
+    effectiveOnAdvance,
+    isAutoAdvanceSupported,
+    isEditModeFromContext,
+  ]);
 
   const handleVideoPlay = useCallback(() => {
     setAutoplayFailed(false);
@@ -409,9 +667,6 @@ export function VideoStep({
     () => formatExpectedDuration(content.expectedDuration),
     [content.expectedDuration]
   );
-
-  const mp4SourceValue = useMemo(() => mp4Sources[0]?.url ?? "", [mp4Sources]);
-  const hlsSourceValue = hlsSource?.url ?? "";
 
   return (
     <div className="space-y-6">
@@ -425,7 +680,20 @@ export function VideoStep({
           ) : null}
         </header>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          {content.sources.length ? (
+          {youtubeEmbedUrl ? (
+            <div className="relative aspect-video w-full overflow-hidden rounded-md bg-black">
+              <iframe
+                key={youtubeEmbedUrl}
+                className="absolute left-0 top-0 h-full w-full"
+                src={youtubeEmbedUrl}
+                title="Vidéo YouTube"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                loading="lazy"
+                referrerPolicy="strict-origin-when-cross-origin"
+                allowFullScreen
+              />
+            </div>
+          ) : hasVideoElementSource ? (
             <video
               ref={videoRef}
               className="h-auto w-full rounded-md bg-black"
@@ -452,11 +720,13 @@ export function VideoStep({
             </video>
           ) : (
             <div className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-              Ajoutez une source vidéo pour commencer la lecture.
+              {showYouTubeError
+                ? "Impossible d’interpréter l’URL YouTube fournie. Vérifiez qu’elle est correcte."
+                : "Ajoutez une source vidéo pour commencer la lecture."}
             </div>
           )}
         </div>
-        {autoplayFailed ? (
+        {autoplayFailed && !youtubeEmbedUrl ? (
           <div className="flex items-center gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             <span>
               La lecture automatique est bloquée par le navigateur.
@@ -487,6 +757,18 @@ export function VideoStep({
             />
           </label>
           <label className="block space-y-1 text-sm">
+            <span className="font-medium text-slate-700">URL YouTube</span>
+            <input
+              className="w-full rounded-md border border-slate-300 p-2"
+              placeholder="https://www.youtube.com/watch?v=abcdefghijk"
+              value={youtubeSourceValue}
+              onChange={handleSourceChange("youtube")}
+            />
+            <span className="block text-xs text-slate-500">
+              Les liens « watch », youtu.be, shorts ou embed sont pris en charge.
+            </span>
+          </label>
+          <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-700">URL HLS</span>
             <input
               className="w-full rounded-md border border-slate-300 p-2"
@@ -509,9 +791,15 @@ export function VideoStep({
               type="checkbox"
               checked={content.autoAdvanceOnEnd ?? false}
               onChange={handleAutoAdvanceChange}
+              disabled={!isAutoAdvanceSupported}
             />
             <span>Passer automatiquement à l’étape suivante en fin de vidéo</span>
           </label>
+          {!isAutoAdvanceSupported ? (
+            <p className="text-xs text-slate-500">
+              L’avance automatique n’est pas disponible pour les vidéos YouTube.
+            </p>
+          ) : null}
           <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-700">
               Durée attendue (secondes)
