@@ -2,6 +2,7 @@ import { registerStepComponent } from "../registry";
 
 import { FormStep } from "./FormStep";
 import { RichContentStep } from "./RichContentStep";
+import { SimulationChatStep } from "./SimulationChatStep";
 import { VideoStep } from "./VideoStep";
 import type { FormStepConfig, FormStepValidationFn } from "./FormStep";
 import {
@@ -11,6 +12,11 @@ import {
   sanitizeFormValues,
   validateFieldSpec,
 } from "./FormStep";
+import type {
+  SimulationChatConfig,
+  SimulationChatPayload,
+  SimulationChatStageConfig,
+} from "./SimulationChatStep";
 import "./workshop";
 import type {
   RichContentChecklistItem,
@@ -31,6 +37,7 @@ import type {
 
 registerStepComponent("form", FormStep);
 registerStepComponent("rich-content", RichContentStep);
+registerStepComponent("simulation-chat", SimulationChatStep);
 registerStepComponent("video", VideoStep);
 
 /**
@@ -51,6 +58,7 @@ export {
   sanitizeFormValues,
   validateFieldSpec,
 };
+export type { SimulationChatConfig, SimulationChatPayload, SimulationChatStageConfig };
 export type { RichContentStepConfig, RichContentStepContent };
 export type { RichContentMediaItem };
 export type {
