@@ -4093,6 +4093,7 @@ export default function ExplorateurIA({
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
+  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isMusicSupported, setIsMusicSupported] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4285,7 +4286,7 @@ export default function ExplorateurIA({
   }, [blockedStage]);
 
   const attemptPlayMusic = useCallback(() => {
-    if (isMusicPlaying) {
+    if (!isMusicEnabled || isMusicPlaying) {
       return;
     }
     const theme = audioRef.current;
@@ -4296,11 +4297,12 @@ export default function ExplorateurIA({
       .start()
       .then(() => setIsMusicPlaying(true))
       .catch(() => {
+        setIsMusicPlaying(false);
         // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
       });
-  }, [isMusicPlaying]);
+  }, [isMusicEnabled, isMusicPlaying]);
 
-  const toggleMusic = () => {
+  useEffect(() => {
     if (!isMusicSupported) {
       return;
     }
@@ -4308,18 +4310,22 @@ export default function ExplorateurIA({
     if (!theme || !theme.isSupported) {
       return;
     }
-    if (isMusicPlaying) {
+    if (isMusicEnabled) {
+      if (!isMusicPlaying) {
+        attemptPlayMusic();
+      }
+    } else if (isMusicPlaying) {
       void theme.stop().finally(() => {
         setIsMusicPlaying(false);
       });
-    } else {
-      void theme
-        .start()
-        .then(() => setIsMusicPlaying(true))
-        .catch(() => {
-          // L'utilisateur devra réessayer en cas de blocage navigateur.
-        });
     }
+  }, [attemptPlayMusic, isMusicEnabled, isMusicPlaying, isMusicSupported]);
+
+  const toggleMusic = () => {
+    if (!isMusicSupported) {
+      return;
+    }
+    setIsMusicEnabled((value) => !value);
   };
 
   const move = useCallback(
@@ -4336,14 +4342,16 @@ export default function ExplorateurIA({
         if (!isWalkable(nx, ny, current.x, current.y)) {
           return current;
         }
-        attemptPlayMusic();
+        if (isMusicEnabled) {
+          attemptPlayMusic();
+        }
         setWalkStep((step) => step + 1);
         moved = true;
         return { x: nx, y: ny };
       });
       return moved;
     },
-    [attemptPlayMusic, isQuarterCompleted]
+    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
   );
 
   const buildingAt = useCallback((x: number, y: number) => {
@@ -4636,6 +4644,10 @@ export default function ExplorateurIA({
     [cancelAutoWalk, move]
   );
 
+  const handleOpenInventory = useCallback(() => {
+    console.info("[ExplorateurIA] Inventaire à implémenter ultérieurement");
+  }, []);
+
   useEffect(() => {
     if (!isMobile || isEditMode) {
       setMobilePrompt(null);
@@ -4682,49 +4694,88 @@ export default function ExplorateurIA({
             </div>
           )}
           <div
-            ref={worldContainerRef}
             className={classNames(
-              "relative touch-manipulation",
-              isMobile
-                ? "flex-1 min-h-0 h-full w-full overflow-hidden"
-                : "mt-4 max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
+              "relative w-full",
+              isMobile ? "flex-1 min-h-0" : "mt-4 max-w-full"
             )}
-            style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
           >
-            {isMusicSupported && (
+            <div
+              className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3"
+            >
               <button
                 type="button"
-                onClick={toggleMusic}
+                onClick={navigateToActivities}
                 className={classNames(
-                  "absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                  "pointer-events-auto flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
                   isMobile ? "active:scale-95" : "hover:bg-slate-100"
                 )}
-                aria-pressed={isMusicPlaying}
-                aria-label={
-                  isMusicPlaying ? "Mettre la musique en pause" : "Lancer la musique"
-                }
-                title={isMusicPlaying ? "Pause" : "Lecture"}
+                title="Retour aux activités"
               >
-                <span aria-hidden="true">{isMusicPlaying ? "⏸" : "♫"}</span>
-                <span>{isMusicPlaying ? "Pause" : "Musique"}</span>
+                <span aria-hidden="true">←</span>
+                <span className="sr-only">Revenir à la liste des activités</span>
               </button>
-            )}
+              <div className="pointer-events-auto flex flex-col items-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenInventory}
+                  className={classNames(
+                    "flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
+                    isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                  )}
+                  title="Ouvrir l’inventaire"
+                >
+                  <span aria-hidden="true" className="text-base leading-none">
+                    🎒
+                  </span>
+                  <span>Inventaire</span>
+                </button>
+                {isMusicSupported && (
+                  <button
+                    type="button"
+                    onClick={toggleMusic}
+                    className={classNames(
+                      "mt-1 flex items-center justify-center rounded-full border bg-white/90 p-2 text-base font-semibold text-slate-700 shadow-sm backdrop-blur",
+                      isMobile ? "active:scale-95" : "hover:bg-slate-100"
+                    )}
+                    aria-pressed={isMusicEnabled}
+                    title={
+                      isMusicEnabled ? "Couper la musique" : "Activer la musique"
+                    }
+                  >
+                    <span className="sr-only">
+                      {isMusicEnabled ? "Couper la musique" : "Activer la musique"}
+                    </span>
+                    <span aria-hidden="true">{isMusicEnabled ? "🔊" : "🔇"}</span>
+                  </button>
+                )}
+              </div>
+            </div>
             <div
-              className={
-                isMobile ? "flex h-full w-full" : "inline-block p-3"
-              }
+              ref={worldContainerRef}
+              className={classNames(
+                "relative touch-manipulation",
+                isMobile
+                  ? "flex-1 min-h-0 h-full w-full overflow-hidden"
+                  : "max-w-full overflow-auto rounded-xl border bg-emerald-50/60 shadow-inner"
+              )}
+              style={isMobile ? undefined : { maxHeight: "min(70vh, 520px)" }}
             >
               <div
-                className={classNames(
-                  "grid",
-                  isMobile ? "h-full w-full min-w-max" : "min-w-max"
-                )}
-                style={{
-                  gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
-                  gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
-                  gap: TILE_GAP,
-                }}
+                className={
+                  isMobile ? "flex h-full w-full" : "inline-block p-3"
+                }
               >
+                <div
+                  className={classNames(
+                    "grid",
+                    isMobile ? "h-full w-full min-w-max" : "min-w-max"
+                  )}
+                  style={{
+                    gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
+                    gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
+                    gap: TILE_GAP,
+                  }}
+                >
                 {world.map((row, y) =>
                   row.map((terrain, x) => {
                     const activeTileset =
@@ -4829,6 +4880,7 @@ export default function ExplorateurIA({
                     );
                   })
                 )}
+                </div>
               </div>
             </div>
             {showMobileControls && (
