@@ -103,7 +103,7 @@ const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
 const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
-const DESKTOP_TILE_MAX_SIZE = 48;
+const DESKTOP_TILE_MAX_SIZE = BASE_TILE_SIZE * 2;
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
 type TileScaleMode = "contain" | "cover";
 
@@ -1384,81 +1384,6 @@ function TerrainThemeOptions({
         Choisissez un style pour changer l'apparence et utilisez le bouton pour
         régénérer la forme de l'île. Le changement est visible immédiatement.
       </p>
-    </div>
-  );
-}
-
-function TilesetControls({
-  ts,
-  setTs,
-}: {
-  ts: Tileset;
-  setTs: (t: Tileset) => void;
-}) {
-  const [url, setUrl] = useState(ts.url ?? mapPackAtlas);
-  const [size, setSize] = useState(ts.size ?? DEFAULT_TILE_SIZE);
-
-  const apply = (mode: TilesetMode) => {
-    if (mode === "builtin") {
-      setTs({ mode: "builtin", size, map: ts.map });
-    } else {
-      setTs({ mode: "atlas", url: url || mapPackAtlas, size, map: ts.map });
-    }
-  };
-
-  return (
-    <div className="space-y-2 text-xs">
-      <div className="flex items-center justify-between">
-        <span>Mode tileset</span>
-        <div className="flex gap-1">
-          <button
-            className={
-              ts.mode === "builtin"
-                ? "px-2 py-1 rounded bg-slate-800 text-white"
-                : "px-2 py-1 rounded bg-slate-100"
-            }
-            onClick={() => apply("builtin")}
-          >
-            builtin
-          </button>
-          <button
-            className={
-              ts.mode === "atlas"
-                ? "px-2 py-1 rounded bg-slate-800 text-white"
-                : "px-2 py-1 rounded bg-slate-100"
-            }
-            onClick={() => apply("atlas")}
-          >
-            atlas
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-2">
-        <label className="flex items-center gap-2">
-          URL
-          <input
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="/assets/tileset.png"
-            className="flex-1 px-2 py-1 border rounded"
-          />
-        </label>
-        <label className="flex items-center gap-2">
-          Tile size
-          <input
-            type="number"
-            value={size}
-            onChange={(event) =>
-              setSize(parseInt(event.target.value || "16", 10))
-            }
-            className="w-20 px-2 py-1 border rounded"
-          />
-        </label>
-        <p className="text-slate-500">
-          Dépose un atlas PNG (64×64) dans public/assets et renseigne l'URL. Pack
-          recommandé: Kenney (CC0) Map Pack.
-        </p>
-      </div>
     </div>
   );
 }
@@ -2945,46 +2870,6 @@ function getTileNameFromCoord(coord: TileCoord): string | null {
   return null;
 }
 
-function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
-  return (
-    <div className="grid grid-cols-3 gap-2 select-none">
-      <div />
-      <button
-        onClick={() => onMove(0, -1)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
-        aria-label="Haut"
-      >
-        ▲
-      </button>
-      <div />
-      <button
-        onClick={() => onMove(-1, 0)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
-        aria-label="Gauche"
-      >
-        ◀
-      </button>
-      <div />
-      <button
-        onClick={() => onMove(1, 0)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm"
-        aria-label="Droite"
-      >
-        ▶
-      </button>
-      <div />
-      <button
-        onClick={() => onMove(0, 1)}
-        className="px-4 py-3 rounded-xl bg-white/80 hover:bg-white shadow text-base sm:text-sm col-start-2"
-        aria-label="Bas"
-      >
-        ▼
-      </button>
-      <div />
-    </div>
-  );
-}
-
 function MobileArrowControls({
   onMove,
   containerRef,
@@ -4138,7 +4023,7 @@ export default function ExplorateurIA({
   }, [stepSequence]);
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
-  const [tileset, setTileset] = useTileset();
+  const [tileset] = useTileset();
   const [worldVersion, forceWorldRefresh] = useState(0);
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
@@ -4930,7 +4815,7 @@ export default function ExplorateurIA({
         className={
           isMobile
             ? "grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0"
-            : "grid w-full gap-6 md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]"
+            : "flex min-h-0 w-full"
         }
       >
         <div className="relative flex min-h-0 flex-1 flex-col">
@@ -5180,113 +5065,7 @@ export default function ExplorateurIA({
             </div>
           )}
         </div>
-        {!isMobile && (
-          <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Progression
-            </div>
-            <ul className="mt-2 text-sm space-y-2">
-              {buildings.map((building) => (
-                <li key={building.id} className="flex items-center justify-between gap-3">
-                  {(() => {
-                    const key = coordKey(building.x, building.y);
-                    const tileBlocked = activeGateKeys.has(key);
-                    const gate = GATE_BY_COORD.get(key);
-                    const lockMessageStage = gate?.stage ?? building.id;
-                    const isLocked = tileBlocked && !isQuarterCompleted(building.id);
-                    return (
-                      <button
-                        onClick={() => {
-                          if (isLocked) {
-                            setBlockedStage(lockMessageStage);
-                            return;
-                          }
-                          setOpen(building.id);
-                        }}
-                        disabled={isLocked}
-                        className={classNames(
-                          "text-left",
-                          isLocked
-                            ? "cursor-not-allowed opacity-60"
-                            : "hover:underline"
-                        )}
-                        style={{ color: building.color }}
-                      >
-                        {building.label}
-                      </button>
-                    );
-                  })()}
-                  <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50">
-                    {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
-                    {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
-                    {building.id === "decision" && (progress.decision.done ? "OK" : "À faire")}
-                    {building.id === "ethique" && (progress.ethique.done ? "OK" : "À faire")}
-                    {building.id === "mairie" && (progress.mairie.done ? "OK" : "À faire")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Contrôles
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <DPad onMove={move} />
-              <div className="text-xs text-slate-600 space-y-1">
-                <p>Entrer: Ouvrir</p>
-                <p>Échap: Fermer</p>
-                <p>Clic: Accès direct</p>
-              </div>
-            </div>
-            {blockedStage && (
-              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
-                Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
-              </div>
-            )}
-          </div>
-          {isEditMode && (
-            <div className="rounded-2xl border bg-white p-4 shadow">
-              <div className="text-xs uppercase tracking-wide text-slate-500">
-                Terrain
-              </div>
-              <div className="mt-3">
-                <TerrainThemeOptions
-                  selectedTheme={selectedTheme}
-                  onSelectTheme={handleThemeChange}
-                  onRegenerate={handleRegenerateWorld}
-                />
-              </div>
-            </div>
-          )}
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Tileset
-            </div>
-            <TilesetControls ts={tileset} setTs={setTileset} />
-          </div>
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Export
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={downloadJSON}
-                className="px-3 py-2 rounded-xl bg-slate-800 text-white"
-              >
-                JSON
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="px-3 py-2 rounded-xl bg-slate-100 border"
-              >
-                PDF
-              </button>
-            </div>
-          </div>
-          </aside>
-        )}
+        
       </div>
 
       <Modal
