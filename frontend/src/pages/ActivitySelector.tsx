@@ -541,12 +541,6 @@ function ActivitySelector(): JSX.Element {
   }, [disabledActivity]);
 
   useEffect(() => {
-    if (!isEditMode) {
-      setIsAddModalOpen(false);
-    }
-  }, [isEditMode]);
-
-  useEffect(() => {
     let cancelled = false;
     const loadProgress = async () => {
       try {
