@@ -97,39 +97,42 @@ PLAN_SYSTEM_PROMPT = (
 )
 
 
-PROMPT_EVALUATION_SCHEMA = {
-    "name": "prompt_evaluation",
-    "schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "total": {"type": "integer", "minimum": 0, "maximum": 100},
-            "clarity": {"type": "integer", "minimum": 0, "maximum": 100},
-            "specificity": {"type": "integer", "minimum": 0, "maximum": 100},
-            "structure": {"type": "integer", "minimum": 0, "maximum": 100},
-            "length": {"type": "integer", "minimum": 0, "maximum": 100},
-            "comments": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 480,
-            },
-            "advice": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1, "maxLength": 240},
-                "minItems": 0,
-                "maxItems": 3,
-            },
+PROMPT_EVALUATION_JSON_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "total": {"type": "integer", "minimum": 0, "maximum": 100},
+        "clarity": {"type": "integer", "minimum": 0, "maximum": 100},
+        "specificity": {"type": "integer", "minimum": 0, "maximum": 100},
+        "structure": {"type": "integer", "minimum": 0, "maximum": 100},
+        "length": {"type": "integer", "minimum": 0, "maximum": 100},
+        "comments": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 480,
         },
-        "required": [
-            "total",
-            "clarity",
-            "specificity",
-            "structure",
-            "length",
-            "comments",
-            "advice",
-        ],
+        "advice": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 240},
+            "minItems": 0,
+            "maxItems": 3,
+        },
     },
+    "required": [
+        "total",
+        "clarity",
+        "specificity",
+        "structure",
+        "length",
+        "comments",
+        "advice",
+    ],
+}
+
+PROMPT_EVALUATION_FORMAT = {
+    "type": "json_schema",
+    "name": "prompt_evaluation",
+    "schema": PROMPT_EVALUATION_JSON_SCHEMA,
 }
 
 
@@ -2045,14 +2048,17 @@ def _handle_prompt_evaluation(payload: PromptEvaluationRequest) -> PromptEvaluat
     prompt = payload.prompt.strip()
 
     try:
+        text_config = {
+            "verbosity": payload.verbosity,
+            "format": dict(PROMPT_EVALUATION_FORMAT),
+        }
         response = client.responses.create(
             model=model,
             input=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_schema", "json_schema": PROMPT_EVALUATION_SCHEMA},
-            text={"verbosity": payload.verbosity},
+            text=text_config,
             reasoning={"effort": payload.thinking, "summary": "auto"},
         )
     except Exception as exc:  # pragma: no cover - defensive catch
