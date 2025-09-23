@@ -50,8 +50,14 @@ export function useLTI() {
           setContext(data);
           setIsLTISession(true);
         } else if (response.status === 401) {
-          // No LTI session, normal operation
+          // No active LTI session. Clear any stale context so admin login can take over.
+          setContext(null);
           setIsLTISession(false);
+          setError(null);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("LTI context unavailable (401). Continuing without LTI session.");
+          }
         } else {
           throw new Error(`Erreur lors de la récupération du contexte LTI: ${response.status}`);
         }

@@ -6,6 +6,7 @@ import {
   type StepSequenceRenderWrapperProps,
 } from "./StepSequenceRenderer";
 import type { StepDefinition } from "./types";
+import { useActivityCompletion } from "../../hooks/useActivityCompletion";
 
 export type StepSequenceActivityConfig = {
   steps: StepDefinition[];
@@ -61,11 +62,37 @@ export function StepSequenceActivity({
     return [] as StepDefinition[];
   }, [metadataSteps, stepSequence, steps]);
 
+  const completionTargetId = completionId || activityId;
+
+  const handleNavigateAfterCompletion = useCallback(() => {
+    if (typeof navigateToActivities === "function") {
+      navigateToActivities();
+    }
+  }, [navigateToActivities]);
+
+  const { markCompleted } = useActivityCompletion({
+    activityId: completionTargetId,
+    onCompleted: handleNavigateAfterCompletion,
+    resetOn: [completionTargetId],
+  });
+
+  const finalizeSequence = useCallback(async () => {
+    if (isEditMode) {
+      return;
+    }
+
+    const success = await markCompleted({ triggerCompletionCallback: true });
+    if (!success) {
+      handleNavigateAfterCompletion();
+    }
+  }, [handleNavigateAfterCompletion, isEditMode, markCompleted]);
+
   const handleComplete = useCallback(
     (payloads: Record<string, unknown>) => {
       onComplete?.(payloads);
+      void finalizeSequence();
     },
-    [onComplete]
+    [finalizeSequence, onComplete]
   );
 
   const activityContext = useMemo(
