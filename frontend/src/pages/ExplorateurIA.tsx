@@ -6,6 +6,7 @@ import {
   useState,
   type DragEvent,
   type ReactNode,
+  type Ref,
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
@@ -2869,61 +2870,62 @@ function DPad({ onMove }: { onMove: (dx: number, dy: number) => void }) {
   );
 }
 
-function MobileArrowControls({ onMove }: { onMove: (dx: number, dy: number) => void }) {
+function MobileArrowControls({
+  onMove,
+  containerRef,
+}: {
+  onMove: (dx: number, dy: number) => void;
+  containerRef?: Ref<HTMLDivElement>;
+}) {
   const buttonClass =
-    "flex h-12 w-12 items-center justify-center rounded-full bg-slate-900/40 text-white text-xl shadow-lg backdrop-blur-md transition active:scale-95";
+    "flex h-10 w-10 items-center justify-center rounded-full bg-slate-900/40 text-white text-lg shadow-lg backdrop-blur-md transition active:scale-95";
   const handle = (dx: number, dy: number) => () => {
     onMove(dx, dy);
   };
 
   return (
     <div
-      className="pointer-events-none fixed inset-0 z-40 flex items-end justify-end"
-      style={{
-        paddingRight: "calc(16px + env(safe-area-inset-right))",
-        paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
-      }}
+      ref={containerRef}
+      className="pointer-events-auto rounded-3xl bg-slate-900/25 p-2.5 shadow-lg backdrop-blur-sm"
     >
-      <div className="pointer-events-auto rounded-3xl bg-slate-900/25 p-3 shadow-lg backdrop-blur-sm">
-        <div className="grid grid-cols-3 gap-2">
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers le haut"
-            onClick={handle(0, -1)}
-            className={buttonClass}
-          >
-            ▲
-          </button>
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers la gauche"
-            onClick={handle(-1, 0)}
-            className={buttonClass}
-          >
-            ◀
-          </button>
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers la droite"
-            onClick={handle(1, 0)}
-            className={buttonClass}
-          >
-            ▶
-          </button>
-          <div />
-          <button
-            type="button"
-            aria-label="Aller vers le bas"
-            onClick={handle(0, 1)}
-            className={classNames(buttonClass, "col-start-2")}
-          >
-            ▼
-          </button>
-          <div />
-        </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <div />
+        <button
+          type="button"
+          aria-label="Aller vers le haut"
+          onClick={handle(0, -1)}
+          className={buttonClass}
+        >
+          ▲
+        </button>
+        <div />
+        <button
+          type="button"
+          aria-label="Aller vers la gauche"
+          onClick={handle(-1, 0)}
+          className={buttonClass}
+        >
+          ◀
+        </button>
+        <div />
+        <button
+          type="button"
+          aria-label="Aller vers la droite"
+          onClick={handle(1, 0)}
+          className={buttonClass}
+        >
+          ▶
+        </button>
+        <div />
+        <button
+          type="button"
+          aria-label="Aller vers le bas"
+          onClick={handle(0, 1)}
+          className={classNames(buttonClass, "col-start-2")}
+        >
+          ▼
+        </button>
+        <div />
       </div>
     </div>
   );
@@ -2938,40 +2940,114 @@ type MobilePromptBuilding = {
   color: string;
 };
 
-function MobileEnterPromptOverlay({
+const MOBILE_CONTROL_GAP = 12;
+
+function MobileControlsOverlay({
   building,
   onEnter,
+  onMove,
 }: {
   building: MobilePromptBuilding | null;
   onEnter: () => void;
+  onMove: (dx: number, dy: number) => void;
 }) {
-  if (!building) {
-    return null;
-  }
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const promptRef = useRef<HTMLButtonElement | null>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  const [stackLayout, setStackLayout] = useState(false);
 
-  const title =
-    building.number != null ? `Quartier ${building.number}` : building.label;
+  const updateLayout = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!building || !promptRef.current || !controlsRef.current || !containerRef.current) {
+      setStackLayout((previous) => (previous ? false : previous));
+      return;
+    }
+    const promptWidth = promptRef.current.getBoundingClientRect().width;
+    const controlsWidth = controlsRef.current.getBoundingClientRect().width;
+    const containerWidth = containerRef.current.getBoundingClientRect().width;
+    const shouldStack =
+      promptWidth + controlsWidth + MOBILE_CONTROL_GAP > containerWidth;
+    setStackLayout((previous) => (previous === shouldStack ? previous : shouldStack));
+  }, [building]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handleResize = () => updateLayout();
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
+    let resizeObserver: ResizeObserver | null = null;
+    if ("ResizeObserver" in window) {
+      resizeObserver = new ResizeObserver(() => updateLayout());
+      const prompt = promptRef.current;
+      const controls = controlsRef.current;
+      const container = containerRef.current;
+      if (prompt) {
+        resizeObserver.observe(prompt);
+      }
+      if (controls) {
+        resizeObserver.observe(controls);
+      }
+      if (container) {
+        resizeObserver.observe(container);
+      }
+    }
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("orientationchange", handleResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, [updateLayout, building]);
+
+  useEffect(() => {
+    updateLayout();
+  }, [building, updateLayout]);
+
+  const title = building?.number != null ? `Quartier ${building.number}` : building?.label;
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-6"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-4"
       style={{
-        paddingBottom: "calc(24px + env(safe-area-inset-bottom))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom))",
+        paddingLeft: "calc(16px + env(safe-area-inset-left))",
+        paddingRight: "calc(16px + env(safe-area-inset-right))",
       }}
     >
-      <button
-        type="button"
-        onClick={onEnter}
-        className="pointer-events-auto flex min-w-[180px] flex-col items-center justify-center rounded-full bg-white/95 px-6 py-3 text-center text-sm font-semibold text-slate-800 shadow-2xl ring-2 ring-emerald-200/80 animate-[prompt-pop_260ms_ease-out] backdrop-blur"
+      <div
+        ref={containerRef}
+        className={
+          stackLayout
+            ? "pointer-events-none flex w-full flex-col-reverse items-stretch gap-3"
+            : classNames(
+                "pointer-events-none flex w-full flex-row items-end gap-3",
+                building ? "justify-between" : "justify-end"
+              )
+        }
       >
-        <span
-          className="text-[11px] font-medium uppercase tracking-wide"
-          style={{ color: building.color }}
-        >
-          {title}
-        </span>
-        <span className="text-lg leading-none text-slate-800">Entrer</span>
-      </button>
+        {building && (
+          <button
+            ref={promptRef}
+            type="button"
+            onClick={onEnter}
+            className="pointer-events-auto flex min-w-[150px] flex-col items-start justify-center rounded-2xl bg-white/95 px-5 py-3 text-left text-sm font-semibold text-slate-800 shadow-2xl ring-2 ring-emerald-200/80 backdrop-blur animate-[prompt-pop_260ms_ease-out]"
+          >
+            <span
+              className="text-[11px] font-medium uppercase tracking-wide"
+              style={{ color: building.color }}
+            >
+              {title}
+            </span>
+            <span className="text-lg leading-none text-slate-800">Entrer</span>
+          </button>
+        )}
+        <MobileArrowControls onMove={onMove} containerRef={controlsRef} />
+      </div>
     </div>
   );
 }
@@ -4721,13 +4797,11 @@ export default function ExplorateurIA({
               </div>
             </div>
             {showMobileControls && (
-              <>
-                <MobileEnterPromptOverlay
-                  building={mobilePromptLocked ? null : mobilePromptBuilding}
-                  onEnter={handleMobileEnter}
-                />
-                <MobileArrowControls onMove={handleOverlayMove} />
-              </>
+              <MobileControlsOverlay
+                building={mobilePromptLocked ? null : mobilePromptBuilding}
+                onEnter={handleMobileEnter}
+                onMove={handleOverlayMove}
+              />
             )}
           </div>
           <style>{`
