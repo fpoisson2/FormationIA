@@ -21,9 +21,14 @@ export type StepRegistry = Record<string, ComponentType<StepComponentProps>>;
 
 export interface StepSequenceContextValue {
   stepIndex: number;
+  stepCount: number;
+  steps: StepDefinition[];
+  payloads: Record<string, unknown>;
   isEditMode: boolean;
   onAdvance: (payload?: unknown) => void;
   onUpdateConfig: (config: unknown) => void;
+  goToStep: (target: number | string) => void;
+  activityContext?: Record<string, unknown> | null;
 }
 
 export const StepSequenceContext = createContext<StepSequenceContextValue | undefined>(

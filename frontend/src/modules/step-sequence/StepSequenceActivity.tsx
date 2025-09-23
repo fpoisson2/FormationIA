@@ -33,6 +33,14 @@ export function StepSequenceActivity({
   metadata,
   isEditMode = false,
   onComplete,
+  activityId,
+  completionId,
+  navigateToActivities,
+  setLayoutOverrides,
+  resetLayoutOverrides,
+  header,
+  card,
+  layout,
 }: StepSequenceActivityProps): JSX.Element {
   const metadataSteps = metadata?.steps;
   const resolvedSteps = useMemo(() => {
@@ -55,11 +63,35 @@ export function StepSequenceActivity({
     [onComplete]
   );
 
+  const activityContext = useMemo(
+    () => ({
+      activityId,
+      completionId,
+      navigateToActivities,
+      setLayoutOverrides,
+      resetLayoutOverrides,
+      header,
+      card,
+      layout,
+    }),
+    [
+      activityId,
+      card,
+      completionId,
+      header,
+      layout,
+      navigateToActivities,
+      resetLayoutOverrides,
+      setLayoutOverrides,
+    ]
+  );
+
   return (
     <StepSequenceRenderer
       steps={resolvedSteps}
       isEditMode={isEditMode}
       onComplete={handleComplete}
+      activityContext={activityContext}
     />
   );
 }

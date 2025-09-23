@@ -9,6 +9,7 @@ export interface StepSequenceRendererProps {
   initialIndex?: number;
   isEditMode?: boolean;
   onComplete?: (payloads: Record<string, unknown>) => void;
+  activityContext?: Record<string, unknown> | null;
 }
 
 export function StepSequenceRenderer({
@@ -16,6 +17,7 @@ export function StepSequenceRenderer({
   initialIndex = 0,
   isEditMode = false,
   onComplete,
+  activityContext = null,
 }: StepSequenceRendererProps): JSX.Element | null {
   const [currentIndex, setCurrentIndex] = useState(() =>
     Math.min(initialIndex, Math.max(steps.length - 1, 0))
@@ -76,14 +78,53 @@ export function StepSequenceRenderer({
     [currentIndex, steps]
   );
 
+  const goToStep = useCallback(
+    (target: number | string) => {
+      if (steps.length === 0) {
+        return;
+      }
+
+      setCurrentIndex((previousIndex) => {
+        if (typeof target === "number") {
+          if (Number.isNaN(target)) {
+            return previousIndex;
+          }
+          const nextIndex = Math.min(
+            Math.max(Math.trunc(target), 0),
+            steps.length - 1
+          );
+          return nextIndex;
+        }
+
+        const resolvedIndex = steps.findIndex((step) => step.id === target);
+        return resolvedIndex === -1 ? previousIndex : resolvedIndex;
+      });
+    },
+    [steps]
+  );
+
   const contextValue = useMemo(
     () => ({
       stepIndex: currentIndex,
+      stepCount: steps.length,
+      steps,
+      payloads: stepPayloads,
       isEditMode,
       onAdvance: handleAdvance,
       onUpdateConfig: handleConfigUpdate,
+      goToStep,
+      activityContext,
     }),
-    [currentIndex, handleAdvance, handleConfigUpdate, isEditMode]
+    [
+      activityContext,
+      currentIndex,
+      goToStep,
+      handleAdvance,
+      handleConfigUpdate,
+      isEditMode,
+      stepPayloads,
+      steps,
+    ]
   );
 
   const activeStep = steps[currentIndex];

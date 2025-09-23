@@ -1,19 +1,79 @@
-import { ChangeEvent, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-import InfoCard from "../components/InfoCard";
+import InfoCard from "../../../../components/InfoCard";
+import type { StepComponentProps } from "../../types";
 
-interface StepOneProps {
-  sourceText: string;
-  onSourceTextChange: (value: string) => void;
+interface WorkshopContextStepConfig {
+  defaultText?: string;
 }
 
-function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element {
-  const navigate = useNavigate();
+interface WorkshopContextStepPayload {
+  sourceText: string;
+}
 
-  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
-    onSourceTextChange(event.target.value);
+const normalizeConfig = (config: unknown): WorkshopContextStepConfig => {
+  if (!config || typeof config !== "object") {
+    return {};
+  }
+  const base = config as WorkshopContextStepConfig;
+  return {
+    defaultText:
+      typeof base.defaultText === "string" ? base.defaultText : undefined,
   };
+};
+
+const extractPayload = (
+  payload: unknown,
+  fallback: WorkshopContextStepConfig
+): WorkshopContextStepPayload => {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "sourceText" in payload &&
+    typeof (payload as WorkshopContextStepPayload).sourceText === "string"
+  ) {
+    return payload as WorkshopContextStepPayload;
+  }
+
+  return {
+    sourceText: fallback.defaultText ?? "",
+  };
+};
+
+export type WorkshopContextStepState = WorkshopContextStepPayload;
+
+export function WorkshopContextStep({
+  config,
+  payload,
+  onAdvance,
+  isEditMode,
+}: StepComponentProps): JSX.Element {
+  const normalizedConfig = useMemo(
+    () => normalizeConfig(config),
+    [config]
+  );
+
+  const initialState = useMemo(
+    () => extractPayload(payload, normalizedConfig),
+    [payload, normalizedConfig]
+  );
+
+  const [sourceText, setSourceText] = useState(initialState.sourceText);
+
+  useEffect(() => {
+    setSourceText(initialState.sourceText);
+  }, [initialState.sourceText]);
+
+  const handleChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setSourceText(event.target.value);
+  }, []);
+
+  const handleAdvance = useCallback(() => {
+    if (isEditMode) {
+      return;
+    }
+    onAdvance({ sourceText });
+  }, [isEditMode, onAdvance, sourceText]);
 
   const wordCount = useMemo(() => {
     const trimmed = sourceText.trim();
@@ -28,7 +88,9 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
       <section className="page-section landing-panel grid gap-10 bg-white/95 animate-section md:grid-cols-[2fr_1fr]">
         <div className="flex flex-col gap-4 animate-section-delayed">
           <div className="space-y-3">
-            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">Étape 1</span>
+            <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+              Étape 1
+            </span>
             <h2 className="text-2xl leading-tight text-[color:var(--brand-black)]">
               Préparez un contexte clair pour guider l'IA
             </h2>
@@ -36,15 +98,19 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
               Sélectionnez un extrait de notes ou de cours qui représente bien vos besoins. Plus le contexte est précis, plus les comparaisons entre modèles seront éclairantes.
             </p>
           </div>
-          <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]" htmlFor="source-text">
+          <label
+            className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]"
+            htmlFor="workshop-source-text"
+          >
             Texte source
           </label>
           <textarea
-            id="source-text"
+            id="workshop-source-text"
             value={sourceText}
             onChange={handleChange}
             placeholder="Collez ici le passage que vous souhaitez faire analyser par l'IA. Pensez à préciser le niveau d'étude et l'objectif pédagogique."
             className="min-h-[220px] w-full rounded-3xl border border-white/70 bg-white/80 p-5 text-sm leading-relaxed shadow-inner focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+            disabled={isEditMode}
           />
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1 text-xs text-[color:var(--brand-charcoal)]">
@@ -57,8 +123,9 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
             </div>
             <button
               type="button"
-              onClick={() => navigate("/atelier/etape-2")}
-              className="cta-button cta-button--primary"
+              onClick={handleAdvance}
+              className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300"
+              disabled={isEditMode}
             >
               Passer à l'étape 2
             </button>
@@ -104,4 +171,3 @@ function StepOne({ sourceText, onSourceTextChange }: StepOneProps): JSX.Element 
   );
 }
 
-export default StepOne;

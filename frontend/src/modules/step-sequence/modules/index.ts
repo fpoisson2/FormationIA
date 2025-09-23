@@ -11,6 +11,7 @@ import {
   sanitizeFormValues,
   validateFieldSpec,
 } from "./FormStep";
+import "./workshop";
 import type {
   RichContentChecklistItem,
   RichContentChecklistSidebar,
@@ -67,3 +68,5 @@ export type {
   VideoStepContent,
 };
 export { VideoStep };
+
+export * from "./workshop";
