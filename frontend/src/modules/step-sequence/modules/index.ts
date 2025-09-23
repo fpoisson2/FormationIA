@@ -1,6 +1,7 @@
 import { registerStepComponent } from "../registry";
 
 import { RichContentStep } from "./RichContentStep";
+import { VideoStep } from "./VideoStep";
 import type {
   RichContentChecklistItem,
   RichContentChecklistSidebar,
@@ -10,8 +11,16 @@ import type {
   RichContentStepContent,
   RichContentTipsSidebar,
 } from "./RichContentStep";
+import type {
+  VideoCaption,
+  VideoSource,
+  VideoStepConfig,
+  VideoStepContent,
+  VideoSourceType,
+} from "./VideoStep";
 
 registerStepComponent("rich-content", RichContentStep);
+registerStepComponent("video", VideoStep);
 
 /**
  * Configuration attendue par le module `rich-content`.
@@ -31,3 +40,11 @@ export type {
   RichContentChecklistItem,
 };
 export { RichContentStep };
+export type {
+  VideoCaption,
+  VideoSource,
+  VideoSourceType,
+  VideoStepConfig,
+  VideoStepContent,
+};
+export { VideoStep };
