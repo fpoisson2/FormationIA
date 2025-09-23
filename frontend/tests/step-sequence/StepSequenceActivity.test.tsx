@@ -1,10 +1,22 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StepSequenceRendererProps } from "../../src/modules/step-sequence/StepSequenceRenderer";
 import type { StepDefinition } from "../../src/modules/step-sequence";
 
 const renderSpy = vi.fn();
+const markCompletedMock = vi.fn(
+  async (_options?: { triggerCompletionCallback?: boolean }) => true
+);
+
+vi.mock("../../src/hooks/useActivityCompletion", () => ({
+  useActivityCompletion: vi.fn(() => ({
+    markCompleted: markCompletedMock,
+    submitLtiScore: vi.fn(),
+    activityProgressMarked: false,
+    ltiScoreSubmitted: false,
+  })),
+}));
 
 vi.mock("../../src/modules/step-sequence/StepSequenceRenderer", () => ({
   StepSequenceRenderer: (props: StepSequenceRendererProps) => {
@@ -41,6 +53,8 @@ const defaultSteps: StepDefinition[] = [
 describe("StepSequenceActivity", () => {
   beforeEach(() => {
     renderSpy.mockClear();
+    markCompletedMock.mockClear();
+    markCompletedMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -66,7 +80,7 @@ describe("StepSequenceActivity", () => {
     ).toBe("true");
   });
 
-  it("relays onComplete when the renderer signals completion", () => {
+  it("relays onComplete when the renderer signals completion", async () => {
     const props = createBaseProps();
     const onComplete = vi.fn();
 
@@ -80,8 +94,14 @@ describe("StepSequenceActivity", () => {
 
     fireEvent.click(screen.getByTestId("step-sequence-renderer"));
 
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onComplete).toHaveBeenCalledWith({ status: "done" });
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith({ status: "done" });
+      expect(markCompletedMock).toHaveBeenCalledTimes(1);
+      expect(markCompletedMock).toHaveBeenCalledWith({
+        triggerCompletionCallback: true,
+      });
+    });
   });
 
   it("prefers the stepSequence prop when provided", () => {
@@ -122,5 +142,23 @@ describe("StepSequenceActivity", () => {
     expect(renderSpy).toHaveBeenCalledTimes(1);
     const [{ steps }] = renderSpy.mock.calls[0];
     expect(steps).toBe(metadataSteps);
+  });
+
+  it("does not mark completion while in edit mode", async () => {
+    const props = createBaseProps();
+
+    render(
+      <StepSequenceActivity
+        {...props}
+        steps={defaultSteps}
+        isEditMode
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("step-sequence-renderer"));
+
+    await waitFor(() => {
+      expect(markCompletedMock).not.toHaveBeenCalled();
+    });
   });
 });
