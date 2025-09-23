@@ -41,6 +41,10 @@ import {
   createChiptuneTheme,
   type ChiptuneTheme,
 } from "./explorateurIA/audio/chiptuneTheme";
+import {
+  createArrivalEffect,
+  type ArrivalEffect,
+} from "./explorateurIA/audio/arrivalEffect";
 
 // ---
 // "Explorateur IA" — Frontend React (module web auto-portant)
@@ -2514,6 +2518,8 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
 const START_MARKER_COORD = atlas("mapTile_179.png");
 const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 const GATE_MARKER_COORD = atlas("mapTile_044.png");
+const ARRIVAL_SHIP_COORD = atlas("mapTile_059.png");
+const ARRIVAL_TOTAL_DURATION_MS = 1500;
 
 function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   currentWorldSeed = seed >>> 0;
@@ -2882,6 +2888,40 @@ function PlayerSprite({
     return <SpriteFromAtlas ts={renderTileset} coord={frame} scale={tileSize} />;
   }
   return null;
+}
+
+function IntroArrival({ tileSize }: { tileSize: number }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
+      <div
+        className="relative flex items-center justify-center"
+        style={{ width: tileSize, height: tileSize }}
+      >
+        <div
+          className="absolute inset-0 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle at 50% 60%, rgba(16, 185, 129, 0.45), rgba(16, 185, 129, 0))",
+            filter: "blur(0.5px)",
+            animation: "alien-arrival-glow 1200ms ease-out forwards",
+          }}
+        />
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{
+            animation:
+              "alien-arrival-flight 1100ms cubic-bezier(0.18, 0.88, 0.32, 1.08) forwards",
+          }}
+        >
+          <SpriteFromAtlas
+            ts={DEFAULT_ATLAS}
+            coord={ARRIVAL_SHIP_COORD}
+            scale={tileSize}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function BuildingSprite({
@@ -4150,6 +4190,8 @@ export default function ExplorateurIA({
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
+  const [isIntroPlaying, setIsIntroPlaying] = useState(true);
+  const [hasIntroFinished, setHasIntroFinished] = useState(false);
   const [isMusicEnabled, setIsMusicEnabled] = useState(() =>
     getStoredMusicPreference()
   );
@@ -4158,6 +4200,7 @@ export default function ExplorateurIA({
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
   const firstScrollRef = useRef(true);
   const audioRef = useRef<ChiptuneTheme | null>(null);
+  const arrivalEffectRef = useRef<ArrivalEffect | null>(null);
   const completionTriggered = useRef(false);
   const autoWalkQueue = useRef<Coord[]>([]);
   const autoWalkTarget = useRef<Coord | null>(null);
@@ -4201,6 +4244,37 @@ export default function ExplorateurIA({
       setTerrainModalOpen(false);
     }
   }, [isEditMode]);
+
+  useEffect(() => {
+    const effect = createArrivalEffect();
+    arrivalEffectRef.current = effect;
+    return () => {
+      effect.dispose();
+      arrivalEffectRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isIntroPlaying || hasIntroFinished) {
+      return;
+    }
+    const effect = arrivalEffectRef.current;
+    if (effect) {
+      void effect.play();
+    }
+    if (typeof window === "undefined") {
+      setHasIntroFinished(true);
+      setIsIntroPlaying(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setHasIntroFinished(true);
+      setIsIntroPlaying(false);
+    }, ARRIVAL_TOTAL_DURATION_MS);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [hasIntroFinished, isIntroPlaying]);
 
   const isQuarterCompleted = useCallback(
     (id: QuarterId) => {
@@ -4334,6 +4408,9 @@ export default function ExplorateurIA({
 
   const move = useCallback(
     (dx: number, dy: number): boolean => {
+      if (isIntroPlaying) {
+        return false;
+      }
       let moved = false;
       setPlayer((current) => {
         const nx = current.x + dx;
@@ -4355,7 +4432,7 @@ export default function ExplorateurIA({
       });
       return moved;
     },
-    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
+    [attemptPlayMusic, isIntroPlaying, isMusicEnabled, isQuarterCompleted]
   );
 
   const buildingAt = useCallback((x: number, y: number) => {
@@ -4434,13 +4511,20 @@ export default function ExplorateurIA({
           : null;
         if (delta) {
           event.preventDefault();
+          if (isIntroPlaying) {
+            return;
+          }
           move(delta[0], delta[1]);
         }
         return;
       }
 
-      if (key === "enter") {
+      if (key === "enter" || key === "e") {
         if (typingTarget || overlayOpen) {
+          return;
+        }
+        if (isIntroPlaying) {
+          event.preventDefault();
           return;
         }
         const hit = buildingAt(player.x, player.y);
@@ -4465,6 +4549,7 @@ export default function ExplorateurIA({
     return () => window.removeEventListener("keydown", handleKey);
   }, [
     buildingAt,
+    isIntroPlaying,
     isInventoryOpen,
     isTerrainModalOpen,
     move,
@@ -4632,7 +4717,7 @@ export default function ExplorateurIA({
 
   const handleTilePress = useCallback(
     (targetX: number, targetY: number) => {
-      if (!isMobile) {
+      if (!isMobile || isIntroPlaying) {
         return;
       }
       if (targetX === player.x && targetY === player.y) {
@@ -4662,6 +4747,7 @@ export default function ExplorateurIA({
       cancelAutoWalk,
       findWalkPath,
       buildingAt,
+      isIntroPlaying,
       isMobile,
       move,
       openIfOnBuilding,
@@ -4671,6 +4757,13 @@ export default function ExplorateurIA({
   );
 
   useEffect(() => {
+    if (isIntroPlaying) {
+      if (isAutoWalking) {
+        cancelAutoWalk();
+      }
+      return;
+    }
+
     if (!isMobile) {
       if (isAutoWalking) {
         cancelAutoWalk();
@@ -4725,6 +4818,7 @@ export default function ExplorateurIA({
     return () => window.clearTimeout(timer);
   }, [
     cancelAutoWalk,
+    isIntroPlaying,
     isAutoWalking,
     isMobile,
     move,
@@ -4943,19 +5037,22 @@ export default function ExplorateurIA({
   }, [activeGateKeys, mobilePromptBuilding]);
 
   const handleMobileEnter = useCallback(() => {
-    if (!mobilePromptBuilding || mobilePromptLocked) {
+    if (!mobilePromptBuilding || mobilePromptLocked || isIntroPlaying) {
       return;
     }
     setMobilePrompt(null);
     setOpen(mobilePromptBuilding.id);
-  }, [mobilePromptBuilding, mobilePromptLocked]);
+  }, [isIntroPlaying, mobilePromptBuilding, mobilePromptLocked]);
 
   const handleOverlayMove = useCallback(
     (dx: number, dy: number) => {
+      if (isIntroPlaying) {
+        return;
+      }
       cancelAutoWalk();
       move(dx, dy);
     },
-    [cancelAutoWalk, move]
+    [cancelAutoWalk, isIntroPlaying, move]
   );
 
   const handleOpenInventory = useCallback(() => {
@@ -5198,9 +5295,26 @@ export default function ExplorateurIA({
                           );
                         })}
                         {player.x === x && player.y === y && (
-                          <div className="pointer-events-none absolute inset-1 z-30 animate-[float_1.2s_ease-in-out_infinite]">
-                            <PlayerSprite ts={tileset} step={walkStep} tileSize={tileSize} />
-                          </div>
+                          <>
+                            {isIntroPlaying ? <IntroArrival tileSize={tileSize} /> : null}
+                            {hasIntroFinished && (
+                              <div className="pointer-events-none absolute inset-1 z-30 animate-[float_1.2s_ease-in-out_infinite]">
+                                <div
+                                  className="will-change-transform"
+                                  style={{
+                                    animation:
+                                      "alien-arrival-player 480ms cubic-bezier(0.22, 0.92, 0.3, 1.05) both",
+                                  }}
+                                >
+                                  <PlayerSprite
+                                    ts={tileset}
+                                    step={walkStep}
+                                    tileSize={tileSize}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     );
@@ -5217,8 +5331,32 @@ export default function ExplorateurIA({
             )}
           </div>
           <style>{`
-            @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
-            @keyframes prompt-pop { 0%{ transform: translateY(18px) scale(0.92); opacity: 0; } 60%{ transform: translateY(-6px) scale(1.04); opacity: 1; } 100%{ transform: translateY(0) scale(1); opacity: 1; } }
+            @keyframes float {
+              0%,100% { transform: translateY(0); }
+              50% { transform: translateY(-2px); }
+            }
+            @keyframes prompt-pop {
+              0% { transform: translateY(18px) scale(0.92); opacity: 0; }
+              60% { transform: translateY(-6px) scale(1.04); opacity: 1; }
+              100% { transform: translateY(0) scale(1); opacity: 1; }
+            }
+            @keyframes alien-arrival-flight {
+              0% { transform: translate3d(-140%, -170%, 0) scale(0.85); opacity: 0; }
+              55% { opacity: 1; }
+              70% { transform: translate3d(8%, -6%, 0) scale(1.06); }
+              85% { transform: translate3d(-3%, 2%, 0) scale(0.98); }
+              100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0; }
+            }
+            @keyframes alien-arrival-glow {
+              0% { opacity: 0; transform: scale(0.6); }
+              40% { opacity: 0.85; transform: scale(1.05); }
+              100% { opacity: 0; transform: scale(1.25); }
+            }
+            @keyframes alien-arrival-player {
+              0% { transform: translateY(12px) scale(0.75); opacity: 0; }
+              60% { transform: translateY(-6px) scale(1.06); opacity: 1; }
+              100% { transform: translateY(0) scale(1); opacity: 1; }
+            }
           `}</style>
         </div>
 
