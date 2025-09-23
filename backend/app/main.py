@@ -97,6 +97,45 @@ PLAN_SYSTEM_PROMPT = (
 )
 
 
+PROMPT_EVALUATION_JSON_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "total": {"type": "integer", "minimum": 0, "maximum": 100},
+        "clarity": {"type": "integer", "minimum": 0, "maximum": 100},
+        "specificity": {"type": "integer", "minimum": 0, "maximum": 100},
+        "structure": {"type": "integer", "minimum": 0, "maximum": 100},
+        "length": {"type": "integer", "minimum": 0, "maximum": 100},
+        "comments": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 480,
+        },
+        "advice": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 240},
+            "minItems": 0,
+            "maxItems": 3,
+        },
+    },
+    "required": [
+        "total",
+        "clarity",
+        "specificity",
+        "structure",
+        "length",
+        "comments",
+        "advice",
+    ],
+}
+
+PROMPT_EVALUATION_FORMAT = {
+    "type": "json_schema",
+    "name": "prompt_evaluation",
+    "schema": PROMPT_EVALUATION_JSON_SCHEMA,
+}
+
+
 class Coordinate(BaseModel):
     x: int = Field(..., ge=0, le=GRID_SIZE - 1)
     y: int = Field(..., ge=0, le=GRID_SIZE - 1)
@@ -678,6 +717,48 @@ class SummaryRequest(BaseModel):
 
 class FlashcardRequest(SummaryRequest):
     card_count: int = Field(default=3, ge=1, le=6)
+
+
+class PromptEvaluationScoreModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    total: int = Field(..., ge=0, le=100)
+    clarity: int = Field(..., ge=0, le=100)
+    specificity: int = Field(..., ge=0, le=100)
+    structure: int = Field(..., ge=0, le=100)
+    length: int = Field(..., ge=0, le=100)
+    comments: str = Field(..., min_length=1, max_length=480)
+    advice: list[str] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PromptEvaluationScoreModel":
+        normalized_advice: list[str] = []
+        for item in self.advice:
+            if not isinstance(item, str):
+                continue
+            trimmed = item.strip()
+            if trimmed:
+                normalized_advice.append(trimmed[:240])
+        object.__setattr__(self, "advice", normalized_advice)
+        object.__setattr__(self, "comments", self.comments.strip())
+        return self
+
+
+class PromptEvaluationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    prompt: str = Field(..., min_length=3, max_length=4000)
+    developer_message: str = Field(
+        ..., alias="developerMessage", min_length=3, max_length=4000
+    )
+    model: str = Field(default="gpt-5-mini")
+    verbosity: Literal["low", "medium", "high"] = "medium"
+    thinking: Literal["minimal", "medium", "high"] = "medium"
+
+
+class PromptEvaluationResponseModel(BaseModel):
+    evaluation: PromptEvaluationScoreModel
+    raw: str
 
 
 class HealthResponse(BaseModel):
@@ -1960,6 +2041,51 @@ def _handle_summary(payload: SummaryRequest) -> StreamingResponse:
     return _stream_summary(client, model, prompt, payload)
 
 
+def _handle_prompt_evaluation(payload: PromptEvaluationRequest) -> PromptEvaluationResponseModel:
+    client = _ensure_client()
+    model = _validate_model(payload.model)
+    system_message = payload.developer_message.strip()
+    prompt = payload.prompt.strip()
+
+    try:
+        text_config = {
+            "verbosity": payload.verbosity,
+            "format": dict(PROMPT_EVALUATION_FORMAT),
+        }
+        response = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt},
+            ],
+            text=text_config,
+            reasoning={"effort": payload.thinking, "summary": "auto"},
+        )
+    except Exception as exc:  # pragma: no cover - defensive catch
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    raw = _extract_text_from_response(response).strip()
+    if not raw:
+        raise HTTPException(status_code=500, detail="Réponse vide du modèle.")
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500, detail="La réponse du modèle n'est pas un JSON valide."
+        ) from exc
+
+    try:
+        evaluation = PromptEvaluationScoreModel.model_validate(parsed)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="La réponse du modèle ne correspond pas au schéma attendu.",
+        ) from exc
+
+    return PromptEvaluationResponseModel(evaluation=evaluation, raw=raw)
+
+
 @app.post("/api/summary")
 def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
@@ -1968,6 +2094,13 @@ def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) 
 @app.post("/summary")
 def fetch_summary_legacy(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
+
+
+@app.post("/api/prompt-evaluation", response_model=PromptEvaluationResponseModel)
+def fetch_prompt_evaluation(
+    payload: PromptEvaluationRequest, _: None = Depends(_require_api_key)
+) -> PromptEvaluationResponseModel:
+    return _handle_prompt_evaluation(payload)
 
 
 def _handle_flashcards(payload: FlashcardRequest) -> JSONResponse:

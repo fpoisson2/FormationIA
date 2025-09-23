@@ -4,6 +4,7 @@ import { FormStep } from "./FormStep";
 import { RichContentStep } from "./RichContentStep";
 import { SimulationChatStep } from "./SimulationChatStep";
 import { VideoStep } from "./VideoStep";
+import { PromptEvaluationStep } from "./PromptEvaluationStep";
 import type { FormStepConfig, FormStepValidationFn } from "./FormStep";
 import {
   createDefaultFieldSpec,
@@ -39,6 +40,7 @@ registerStepComponent("form", FormStep);
 registerStepComponent("rich-content", RichContentStep);
 registerStepComponent("simulation-chat", SimulationChatStep);
 registerStepComponent("video", VideoStep);
+registerStepComponent("prompt-evaluation", PromptEvaluationStep);
 
 /**
  * Configuration attendue par le module `rich-content`.
@@ -76,5 +78,12 @@ export type {
   VideoStepContent,
 };
 export { VideoStep };
+
+export type {
+  PromptEvaluationStepConfig,
+  PromptEvaluationScore,
+  PromptEvaluationStepPayload,
+} from "./PromptEvaluationStep";
+export { PromptEvaluationStep };
 
 export * from "./workshop";
