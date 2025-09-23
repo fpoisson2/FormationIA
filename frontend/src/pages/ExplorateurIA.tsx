@@ -4093,6 +4093,7 @@ export default function ExplorateurIA({
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
+  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isMusicSupported, setIsMusicSupported] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4285,7 +4286,7 @@ export default function ExplorateurIA({
   }, [blockedStage]);
 
   const attemptPlayMusic = useCallback(() => {
-    if (isMusicPlaying) {
+    if (!isMusicEnabled || isMusicPlaying) {
       return;
     }
     const theme = audioRef.current;
@@ -4296,11 +4297,12 @@ export default function ExplorateurIA({
       .start()
       .then(() => setIsMusicPlaying(true))
       .catch(() => {
+        setIsMusicPlaying(false);
         // Autoplay peut être bloqué : l'utilisateur pourra utiliser le bouton.
       });
-  }, [isMusicPlaying]);
+  }, [isMusicEnabled, isMusicPlaying]);
 
-  const toggleMusic = () => {
+  useEffect(() => {
     if (!isMusicSupported) {
       return;
     }
@@ -4308,18 +4310,22 @@ export default function ExplorateurIA({
     if (!theme || !theme.isSupported) {
       return;
     }
-    if (isMusicPlaying) {
+    if (isMusicEnabled) {
+      if (!isMusicPlaying) {
+        attemptPlayMusic();
+      }
+    } else if (isMusicPlaying) {
       void theme.stop().finally(() => {
         setIsMusicPlaying(false);
       });
-    } else {
-      void theme
-        .start()
-        .then(() => setIsMusicPlaying(true))
-        .catch(() => {
-          // L'utilisateur devra réessayer en cas de blocage navigateur.
-        });
     }
+  }, [attemptPlayMusic, isMusicEnabled, isMusicPlaying, isMusicSupported]);
+
+  const toggleMusic = () => {
+    if (!isMusicSupported) {
+      return;
+    }
+    setIsMusicEnabled((value) => !value);
   };
 
   const move = useCallback(
@@ -4336,14 +4342,16 @@ export default function ExplorateurIA({
         if (!isWalkable(nx, ny, current.x, current.y)) {
           return current;
         }
-        attemptPlayMusic();
+        if (isMusicEnabled) {
+          attemptPlayMusic();
+        }
         setWalkStep((step) => step + 1);
         moved = true;
         return { x: nx, y: ny };
       });
       return moved;
     },
-    [attemptPlayMusic, isQuarterCompleted]
+    [attemptPlayMusic, isMusicEnabled, isQuarterCompleted]
   );
 
   const buildingAt = useCallback((x: number, y: number) => {
@@ -4706,36 +4714,38 @@ export default function ExplorateurIA({
                 <span aria-hidden="true">←</span>
                 <span className="sr-only">Revenir à la liste des activités</span>
               </button>
-              <div className="pointer-events-auto flex items-center gap-2">
+              <div className="pointer-events-auto flex flex-col items-end gap-2">
                 <button
                   type="button"
                   onClick={handleOpenInventory}
                   className={classNames(
-                    "flex items-center justify-center rounded-full border bg-white/90 p-2 text-base font-semibold text-slate-700 shadow-sm backdrop-blur",
+                    "flex items-center gap-2 rounded-full border bg-white/90 px-3 py-1 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur",
                     isMobile ? "active:scale-95" : "hover:bg-slate-100"
                   )}
                   title="Ouvrir l’inventaire"
                 >
-                  <span aria-hidden="true">🎒</span>
-                  <span className="sr-only">Ouvrir l’inventaire</span>
+                  <span aria-hidden="true" className="text-base leading-none">
+                    🎒
+                  </span>
+                  <span>Inventaire</span>
                 </button>
                 {isMusicSupported && (
                   <button
                     type="button"
                     onClick={toggleMusic}
                     className={classNames(
-                      "flex items-center justify-center rounded-full border bg-white/90 p-2 text-base font-semibold text-slate-700 shadow-sm backdrop-blur",
+                      "mt-1 flex items-center justify-center rounded-full border bg-white/90 p-2 text-base font-semibold text-slate-700 shadow-sm backdrop-blur",
                       isMobile ? "active:scale-95" : "hover:bg-slate-100"
                     )}
-                    aria-pressed={isMusicPlaying}
+                    aria-pressed={isMusicEnabled}
                     title={
-                      isMusicPlaying ? "Couper la musique" : "Activer la musique"
+                      isMusicEnabled ? "Couper la musique" : "Activer la musique"
                     }
                   >
                     <span className="sr-only">
-                      {isMusicPlaying ? "Couper la musique" : "Activer la musique"}
+                      {isMusicEnabled ? "Couper la musique" : "Activer la musique"}
                     </span>
-                    <span aria-hidden="true">{isMusicPlaying ? "🔊" : "🔇"}</span>
+                    <span aria-hidden="true">{isMusicEnabled ? "🔊" : "🔇"}</span>
                   </button>
                 )}
               </div>
