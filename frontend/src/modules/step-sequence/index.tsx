@@ -2,7 +2,10 @@ import { useContext } from "react";
 
 import { getStepComponent, registerStepComponent, STEP_COMPONENT_REGISTRY } from "./registry";
 import { StepSequenceRenderer } from "./StepSequenceRenderer";
-import type { StepSequenceRendererProps } from "./StepSequenceRenderer";
+import type {
+  StepSequenceRenderWrapperProps,
+  StepSequenceRendererProps,
+} from "./StepSequenceRenderer";
 import { StepSequenceActivity } from "./StepSequenceActivity";
 import type {
   StepSequenceActivityConfig,
@@ -53,4 +56,5 @@ export type {
   StepRegistry,
   StepSequenceContextValue,
   StepSequenceRendererProps,
+  StepSequenceRenderWrapperProps,
 };

@@ -1,8 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+} from "react";
 
 import { getStepComponent } from "./registry";
 import { StepSequenceContext } from "./types";
-import type { StepComponentProps, StepDefinition } from "./types";
+import type {
+  StepComponentProps,
+  StepDefinition,
+  StepSequenceContextValue,
+} from "./types";
+
+export interface StepSequenceRenderWrapperProps {
+  step: StepDefinition;
+  stepIndex: number;
+  stepCount: number;
+  StepComponent: ComponentType<StepComponentProps>;
+  componentProps: StepComponentProps;
+  context: StepSequenceContextValue;
+  advance: (payload?: unknown) => void;
+}
 
 export interface StepSequenceRendererProps {
   steps: StepDefinition[];
@@ -10,6 +30,8 @@ export interface StepSequenceRendererProps {
   isEditMode?: boolean;
   onComplete?: (payloads: Record<string, unknown>) => void;
   activityContext?: Record<string, unknown> | null;
+  onStepConfigChange?: (stepId: string, config: unknown) => void;
+  renderStepWrapper?: (props: StepSequenceRenderWrapperProps) => JSX.Element;
 }
 
 export function StepSequenceRenderer({
@@ -18,6 +40,8 @@ export function StepSequenceRenderer({
   isEditMode = false,
   onComplete,
   activityContext = null,
+  onStepConfigChange,
+  renderStepWrapper,
 }: StepSequenceRendererProps): JSX.Element | null {
   const [currentIndex, setCurrentIndex] = useState(() =>
     Math.min(initialIndex, Math.max(steps.length - 1, 0))
@@ -74,8 +98,9 @@ export function StepSequenceRenderer({
       if (!activeStep) return;
 
       setStepConfigs((prev) => ({ ...prev, [activeStep.id]: config }));
+      onStepConfigChange?.(activeStep.id, config);
     },
-    [currentIndex, steps]
+    [currentIndex, onStepConfigChange, steps]
   );
 
   const goToStep = useCallback(
@@ -152,6 +177,24 @@ export function StepSequenceRenderer({
     onAdvance: handleAdvance,
     onUpdateConfig: handleConfigUpdate,
   };
+
+  if (renderStepWrapper) {
+    const wrapperProps: StepSequenceRenderWrapperProps = {
+      step: activeStep,
+      stepIndex: currentIndex,
+      stepCount: steps.length,
+      StepComponent,
+      componentProps,
+      context: contextValue,
+      advance: handleAdvance,
+    };
+
+    return (
+      <StepSequenceContext.Provider value={contextValue}>
+        {renderStepWrapper(wrapperProps)}
+      </StepSequenceContext.Provider>
+    );
+  }
 
   return (
     <StepSequenceContext.Provider value={contextValue}>
