@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+} from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
@@ -18,10 +24,319 @@ import {
   type ActivityConfigEntry,
   type ActivityDefinition,
 } from "../config/activities";
+import {
+  getStepComponent,
+  STEP_COMPONENT_REGISTRY,
+  StepSequenceContext,
+  type StepDefinition,
+} from "../modules/step-sequence";
+import "../modules/step-sequence/modules";
 import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
+
+const STEP_SEQUENCE_COMPONENT_KEY = "step-sequence";
+
+const STEP_TYPE_LABELS: Record<string, string> = {
+  form: "Formulaire",
+  "rich-content": "Contenu riche",
+  video: "Vidéo",
+};
+
+const NOOP = () => {};
+
+function generateUniqueId(prefix: string): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `${prefix}-${crypto.randomUUID()}`;
+    }
+  } catch (error) {
+    // Ignore errors when crypto is not available (e.g. server-side rendering)
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getStepTypeLabel(key: string): string {
+  return STEP_TYPE_LABELS[key] ?? key;
+}
+
+function createDefaultStepSequenceTemplate(): StepDefinition[] {
+  const introStepId = generateUniqueId("step");
+  const formStepId = generateUniqueId("step");
+  const formFieldId = generateUniqueId("field");
+
+  return [
+    {
+      id: introStepId,
+      component: "rich-content",
+      config: {
+        title: "Introduction à la séquence",
+        body: "Présentez le contexte de l'activité et détaillez les consignes clés pour l'apprenant.",
+        sidebar: {
+          type: "tips",
+          title: "Pour bien démarrer",
+          tips: [
+            "Rappelle les objectifs pédagogiques.",
+            "Partage une ressource ou un exemple inspirant.",
+          ],
+        },
+      },
+    },
+    {
+      id: formStepId,
+      component: "form",
+      config: {
+        submitLabel: "Envoyer ma réponse",
+        allowEmpty: false,
+        fields: [
+          {
+            id: formFieldId,
+            type: "textarea_with_counter",
+            label: "Décrivez votre besoin ou votre situation",
+            minWords: 20,
+            maxWords: 150,
+          },
+        ],
+      },
+    },
+  ];
+}
+
+interface StepSequenceEditorProps {
+  activityTitle: string;
+  steps: StepDefinition[];
+  stepTypeOptions: string[];
+  onAddStep: (component: string) => void;
+  onRemoveStep: (stepId: string) => void;
+  onMoveStep: (fromIndex: number, toIndex: number) => void;
+  onChangeStepType: (stepId: string, component: string) => void;
+  onUpdateStepConfig: (stepId: string, config: unknown) => void;
+}
+
+interface StepSequenceStepCardProps {
+  step: StepDefinition;
+  index: number;
+  stepTypeOptions: string[];
+  onRemove: (stepId: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onChangeType: (stepId: string, component: string) => void;
+  onUpdateConfig: (stepId: string, config: unknown) => void;
+}
+
+function StepSequenceStepCard({
+  step,
+  index,
+  stepTypeOptions,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp,
+  canMoveDown,
+  onChangeType,
+  onUpdateConfig,
+}: StepSequenceStepCardProps): JSX.Element {
+  const StepComponent = useMemo(() => getStepComponent(step.component), [step.component]);
+
+  const handleTypeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      onChangeType(step.id, event.target.value);
+    },
+    [onChangeType, step.id]
+  );
+
+  const handleConfigUpdate = useCallback(
+    (config: unknown) => {
+      onUpdateConfig(step.id, config);
+    },
+    [onUpdateConfig, step.id]
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      stepIndex: 0,
+      isEditMode: true,
+      onAdvance: NOOP,
+      onUpdateConfig: handleConfigUpdate,
+    }),
+    [handleConfigUpdate]
+  );
+
+  return (
+    <div className="rounded-2xl border border-orange-200/70 bg-orange-50/50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+          Étape {index + 1}
+        </h4>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onMoveUp}
+            disabled={!canMoveUp}
+            className="rounded-full border border-orange-200 px-2 py-1 text-xs text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={`Monter l'étape ${index + 1}`}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            className="rounded-full border border-orange-200 px-2 py-1 text-xs text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={`Descendre l'étape ${index + 1}`}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={() => onRemove(step.id)}
+            className="rounded-full border border-red-200 px-2 py-1 text-xs text-red-600 transition hover:border-red-300 hover:bg-red-100"
+          >
+            Supprimer l'étape
+          </button>
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        <label className="flex flex-col gap-1 text-xs font-semibold text-orange-700">
+          Type d'étape
+          <select
+            value={step.component}
+            onChange={handleTypeChange}
+            className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+          >
+            {stepTypeOptions.map((type) => (
+              <option key={type} value={type}>
+                {getStepTypeLabel(type)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="space-y-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-sm">
+          {StepComponent ? (
+            <StepSequenceContext.Provider value={contextValue}>
+              <StepComponent
+                definition={step}
+                config={step.config}
+                payload={undefined}
+                isActive
+                isEditMode
+                onAdvance={NOOP}
+                onUpdateConfig={handleConfigUpdate}
+              />
+            </StepSequenceContext.Provider>
+          ) : (
+            <p className="text-sm text-orange-700">
+              Aucun composant enregistré pour « {step.component} ».
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepSequenceEditor({
+  activityTitle,
+  steps,
+  stepTypeOptions,
+  onAddStep,
+  onRemoveStep,
+  onMoveStep,
+  onChangeStepType,
+  onUpdateStepConfig,
+}: StepSequenceEditorProps): JSX.Element {
+  const [nextStepType, setNextStepType] = useState<string>("");
+
+  useEffect(() => {
+    if (stepTypeOptions.length === 0) {
+      setNextStepType("");
+      return;
+    }
+    setNextStepType((prev) =>
+      prev && stepTypeOptions.includes(prev) ? prev : stepTypeOptions[0]
+    );
+  }, [stepTypeOptions]);
+
+  const handleAddStep = useCallback(() => {
+    if (!nextStepType) return;
+    onAddStep(nextStepType);
+  }, [nextStepType, onAddStep]);
+
+  return (
+    <section
+      role="region"
+      aria-label={`Séquence d'étapes pour ${activityTitle}`}
+      className="space-y-5 rounded-3xl border border-orange-200 bg-orange-50/60 p-5"
+    >
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+          Séquence d'étapes
+        </h3>
+        <p className="text-xs text-orange-800">
+          Ajoutez, organisez et configurez les étapes qui composent cette activité.
+        </p>
+      </div>
+      <div className="space-y-4">
+        {steps.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-orange-200 bg-white/70 p-4 text-sm text-orange-700">
+            Aucune étape configurée pour le moment. Ajoutez une première étape pour
+            démarrer la séquence.
+          </p>
+        ) : (
+          steps.map((step, index) => (
+            <StepSequenceStepCard
+              key={step.id}
+              step={step}
+              index={index}
+              stepTypeOptions={stepTypeOptions}
+              onRemove={onRemoveStep}
+              onMoveUp={() => onMoveStep(index, Math.max(0, index - 1))}
+              onMoveDown={() =>
+                onMoveStep(index, Math.min(steps.length - 1, index + 1))
+              }
+              canMoveUp={index > 0}
+              canMoveDown={index < steps.length - 1}
+              onChangeType={onChangeStepType}
+              onUpdateConfig={onUpdateStepConfig}
+            />
+          ))
+        )}
+      </div>
+      <div className="space-y-2 rounded-2xl border border-dashed border-orange-200 bg-white/70 p-4">
+        <label className="flex flex-col gap-1 text-xs font-semibold text-orange-700">
+          Type d'étape à ajouter
+          <select
+            value={nextStepType}
+            onChange={(event) => setNextStepType(event.target.value)}
+            className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+            disabled={stepTypeOptions.length === 0}
+          >
+            {stepTypeOptions.length === 0 ? (
+              <option value="">Aucun module disponible</option>
+            ) : (
+              stepTypeOptions.map((type) => (
+                <option key={type} value={type}>
+                  {getStepTypeLabel(type)}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={handleAddStep}
+          disabled={stepTypeOptions.length === 0 || !nextStepType}
+          className="inline-flex items-center justify-center rounded-full border border-orange-300 bg-white px-4 py-2 text-xs font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Ajouter une étape
+        </button>
+      </div>
+    </section>
+  );
+}
 
 const DEFAULT_ACTIVITY_SELECTOR_HEADER: ActivitySelectorHeaderConfig = {
   eyebrow: "Choisis ton activité",
@@ -71,6 +386,10 @@ function ActivitySelector(): JSX.Element {
   const definitionMap = useMemo(
     () => new Map(defaultActivities.map((activity) => [activity.id, activity])),
     [defaultActivities]
+  );
+  const stepComponentKeys = useMemo(
+    () => Object.keys(STEP_COMPONENT_REGISTRY).sort((a, b) => a.localeCompare(b)),
+    []
   );
 
   const buildEditableActivities = useCallback(
@@ -161,6 +480,7 @@ function ActivitySelector(): JSX.Element {
       });
   }, [definitionMap, editableActivities]);
   const canAddActivity = availableCatalogOptions.length > 0;
+  const canUseStepSequenceShortcut = stepComponentKeys.length > 0;
 
   useEffect(() => {
     if (!completedId && !disabledId) {
@@ -363,6 +683,165 @@ function ActivitySelector(): JSX.Element {
     );
   };
 
+  const handleAddStepToActivity = useCallback(
+    (activityId: string, component: string) => {
+      if (!isEditMode) return;
+
+      setEditableActivities((prev) =>
+        prev.map((activity) => {
+          if (activity.id !== activityId) {
+            return activity;
+          }
+          const baseSteps = activity.stepSequence ?? [];
+          const existingIds = new Set(baseSteps.map((step) => step.id));
+          let stepId = generateUniqueId("step");
+          while (existingIds.has(stepId)) {
+            stepId = generateUniqueId("step");
+          }
+          const nextSteps: StepDefinition[] = [
+            ...baseSteps.map((step) => ({ ...step })),
+            {
+              id: stepId,
+              component,
+            },
+          ];
+          return {
+            ...activity,
+            stepSequence: nextSteps,
+          };
+        })
+      );
+    },
+    [isEditMode]
+  );
+
+  const handleRemoveStepFromActivity = useCallback(
+    (activityId: string, stepId: string) => {
+      if (!isEditMode) return;
+
+      setEditableActivities((prev) =>
+        prev.map((activity) => {
+          if (activity.id !== activityId) {
+            return activity;
+          }
+          const steps = activity.stepSequence ?? [];
+          if (!steps.some((step) => step.id === stepId)) {
+            return activity;
+          }
+          const nextSteps = steps
+            .filter((step) => step.id !== stepId)
+            .map((step) => ({ ...step }));
+          return {
+            ...activity,
+            stepSequence: nextSteps,
+          };
+        })
+      );
+    },
+    [isEditMode]
+  );
+
+  const handleMoveStepWithinActivity = useCallback(
+    (activityId: string, fromIndex: number, toIndex: number) => {
+      if (!isEditMode) return;
+
+      setEditableActivities((prev) =>
+        prev.map((activity) => {
+          if (activity.id !== activityId) {
+            return activity;
+          }
+          const steps = activity.stepSequence ?? [];
+          if (
+            fromIndex === toIndex ||
+            fromIndex < 0 ||
+            toIndex < 0 ||
+            fromIndex >= steps.length ||
+            toIndex >= steps.length
+          ) {
+            return activity;
+          }
+          const nextSteps = steps.map((step) => ({ ...step }));
+          const [moved] = nextSteps.splice(fromIndex, 1);
+          nextSteps.splice(toIndex, 0, moved);
+          return {
+            ...activity,
+            stepSequence: nextSteps,
+          };
+        })
+      );
+    },
+    [isEditMode]
+  );
+
+  const handleChangeStepComponent = useCallback(
+    (activityId: string, stepId: string, component: string) => {
+      if (!isEditMode) return;
+
+      setEditableActivities((prev) =>
+        prev.map((activity) => {
+          if (activity.id !== activityId) {
+            return activity;
+          }
+          const steps = activity.stepSequence ?? [];
+          let updated = false;
+          const nextSteps = steps.map((step) => {
+            if (step.id !== stepId) {
+              return { ...step };
+            }
+            updated = true;
+            return {
+              ...step,
+              component,
+              config: undefined,
+            };
+          });
+          if (!updated) {
+            return activity;
+          }
+          return {
+            ...activity,
+            stepSequence: nextSteps,
+          };
+        })
+      );
+    },
+    [isEditMode]
+  );
+
+  const handleUpdateStepConfig = useCallback(
+    (activityId: string, stepId: string, config: unknown) => {
+      if (!isEditMode) return;
+
+      setEditableActivities((prev) =>
+        prev.map((activity) => {
+          if (activity.id !== activityId) {
+            return activity;
+          }
+          const steps = activity.stepSequence ?? [];
+          let updated = false;
+          const nextSteps = steps.map((step) => {
+            if (step.id !== stepId) {
+              return { ...step };
+            }
+            updated = true;
+            return {
+              ...step,
+              config,
+            };
+          });
+          if (!updated) {
+            return activity;
+          }
+          return {
+            ...activity,
+            stepSequence: nextSteps,
+          };
+        })
+      );
+    },
+    [isEditMode]
+  );
+
   const handleDragStart = (index: number) => {
     if (!isEditMode) return;
     setDraggedIndex(index);
@@ -458,6 +937,51 @@ function ActivitySelector(): JSX.Element {
     setCustomActivityPath("");
     setIsAddModalOpen(false);
   };
+
+  const handleCreateStepSequenceActivity = useCallback(() => {
+    if (!isEditMode || !canUseStepSequenceShortcut) return;
+
+    setEditableActivities((prev) => {
+      const existingIds = new Set(prev.map((activity) => activity.id));
+      let candidateId = generateUniqueId("sequence");
+      while (existingIds.has(candidateId)) {
+        candidateId = generateUniqueId("sequence");
+      }
+
+      const templateSteps = createDefaultStepSequenceTemplate();
+
+      const baseEntry: ActivityConfigEntry = {
+        id: candidateId,
+        componentKey: STEP_SEQUENCE_COMPONENT_KEY,
+        enabled: true,
+        card: {
+          title: "Nouvelle séquence StepSequence",
+          description:
+            "Créez un parcours sur mesure en combinant plusieurs étapes guidées.",
+          highlights: [
+            "Introduction contextualisée",
+            "Collecte d'informations structurée",
+            "Étapes modulaires",
+          ],
+          cta: {
+            label: "Configurer",
+            to: `/activites/${candidateId}`,
+          },
+        },
+        stepSequence: templateSteps,
+      };
+
+      const resolved = resolveActivityDefinition(baseEntry);
+
+      return [...prev, resolved];
+    });
+
+    setCustomActivityError(null);
+    setCustomActivityId("");
+    setCustomComponentKey("");
+    setCustomActivityPath("");
+    setIsAddModalOpen(false);
+  }, [canUseStepSequenceShortcut, isEditMode]);
 
   const handleSaveChanges = async () => {
     if (isSaving) return;
@@ -829,6 +1353,28 @@ function ActivitySelector(): JSX.Element {
                 </li>
               )}
             </ul>
+            {isEditMode && activity.componentKey === STEP_SEQUENCE_COMPONENT_KEY ? (
+              <StepSequenceEditor
+                activityTitle={activity.card.title}
+                steps={activity.stepSequence ?? []}
+                stepTypeOptions={stepComponentKeys}
+                onAddStep={(component) =>
+                  handleAddStepToActivity(activity.id, component)
+                }
+                onRemoveStep={(stepId) =>
+                  handleRemoveStepFromActivity(activity.id, stepId)
+                }
+                onMoveStep={(fromIndex, toIndex) =>
+                  handleMoveStepWithinActivity(activity.id, fromIndex, toIndex)
+                }
+                onChangeStepType={(stepId, component) =>
+                  handleChangeStepComponent(activity.id, stepId, component)
+                }
+                onUpdateStepConfig={(stepId, config) =>
+                  handleUpdateStepConfig(activity.id, stepId, config)
+                }
+              />
+            ) : null}
             <div className="mt-auto">
               {isEditMode ? (
                 <div className="space-y-4">
@@ -882,6 +1428,26 @@ function ActivitySelector(): JSX.Element {
         size="md"
       >
         <div className="space-y-6">
+          <div className="rounded-2xl border border-orange-200/70 bg-orange-50/60 p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-orange-800">
+                  Nouvelle activité StepSequence
+                </p>
+                <p className="text-xs text-orange-700">
+                  Génère une activité multi-étapes avec une introduction et un formulaire déjà configurés.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateStepSequenceActivity}
+                disabled={!canUseStepSequenceShortcut}
+                className="inline-flex items-center justify-center rounded-full border border-orange-300 bg-white px-4 py-2 text-xs font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Nouvelle activité StepSequence
+              </button>
+            </div>
+          </div>
           {availableCatalogOptions.length > 0 ? (
             <div className="space-y-2">
               {availableCatalogOptions.map((option) => (
