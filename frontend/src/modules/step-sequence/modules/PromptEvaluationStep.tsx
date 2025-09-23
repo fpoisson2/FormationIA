@@ -61,7 +61,6 @@ export interface PromptEvaluationStepPayload {
   prompt: string;
   rawResponse: string;
   evaluation: PromptEvaluationScore | null;
-  comment: string;
 }
 
 function countWords(text: string): number {
@@ -159,7 +158,6 @@ function normalizePayload(payload: unknown): PromptEvaluationStepPayload {
       prompt: "",
       rawResponse: "",
       evaluation: null,
-      comment: "",
     } satisfies PromptEvaluationStepPayload;
   }
 
@@ -169,7 +167,6 @@ function normalizePayload(payload: unknown): PromptEvaluationStepPayload {
     prompt: typeof base.prompt === "string" ? base.prompt : "",
     rawResponse: typeof base.rawResponse === "string" ? base.rawResponse : "",
     evaluation: isPromptEvaluationScore(base.evaluation) ? base.evaluation : null,
-    comment: typeof base.comment === "string" ? base.comment : "",
   } satisfies PromptEvaluationStepPayload;
 }
 
@@ -183,65 +180,99 @@ function cleanJson(raw: string): string {
     .trim();
 }
 
+function extractJsonCandidate(raw: string): string | null {
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    return null;
+  }
+  return raw.slice(firstBrace, lastBrace + 1).trim();
+}
+
+function parseEvaluationObject(
+  data: Record<string, unknown>
+): PromptEvaluationScore | null {
+  const toInteger = (value: unknown): number | undefined => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Math.round(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) {
+        return Math.round(parsed);
+      }
+    }
+    return undefined;
+  };
+
+  const total = toInteger(data.total);
+  if (typeof total !== "number") {
+    return null;
+  }
+
+  const result: PromptEvaluationScore = { total };
+  const clarity = toInteger(data.clarity);
+  if (typeof clarity === "number") {
+    result.clarity = clarity;
+  }
+  const specificity = toInteger(data.specificity);
+  if (typeof specificity === "number") {
+    result.specificity = specificity;
+  }
+  const structure = toInteger(data.structure);
+  if (typeof structure === "number") {
+    result.structure = structure;
+  }
+  const lengthScore = toInteger(data.length);
+  if (typeof lengthScore === "number") {
+    result.length = lengthScore;
+  }
+  if (typeof data.comments === "string") {
+    result.comments = data.comments;
+  }
+  if (Array.isArray(data.advice)) {
+    result.advice = data.advice.filter((item): item is string => typeof item === "string");
+  }
+
+  return result;
+}
+
 function parseEvaluation(raw: string): PromptEvaluationScore | null {
-  const cleaned = cleanJson(raw);
-  if (!cleaned) {
+  const trimmed = raw.trim();
+  if (!trimmed) {
     return null;
   }
 
-  try {
-    const data = JSON.parse(cleaned) as Record<string, unknown>;
-
-    const toInteger = (value: unknown): number | undefined => {
-      if (typeof value === "number" && Number.isFinite(value)) {
-        return Math.round(value);
-      }
-      if (typeof value === "string" && value.trim().length > 0) {
-        const parsed = Number.parseFloat(value);
-        if (Number.isFinite(parsed)) {
-          return Math.round(parsed);
-        }
-      }
-      return undefined;
-    };
-
-    const total = toInteger(data.total);
-    if (typeof total !== "number") {
-      return null;
-    }
-
-    const result: PromptEvaluationScore = { total };
-    const clarity = toInteger(data.clarity);
-    if (typeof clarity === "number") {
-      result.clarity = clarity;
-    }
-    const specificity = toInteger(data.specificity);
-    if (typeof specificity === "number") {
-      result.specificity = specificity;
-    }
-    const structure = toInteger(data.structure);
-    if (typeof structure === "number") {
-      result.structure = structure;
-    }
-    const lengthScore = toInteger(data.length);
-    if (typeof lengthScore === "number") {
-      result.length = lengthScore;
-    }
-    if (typeof data.comments === "string") {
-      result.comments = data.comments;
-    }
-    if (Array.isArray(data.advice)) {
-      result.advice = data.advice.filter((item): item is string => typeof item === "string");
-    }
-
-    return result;
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn("Unable to parse evaluation JSON", error);
-    }
-    return null;
+  const attempts = new Set<string>();
+  const cleaned = cleanJson(trimmed);
+  if (cleaned) {
+    attempts.add(cleaned);
   }
+  const bracesCandidate = extractJsonCandidate(trimmed);
+  if (bracesCandidate) {
+    attempts.add(bracesCandidate);
+  }
+
+  let lastError: unknown = null;
+
+  for (const candidate of attempts) {
+    try {
+      const data = JSON.parse(candidate) as Record<string, unknown>;
+      const evaluation = parseEvaluationObject(data);
+      if (evaluation) {
+        return evaluation;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (import.meta.env.DEV && lastError) {
+    // eslint-disable-next-line no-console
+    console.warn("Unable to parse evaluation JSON", lastError);
+  }
+
+  return null;
 }
 
 function SparklesIcon({ className }: { className?: string }): JSX.Element {
@@ -313,7 +344,6 @@ export function PromptEvaluationStep({
   const [promptText, setPromptText] = useState<string>(() =>
     typedPayload.prompt || content.defaultText
   );
-  const [comment, setComment] = useState<string>(() => typedPayload.comment);
   const [evaluationRaw, setEvaluationRaw] = useState<string>(
     () => typedPayload.rawResponse
   );
@@ -326,12 +356,10 @@ export function PromptEvaluationStep({
 
   useEffect(() => {
     setPromptText(typedPayload.prompt || content.defaultText);
-    setComment(typedPayload.comment);
     setEvaluationRaw(typedPayload.rawResponse);
     setEvaluation(typedPayload.evaluation);
   }, [
     typedPayload.prompt,
-    typedPayload.comment,
     typedPayload.rawResponse,
     typedPayload.evaluation,
     content.defaultText,
@@ -340,7 +368,6 @@ export function PromptEvaluationStep({
   useEffect(() => {
     if (isDesigner) {
       setPromptText(content.defaultText);
-      setComment("");
       setEvaluation(null);
       setEvaluationRaw("");
       setParseWarning(null);
@@ -356,13 +383,6 @@ export function PromptEvaluationStep({
       setEvaluationRaw("");
       setParseWarning(null);
       setError(null);
-    },
-    []
-  );
-
-  const handleCommentChange = useCallback(
-    (event: ChangeEvent<HTMLTextAreaElement>) => {
-      setComment(event.target.value);
     },
     []
   );
@@ -383,23 +403,6 @@ export function PromptEvaluationStep({
   const runtimePrompt = isDesigner ? content.defaultText : promptText;
   const wordCount = useMemo(() => countWords(runtimePrompt), [runtimePrompt]);
   const trimmedPrompt = promptText.trim();
-
-  const breakdown = useMemo(() => {
-    if (!evaluation) {
-      return [] as Array<{ key: NumericScoreKey; label: string; value: number }>;
-    }
-    const entries: Array<{ key: NumericScoreKey; label: string; value: number }> = [];
-    const pushEntry = (key: NumericScoreKey, label: string, value?: number) => {
-      if (typeof value === "number") {
-        entries.push({ key, label, value });
-      }
-    };
-    pushEntry("clarity", "Clarté", evaluation.clarity);
-    pushEntry("specificity", "Spécificité", evaluation.specificity);
-    pushEntry("structure", "Structure", evaluation.structure);
-    pushEntry("length", "Longueur", evaluation.length);
-    return entries;
-  }, [evaluation]);
 
   const canRequestEvaluation = !isDesigner && !loading && trimmedPrompt.length > 0;
   const canContinue =
@@ -492,11 +495,9 @@ export function PromptEvaluationStep({
       prompt: promptText,
       rawResponse: evaluationRaw,
       evaluation,
-      comment,
     });
   }, [
     canContinue,
-    comment,
     effectiveOnAdvance,
     evaluation,
     evaluationRaw,
@@ -504,7 +505,6 @@ export function PromptEvaluationStep({
   ]);
 
   const promptFieldId = `${definition.id}-prompt`;
-  const commentFieldId = `${definition.id}-comment`;
   const developerFieldId = `${definition.id}-developer-message`;
 
   const configIds = useMemo(
@@ -685,102 +685,23 @@ export function PromptEvaluationStep({
         ) : null}
       </section>
 
-      <section className="space-y-4 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Retour de l’évaluation
-          </h3>
-          {evaluation ? (
-            <span className="text-3xl font-semibold text-slate-900">
-              {evaluation.total}
-              <span className="ml-1 text-base font-medium text-slate-500">
-                /100
-              </span>
-            </span>
-          ) : null}
-        </div>
-        {evaluation ? (
-          <div className="space-y-4">
-            {breakdown.length > 0 ? (
-              <dl className="grid gap-4 sm:grid-cols-2">
-                {breakdown.map((item) => (
-                  <div
-                    key={item.key}
-                    className="rounded-2xl bg-slate-100/80 p-4 text-slate-800"
-                  >
-                    <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {item.label}
-                    </dt>
-                    <dd className="text-lg font-semibold">
-                      {item.value}
-                      <span className="ml-1 text-sm font-medium text-slate-500">
-                        /100
-                      </span>
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            ) : null}
-            {evaluation.comments ? (
-              <div className="rounded-2xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                <p className="font-semibold text-slate-800">Commentaire IA</p>
-                <p className="mt-1 whitespace-pre-wrap">{evaluation.comments}</p>
-              </div>
-            ) : null}
-            {evaluation.advice && evaluation.advice.length > 0 ? (
-              <div className="rounded-2xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">
-                <p className="font-semibold text-slate-800">Pistes suggérées</p>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {evaluation.advice.map((item, index) => (
-                    <li key={index}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="text-sm text-slate-500">
-            {evaluationRaw
-              ? "Réponse IA reçue. Ajuste le message développeur si nécessaire."
-              : "Demande un score pour afficher l’analyse détaillée."}
-          </p>
-        )}
-        <div className="space-y-2">
-          <label
-            htmlFor={`${definition.id}-evaluation-raw`}
-            className="text-xs font-semibold uppercase tracking-wide text-slate-500"
-          >
-            Réponse brute
-          </label>
-          <textarea
-            id={`${definition.id}-evaluation-raw`}
-            value={evaluationRaw}
-            readOnly
-            rows={Math.max(4, Math.min(12, evaluationRaw.split(/\n/).length + 1))}
-            className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-700 shadow-inner"
-            placeholder="La réponse JSON de l’IA apparaîtra ici."
-          />
-        </div>
-      </section>
-
       <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
         <label
-          htmlFor={commentFieldId}
+          htmlFor={`${definition.id}-evaluation-raw`}
           className="text-xs font-semibold uppercase tracking-wide text-slate-500"
         >
-          Commentaire
+          Réponse de l’IA
         </label>
         <textarea
-          id={commentFieldId}
-          value={isDesigner ? "" : comment}
-          onChange={isDesigner ? undefined : handleCommentChange}
-          readOnly={isDesigner}
-          rows={4}
-          className="w-full rounded-3xl border border-slate-200 bg-white p-3 text-sm leading-relaxed text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-          placeholder="Prends des notes sur ce que tu souhaites améliorer."
+          id={`${definition.id}-evaluation-raw`}
+          value={evaluationRaw}
+          readOnly
+          rows={Math.max(4, Math.min(12, evaluationRaw.split(/\n/).length + 1))}
+          className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-700 shadow-inner"
+          placeholder="La réponse JSON de l’IA apparaîtra ici."
         />
         <p className="text-xs text-slate-500">
-          Utilise cet espace pour résumer ce que tu retiens de l’évaluation.
+          Cette sortie est conservée telle quelle pour la suite de l’activité.
         </p>
       </section>
 
