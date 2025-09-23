@@ -84,6 +84,28 @@ describe("StepSequenceActivity", () => {
     expect(onComplete).toHaveBeenCalledWith({ status: "done" });
   });
 
+  it("prefers the stepSequence prop when provided", () => {
+    const props = createBaseProps();
+    const fallbackSteps: StepDefinition[] = [
+      { id: "metadata", component: "metadata" },
+    ];
+    const sequenceSteps: StepDefinition[] = [
+      { id: "sequence", component: "sequence" },
+    ];
+
+    render(
+      <StepSequenceActivity
+        {...props}
+        stepSequence={sequenceSteps}
+        metadata={{ steps: fallbackSteps }}
+      />
+    );
+
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    const [{ steps: receivedSteps }] = renderSpy.mock.calls[0];
+    expect(receivedSteps).toBe(sequenceSteps);
+  });
+
   it("falls back to metadata steps when none are provided in props", () => {
     const props = createBaseProps();
     const metadataSteps: StepDefinition[] = [

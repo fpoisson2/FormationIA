@@ -10,6 +10,7 @@ export type StepSequenceActivityConfig = {
 
 export type StepSequenceActivityProps = ActivityProps & {
   steps?: StepDefinition[];
+  stepSequence?: StepDefinition[];
   metadata?: StepSequenceActivityConfig | null;
   onComplete?: (payloads: Record<string, unknown>) => void;
 };
@@ -28,6 +29,7 @@ const isStepDefinitionArray = (
 
 export function StepSequenceActivity({
   steps,
+  stepSequence,
   metadata,
   isEditMode = false,
   onComplete,
@@ -37,11 +39,14 @@ export function StepSequenceActivity({
     if (isStepDefinitionArray(steps)) {
       return steps;
     }
+    if (isStepDefinitionArray(stepSequence)) {
+      return stepSequence;
+    }
     if (isStepDefinitionArray(metadataSteps)) {
       return metadataSteps;
     }
     return [] as StepDefinition[];
-  }, [metadataSteps, steps]);
+  }, [metadataSteps, stepSequence, steps]);
 
   const handleComplete = useCallback(
     (payloads: Record<string, unknown>) => {
