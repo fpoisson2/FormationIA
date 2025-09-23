@@ -1,7 +1,16 @@
 import { registerStepComponent } from "../registry";
 
+import { FormStep } from "./FormStep";
 import { RichContentStep } from "./RichContentStep";
 import { VideoStep } from "./VideoStep";
+import type { FormStepConfig, FormStepValidationFn } from "./FormStep";
+import {
+  createDefaultFieldSpec,
+  defaultValidateFormValues,
+  isFormAnswerEmpty,
+  sanitizeFormValues,
+  validateFieldSpec,
+} from "./FormStep";
 import type {
   RichContentChecklistItem,
   RichContentChecklistSidebar,
@@ -19,6 +28,7 @@ import type {
   VideoSourceType,
 } from "./VideoStep";
 
+registerStepComponent("form", FormStep);
 registerStepComponent("rich-content", RichContentStep);
 registerStepComponent("video", VideoStep);
 
@@ -31,6 +41,15 @@ registerStepComponent("video", VideoStep);
  * @property sidebar Bloc optionnel situé dans la colonne latérale (astuces ou checklist).
  * @property onChange Callback déclenché en mode édition à chaque modification des champs.
  */
+export type { FormStepConfig, FormStepValidationFn };
+export {
+  FormStep,
+  createDefaultFieldSpec,
+  defaultValidateFormValues,
+  isFormAnswerEmpty,
+  sanitizeFormValues,
+  validateFieldSpec,
+};
 export type { RichContentStepConfig, RichContentStepContent };
 export type { RichContentMediaItem };
 export type {
