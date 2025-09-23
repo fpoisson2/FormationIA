@@ -4815,20 +4815,12 @@ export default function ExplorateurIA({
   return (
     <div
       className={classNames(
-        "relative w-full",
-        isMobile
-          ? "flex flex-1 h-full min-h-[100dvh] flex-col overflow-hidden"
-          : "space-y-6"
+        "relative flex h-full min-h-[100dvh] w-full flex-1 flex-col overflow-hidden",
+        !isMobile && "gap-6"
       )}
     >
       <Fireworks show={celebrate} />
-      <div
-        className={
-          isMobile
-            ? "grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0"
-            : "flex min-h-0 w-full"
-        }
-      >
+      <div className="grid min-h-0 w-full flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0">
         <div className="relative flex min-h-0 flex-1 flex-col">
           {!isMobile && (
             <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
