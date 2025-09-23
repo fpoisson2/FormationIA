@@ -327,8 +327,9 @@ def _normalize_activities_payload(
 
 def _load_activities_config() -> dict[str, Any]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
-    if not ACTIVITIES_CONFIG_PATH.exists():
-        return {"activities": []}
+    uses_default_fallback = not ACTIVITIES_CONFIG_PATH.exists()
+    if uses_default_fallback:
+        return {"activities": [], "usesDefaultFallback": True}
 
     try:
         with ACTIVITIES_CONFIG_PATH.open("r", encoding="utf-8") as handle:
@@ -365,7 +366,7 @@ def _load_activities_config() -> dict[str, Any]:
 
     activities = _normalize_activities_payload(activities, error_status=500)
 
-    config: dict[str, Any] = {"activities": activities}
+    config: dict[str, Any] = {"activities": activities, "usesDefaultFallback": uses_default_fallback}
     if activity_selector_header is not None:
         config["activitySelectorHeader"] = activity_selector_header
 
@@ -724,7 +725,7 @@ class ActivityPayload(BaseModel):
 class ActivityConfigRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
-    activities: list[ActivityPayload] = Field(..., min_items=1)
+    activities: list[ActivityPayload] = Field(..., min_items=0)
     activity_selector_header: ActivitySelectorHeader | None = Field(
         default=None, alias="activitySelectorHeader"
     )
