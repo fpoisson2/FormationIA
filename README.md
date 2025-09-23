@@ -9,6 +9,25 @@ Cette version transforme le prototype purement client en une application complè
 - `docker-compose.yml` · Orchestration des deux services
 - `AGENTS.md` · Référence rapide des agents exposés par l’API
 
+## Créer une nouvelle activité (frontend)
+
+1. **Dupliquer le gabarit React** : copiez `frontend/src/pages/templates/ActivityBlank.tsx` vers un nouveau fichier dans `frontend/src/pages/` (par exemple `NouvelleActivite.tsx`) et renommez le composant. Le template expose déjà `useActivityCompletion` et un bouton de validation qui envoie le succès au backend puis renvoie vers la liste des activités.
+2. **Enregistrer le composant** : importez votre composant dans `frontend/src/config/activities.tsx`, ajoutez-le dans `COMPONENT_REGISTRY`, puis créez une entrée dans `ACTIVITY_CATALOG` avec un identifiant unique, un chemin (`path`) et les métadonnées par défaut (`header`, `card`, `completionId` si différent de l’identifiant).
+3. **Personnaliser la mise en page** : utilisez les props fournies (`layout`, `setLayoutOverrides`, `navigateToActivities`, `isEditMode`) pour ajuster le contenu et tirer parti du mode édition admin. Le bouton « Sauvegarder » de l’entête persiste automatiquement les textes et overrides.
+4. **Tester le parcours** : lancez `npm run dev` (ou `npm run build`) dans `frontend/` et vérifiez que l’activité apparaît dans `/activites`, que le routing fonctionne et que la complétion est bien remontée dans le suivi (`POST /api/progress/activity`).
+
+### Points d'intégration backend à disposition du frontend
+
+Depuis une activité vous pouvez consommer les routes suivantes (préfixées par `VITE_API_BASE_URL`) pour orchestrer votre logique métier :
+
+- `GET /api/progress` — récupérer l’état de progression courant (utilisé pour afficher les coches dans le sélecteur d’activités).
+- `POST /api/progress/activity` — marquer une activité comme réussie et déclencher, le cas échéant, la publication de la note LTI.
+- `POST /api/summary` — obtenir un résumé en flux `text/plain` (stream) à partir d’un texte source et des paramètres `model`/`verbosity`/`thinking`.
+- `POST /api/ai` — proxy polyvalent vers l’API Responses avec choix du modèle, de la verbosité, de l’effort de raisonnement, streaming (`stream=true`) et sortie structurée optionnelle (`structuredOutput`).
+- Pour les besoins spécifiques à une activité existante, consultez le code des routeurs FastAPI (`backend/app/main.py`) ou échangez avec l’équipe backend afin de confirmer la stabilité de la route.
+
+Toutes ces routes respectent la configuration CORS du backend (voir `FRONTEND_ORIGIN`) et sont exposées au frontend via `fetch` ou tout client HTTP équivalent.
+
 ## Prérequis
 
 1. Docker et Docker Compose
@@ -40,6 +59,7 @@ docker-compose up --build
 Le backend expose désormais trois agents principaux :
 
 - `POST /api/summary` — Résumé envoyé en flux continu (texte brut) avec contrôle du modèle GPT-5, de la verbosité (`low`/`medium`/`high`) et de l’effort de raisonnement (`minimal`/`medium`/`high`).
+- `POST /api/ai` — Point d’entrée générique vers Responses : vous fournissez la liste de messages (`messages` ou `input`), choisissez le modèle GPT-5, la verbosité, l’effort de raisonnement, activez si besoin le streaming et/ou un schéma JSON (`structuredOutput`) pour valider la sortie.
 - `POST /api/flashcards` — Génération de cartes d’étude (JSON) en réutilisant les mêmes paramètres.
 - `POST /api/plan` — Conversion d’une consigne naturelle en plan JSON structuré (≤30 actions) pour piloter le « Parcours de la clarté ». La réponse est streamée en SSE (`plan`, `step`, `done|blocked`, `stats`).
 

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from openai import OpenAI as ResponsesClient
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import AliasChoices, AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .admin_store import (
     AdminAuthError,
@@ -600,6 +600,8 @@ def _extract_text_from_response(response) -> str:
     chunks: list[str] = []
     for item in getattr(response, "output", []) or []:
         content = getattr(item, "content", None)
+        if content is None and isinstance(item, dict):
+            content = item.get("content")
         if not content:
             continue
         for part in content:
@@ -635,6 +637,94 @@ def _extract_reasoning_summary(response) -> str:
                 summary_chunks.append(str(text))
 
     return "\n".join(summary_chunks).strip()
+
+
+def _extract_structured_output(response) -> Any:
+    """Tente de récupérer la sortie structurée (JSON) d'une réponse Responses."""
+
+    for item in getattr(response, "output", []) or []:
+        content = getattr(item, "content", None)
+        if content is None and isinstance(item, dict):
+            content = item.get("content")
+        if not content:
+            continue
+        for part in content:
+            if hasattr(part, "structured") and getattr(part, "structured") is not None:
+                return getattr(part, "structured")
+            if isinstance(part, dict):
+                if "structured" in part and part["structured"] is not None:
+                    return part["structured"]
+                if "json" in part and part["json"] is not None:
+                    return part["json"]
+            text_value = getattr(part, "text", None)
+            if text_value is None and isinstance(part, dict):
+                text_value = part.get("text")
+            if isinstance(text_value, str) and text_value:
+                try:
+                    return json.loads(text_value)
+                except json.JSONDecodeError:
+                    continue
+
+    raise HTTPException(status_code=500, detail="Impossible d'extraire la sortie structurée du modèle.")
+
+
+class AIContentPart(BaseModel):
+    type: Literal["text"] = "text"
+    text: str = Field(..., min_length=1)
+
+
+class AIMessage(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: Literal["system", "user", "assistant"]
+    content: str | list[AIContentPart]
+
+    @model_validator(mode="after")
+    def _ensure_content(self) -> "AIMessage":
+        if isinstance(self.content, str):
+            if not self.content:
+                raise ValueError("Le contenu ne peut pas être vide.")
+        else:
+            if not self.content:
+                raise ValueError("Le contenu ne peut pas être vide.")
+        return self
+
+
+class StructuredOutputRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    schema_: dict[str, Any] = Field(..., alias="schema")
+    strict: bool = True
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        return self.schema_
+
+    @model_validator(mode="after")
+    def _validate_schema(self) -> "StructuredOutputRequest":
+        if not isinstance(self.schema_, dict) or not self.schema_:
+            raise ValueError("schema doit être un objet JSON non vide.")
+        if "type" not in self.schema_:
+            raise ValueError("schema doit contenir la clé 'type'.")
+        return self
+
+
+class GenericAIRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    messages: list[AIMessage] = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("messages", "input"),
+    )
+    model: str = Field(default="gpt-5-mini")
+    verbosity: Literal["low", "medium", "high"] = "medium"
+    thinking: Literal["minimal", "medium", "high"] = "medium"
+    stream: bool = False
+    structured_output: StructuredOutputRequest | None = Field(
+        default=None, alias="structuredOutput"
+    )
 
 
 class SummaryRequest(BaseModel):
@@ -1868,6 +1958,103 @@ def _validate_model(model_name: str) -> str:
         supported = ", ".join(SUPPORTED_MODELS)
         raise HTTPException(status_code=400, detail=f"Modèle non supporté. Modèles disponibles: {supported}")
     return model_name
+
+
+def _format_response_messages(messages: list[AIMessage]) -> list[dict[str, Any]]:
+    formatted: list[dict[str, Any]] = []
+    for message in messages:
+        if isinstance(message.content, str):
+            formatted.append({"role": message.role, "content": message.content})
+        else:
+            formatted.append(
+                {
+                    "role": message.role,
+                    "content": [part.model_dump() for part in message.content],
+                }
+            )
+    return formatted
+
+
+def _build_response_kwargs(payload: GenericAIRequest, model: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "input": _format_response_messages(payload.messages),
+        "text": {"verbosity": payload.verbosity},
+        "reasoning": {"effort": payload.thinking, "summary": "auto"},
+    }
+    if payload.structured_output:
+        json_schema = {
+            "name": payload.structured_output.name,
+            "schema": payload.structured_output.schema,
+            "strict": payload.structured_output.strict,
+        }
+        kwargs["response_format"] = {"type": "json_schema", "json_schema": json_schema}
+    return kwargs
+
+
+def _handle_generic_ai(payload: GenericAIRequest) -> Response:
+    client = _ensure_client()
+    model = _validate_model(payload.model)
+    response_kwargs = _build_response_kwargs(payload, model)
+
+    if payload.stream:
+
+        def _stream_generic_response() -> Generator[str, None, None]:
+            buffered_json: list[str] | None = [] if payload.structured_output else None
+            try:
+                with client.responses.stream(**response_kwargs) as stream:
+                    for event in stream:
+                        if event.type == "response.output_text.delta" and event.delta:
+                            if buffered_json is not None:
+                                buffered_json.append(event.delta)
+                            else:
+                                yield event.delta
+                        elif (
+                            buffered_json is not None
+                            and event.type == "response.output_json.delta"
+                            and event.delta
+                        ):
+                            buffered_json.append(event.delta)
+                        elif event.type == "response.error":
+                            raise HTTPException(
+                                status_code=500,
+                                detail=event.error.get("message", "Erreur du service de génération"),
+                            )
+                    final_response = stream.get_final_response()
+                    if buffered_json is not None:
+                        if buffered_json:
+                            yield "".join(buffered_json)
+                        else:
+                            structured = _extract_structured_output(final_response)
+                            yield json.dumps(structured, ensure_ascii=False)
+            except HTTPException:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive catch
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        media_type = "application/json" if payload.structured_output else "text/plain"
+        return StreamingResponse(_stream_generic_response(), media_type=media_type)
+
+    try:
+        response = client.responses.create(**response_kwargs)
+    except Exception as exc:  # pragma: no cover - defensive catch
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    reasoning_summary = _extract_reasoning_summary(response) or None
+    if payload.structured_output:
+        structured = _extract_structured_output(response)
+        return JSONResponse(content={"result": structured, "reasoning": reasoning_summary})
+
+    content = _extract_text_from_response(response).strip()
+    if not content:
+        raise HTTPException(status_code=500, detail="Réponse inattendue du modèle.")
+
+    return JSONResponse(content={"output": content, "reasoning": reasoning_summary})
+
+
+@app.post("/api/ai")
+def call_generic_ai(payload: GenericAIRequest, _: None = Depends(_require_api_key)) -> Response:
+    return _handle_generic_ai(payload)
 
 
 def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: SummaryRequest) -> StreamingResponse:
