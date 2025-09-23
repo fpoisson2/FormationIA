@@ -8,7 +8,6 @@ import {
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
-import { AdminModal } from "../components/admin/AdminModal";
 import {
   getProgress,
   admin,
@@ -17,7 +16,6 @@ import {
   type ProgressResponse,
 } from "../api";
 import {
-  ACTIVITY_CATALOG,
   getDefaultActivityDefinitions,
   resolveActivityDefinition,
   serializeActivityDefinition,
@@ -442,13 +440,6 @@ function ActivitySelector(): JSX.Element {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [headerOverrides, setHeaderOverrides] = useState<ActivitySelectorHeaderConfig>({});
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [customActivityId, setCustomActivityId] = useState("");
-  const [customComponentKey, setCustomComponentKey] = useState("");
-  const [customActivityPath, setCustomActivityPath] = useState("");
-  const [customActivityError, setCustomActivityError] = useState<string | null>(
-    null
-  );
   const location = useLocation();
   const navigate = useNavigate();
   const { context, isLTISession, loading: ltiLoading } = useLTI();
@@ -467,23 +458,23 @@ function ActivitySelector(): JSX.Element {
   const userRoles = normaliseRoles(adminUser?.roles);
   const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
 
-  const availableCatalogOptions = useMemo(() => {
-    const usedIds = new Set(editableActivities.map((activity) => activity.id));
-    return Object.entries(ACTIVITY_CATALOG)
-      .filter(([id]) => !usedIds.has(id))
-      .map(([id, entry]) => {
-        const baseDefinition =
-          definitionMap.get(id) ?? resolveActivityDefinition({ id });
-        return {
-          id,
-          componentKey: entry.componentKey,
-          title: baseDefinition.card.title,
-          description: baseDefinition.card.description,
-        };
-      });
-  }, [definitionMap, editableActivities]);
-  const canAddActivity = availableCatalogOptions.length > 0;
   const canUseStepSequenceShortcut = stepComponentKeys.length > 0;
+  const newSequenceButtonClasses = `group flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition ${
+    canUseStepSequenceShortcut
+      ? "border-orange-300 bg-white/70 text-orange-600 hover:border-orange-400 hover:bg-orange-50 hover:text-orange-700"
+      : "cursor-not-allowed border-gray-200 bg-gray-50/80 text-gray-400"
+  }`;
+  const newSequenceLabel = canUseStepSequenceShortcut
+    ? "Ajouter une activité StepSequence"
+    : "Modules StepSequence indisponibles";
+  const newSequenceDescription = canUseStepSequenceShortcut
+    ? "Crée une nouvelle séquence multi-étapes."
+    : "Ajoutez un module d’étape pour pouvoir créer une séquence.";
+  const newSequenceDescriptionClasses = `text-xs ${
+    canUseStepSequenceShortcut
+      ? "text-orange-600 opacity-80"
+      : "text-gray-400"
+  }`;
 
   useEffect(() => {
     if (!completedId && !disabledId) {
@@ -871,76 +862,6 @@ function ActivitySelector(): JSX.Element {
     setDragOverIndex(null);
   };
 
-  const handleAddActivityClick = () => {
-    if (!isEditMode) return;
-    setCustomActivityId("");
-    setCustomComponentKey("");
-    setCustomActivityPath("");
-    setCustomActivityError(null);
-    setIsAddModalOpen(true);
-  };
-
-  const handleCloseAddModal = () => {
-    setIsAddModalOpen(false);
-  };
-
-  const handleSelectActivityToAdd = (activityId: string) => {
-    if (!isEditMode) return;
-
-    setEditableActivities((prev) => {
-      if (prev.some((activity) => activity.id === activityId)) {
-        return prev;
-      }
-      const baseDefinition = resolveActivityDefinition({ id: activityId });
-      return [
-        ...prev,
-        { ...baseDefinition, enabled: baseDefinition.enabled !== false },
-      ];
-    });
-    setIsAddModalOpen(false);
-  };
-
-  const handleCreateCustomActivity = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!isEditMode) return;
-
-    const trimmedId = customActivityId.trim();
-    const trimmedComponentKey = customComponentKey.trim();
-    const trimmedPath = customActivityPath.trim();
-
-    if (!trimmedId) {
-      setCustomActivityError("Veuillez renseigner un identifiant unique.");
-      return;
-    }
-
-    if (!trimmedComponentKey) {
-      setCustomActivityError("Veuillez renseigner le composant TSX à utiliser.");
-      return;
-    }
-
-    if (editableActivities.some((activity) => activity.id === trimmedId)) {
-      setCustomActivityError(
-        "Une activité avec cet identifiant existe déjà dans la liste."
-      );
-      return;
-    }
-
-    setEditableActivities((prev) => [
-      ...prev,
-      resolveActivityDefinition({
-        id: trimmedId,
-        componentKey: trimmedComponentKey,
-        path: trimmedPath || undefined,
-      } as ActivityConfigEntry),
-    ]);
-
-    setCustomActivityError(null);
-    setCustomActivityId("");
-    setCustomComponentKey("");
-    setCustomActivityPath("");
-    setIsAddModalOpen(false);
-  };
-
   const handleCreateStepSequenceActivity = useCallback(() => {
     if (!isEditMode || !canUseStepSequenceShortcut) return;
 
@@ -979,11 +900,6 @@ function ActivitySelector(): JSX.Element {
       return [...prev, resolved];
     });
 
-    setCustomActivityError(null);
-    setCustomActivityId("");
-    setCustomComponentKey("");
-    setCustomActivityPath("");
-    setIsAddModalOpen(false);
   }, [canUseStepSequenceShortcut, isEditMode]);
 
   const handleSaveChanges = async () => {
@@ -1082,22 +998,6 @@ function ActivitySelector(): JSX.Element {
                   className="inline-flex items-center justify-center rounded-full border border-green-600/20 bg-green-50 px-4 py-2 text-xs font-medium text-green-700 transition hover:border-green-600/40 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSaving ? 'Sauvegarde...' : 'Sauvegarder'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddActivityClick}
-                  disabled={isSaving}
-                  aria-disabled={!canAddActivity}
-                  className={`inline-flex items-center justify-center rounded-full border border-blue-600/20 bg-blue-50 px-4 py-2 text-xs font-medium text-blue-700 transition hover:border-blue-600/40 hover:bg-blue-100 ${
-                    isSaving ? 'opacity-50 cursor-not-allowed' : ''
-                  } ${
-                    !canAddActivity && !isSaving
-                      ? 'opacity-60 hover:border-blue-600/20 hover:bg-blue-50'
-                      : ''
-                  }`}
-                  title={!canAddActivity ? 'Toutes les activités du catalogue sont déjà présentes.' : undefined}
-                >
-                  Ajouter une activité
                 </button>
                 <button
                   onClick={handleCancelChanges}
@@ -1413,150 +1313,25 @@ function ActivitySelector(): JSX.Element {
           </article>
         );
       })}
+        {isEditMode ? (
+          <button
+            type="button"
+            onClick={handleCreateStepSequenceActivity}
+            disabled={!canUseStepSequenceShortcut}
+            aria-disabled={!canUseStepSequenceShortcut}
+            className={newSequenceButtonClasses}
+          >
+            <span className="flex h-16 w-16 items-center justify-center rounded-full border border-current text-4xl font-light leading-none">
+              +
+            </span>
+            <span className="text-sm font-semibold uppercase tracking-wide">
+              {newSequenceLabel}
+            </span>
+            <span className={newSequenceDescriptionClasses}>{newSequenceDescription}</span>
+          </button>
+        ) : null}
       </div>
       </ActivityLayout>
-      <AdminModal
-        open={isAddModalOpen}
-        onClose={handleCloseAddModal}
-        title="Ajouter une activité"
-        description="Choisissez un composant du catalogue ou saisissez un composant TSX personnalisé."
-        footer={
-          <button
-            onClick={handleCloseAddModal}
-            className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
-          >
-            Fermer
-          </button>
-        }
-        size="md"
-      >
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-orange-200/70 bg-orange-50/60 p-4 shadow-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-orange-800">
-                  Nouvelle activité StepSequence
-                </p>
-                <p className="text-xs text-orange-700">
-                  Génère une activité multi-étapes avec une introduction et un formulaire déjà configurés.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleCreateStepSequenceActivity}
-                disabled={!canUseStepSequenceShortcut}
-                className="inline-flex items-center justify-center rounded-full border border-orange-300 bg-white px-4 py-2 text-xs font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Nouvelle activité StepSequence
-              </button>
-            </div>
-          </div>
-          {availableCatalogOptions.length > 0 ? (
-            <div className="space-y-2">
-              {availableCatalogOptions.map((option) => (
-                <button
-                  key={option.id}
-                  onClick={() => handleSelectActivityToAdd(option.id)}
-                  className="w-full rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white px-4 py-3 text-left transition hover:border-[color:var(--brand-red)]/40 hover:bg-[color:var(--brand-red)]/5"
-                >
-                  <div className="flex items-center justify-between text-sm font-semibold text-[color:var(--brand-black)]">
-                    <span>{option.title}</span>
-                    <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                      {option.componentKey}
-                    </span>
-                  </div>
-                  {option.description && (
-                    <p className="mt-1 text-xs text-[color:var(--brand-charcoal)]/80">
-                      {option.description}
-                    </p>
-                  )}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-dashed border-[color:var(--brand-charcoal)]/20 bg-gray-50 px-4 py-6 text-center text-sm text-[color:var(--brand-charcoal)]">
-              Toutes les activités du catalogue sont déjà présentes.
-            </p>
-          )}
-          <div className="rounded-2xl border border-dashed border-[color:var(--brand-charcoal)]/20 bg-white px-4 py-5">
-            <h3 className="text-sm font-semibold text-[color:var(--brand-black)]">
-              Ajouter une activité personnalisée
-            </h3>
-            <p className="mt-1 text-xs text-[color:var(--brand-charcoal)]/80">
-              Renseignez un identifiant inédit et la clé du composant TSX à rendre disponible.
-            </p>
-            {customActivityError ? (
-              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {customActivityError}
-              </p>
-            ) : null}
-            <form onSubmit={handleCreateCustomActivity} className="mt-4 space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[color:var(--brand-charcoal)]">
-                  Identifiant de l’activité
-                </label>
-                <input
-                  type="text"
-                  value={customActivityId}
-                  onChange={(event) => {
-                    setCustomActivityId(event.target.value);
-                    if (customActivityError) {
-                      setCustomActivityError(null);
-                    }
-                  }}
-                  placeholder="ex : analyse-personnalisee"
-                  className="w-full rounded-lg border border-[color:var(--brand-charcoal)]/20 px-3 py-2 text-sm focus:border-[color:var(--brand-red)]/50 focus:outline-none"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[color:var(--brand-charcoal)]">
-                  Composant TSX
-                </label>
-                <input
-                  type="text"
-                  value={customComponentKey}
-                  onChange={(event) => {
-                    setCustomComponentKey(event.target.value);
-                    if (customActivityError) {
-                      setCustomActivityError(null);
-                    }
-                  }}
-                  placeholder="ex : custom-activity"
-                  className="w-full rounded-lg border border-[color:var(--brand-charcoal)]/20 px-3 py-2 text-sm focus:border-[color:var(--brand-red)]/50 focus:outline-none"
-                />
-                <p className="text-[11px] text-[color:var(--brand-charcoal)]/70">
-                  Utilisez la clé du composant exporté dans le registre React.
-                </p>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[color:var(--brand-charcoal)]">
-                  Chemin personnalisé (optionnel)
-                </label>
-                <input
-                  type="text"
-                  value={customActivityPath}
-                  onChange={(event) => {
-                    setCustomActivityPath(event.target.value);
-                    if (customActivityError) {
-                      setCustomActivityError(null);
-                    }
-                  }}
-                  placeholder="ex : /activites/analyse-personnalisee"
-                  className="w-full rounded-lg border border-[color:var(--brand-charcoal)]/20 px-3 py-2 text-sm focus:border-[color:var(--brand-red)]/50 focus:outline-none"
-                />
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-red)]/40 bg-[color:var(--brand-red)]/10 px-4 py-2 text-xs font-medium text-[color:var(--brand-red)] transition hover:border-[color:var(--brand-red)]/60 hover:bg-[color:var(--brand-red)]/20"
-                >
-                  Ajouter cette activité
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </AdminModal>
     </>
   );
 }
