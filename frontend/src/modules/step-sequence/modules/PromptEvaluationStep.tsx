@@ -40,27 +40,39 @@ interface PromptEvaluationStepContent {
   thinking: ThinkingChoice;
 }
 
-export interface PromptEvaluationStepConfig
-  extends PromptEvaluationStepContent {
+export interface PromptEvaluationStepConfig extends PromptEvaluationStepContent {
   onChange?: (content: PromptEvaluationStepContent) => void;
 }
 
-type NumericScoreKey = "total" | "clarity" | "specificity" | "structure" | "length";
+type DetailedScoreKey = "clarity" | "specificity" | "structure" | "length";
+
+const SCORE_LABELS: Record<DetailedScoreKey, string> = {
+  clarity: "Clarté",
+  specificity: "Spécificité",
+  structure: "Structure",
+  length: "Longueur",
+};
 
 export interface PromptEvaluationScore {
   total: number;
-  clarity?: number;
-  specificity?: number;
-  structure?: number;
-  length?: number;
-  comments?: string;
-  advice?: string[];
+  clarity: number;
+  specificity: number;
+  structure: number;
+  length: number;
+  comments: string;
+  advice: string[];
 }
 
 export interface PromptEvaluationStepPayload {
   prompt: string;
   rawResponse: string;
   evaluation: PromptEvaluationScore | null;
+  comment: string;
+}
+
+interface PromptEvaluationApiResponse {
+  evaluation: PromptEvaluationScore;
+  raw: string;
 }
 
 function countWords(text: string): number {
@@ -113,42 +125,28 @@ function isPromptEvaluationScore(value: unknown): value is PromptEvaluationScore
   if (!value || typeof value !== "object") {
     return false;
   }
-
-  const candidate = value as Partial<PromptEvaluationScore> & Record<string, unknown>;
-  if (typeof candidate.total !== "number" || !Number.isFinite(candidate.total)) {
-    return false;
-  }
-
-  const numericKeys: NumericScoreKey[] = [
+  const candidate = value as Record<string, unknown>;
+  const numericKeys: (keyof PromptEvaluationScore)[] = [
+    "total",
     "clarity",
     "specificity",
     "structure",
     "length",
   ];
-
-  for (const key of numericKeys) {
-    const score = candidate[key];
-    if (
-      score !== undefined &&
-      (typeof score !== "number" || !Number.isFinite(score))
-    ) {
-      return false;
-    }
-  }
-
-  if (candidate.comments !== undefined && typeof candidate.comments !== "string") {
+  if (
+    numericKeys.some((key) => {
+      const score = candidate[key];
+      return typeof score !== "number" || Number.isNaN(score);
+    })
+  ) {
     return false;
   }
-
-  if (candidate.advice !== undefined) {
-    if (!Array.isArray(candidate.advice)) {
-      return false;
-    }
-    if (candidate.advice.some((item) => typeof item !== "string")) {
-      return false;
-    }
+  if (typeof candidate.comments !== "string") {
+    return false;
   }
-
+  if (!Array.isArray(candidate.advice) || candidate.advice.some((item) => typeof item !== "string")) {
+    return false;
+  }
   return true;
 }
 
@@ -158,6 +156,7 @@ function normalizePayload(payload: unknown): PromptEvaluationStepPayload {
       prompt: "",
       rawResponse: "",
       evaluation: null,
+      comment: "",
     } satisfies PromptEvaluationStepPayload;
   }
 
@@ -167,112 +166,8 @@ function normalizePayload(payload: unknown): PromptEvaluationStepPayload {
     prompt: typeof base.prompt === "string" ? base.prompt : "",
     rawResponse: typeof base.rawResponse === "string" ? base.rawResponse : "",
     evaluation: isPromptEvaluationScore(base.evaluation) ? base.evaluation : null,
+    comment: typeof base.comment === "string" ? base.comment : "",
   } satisfies PromptEvaluationStepPayload;
-}
-
-function cleanJson(raw: string): string {
-  return raw
-    .replace(/Résumé du raisonnement[\s\S]*$/i, "")
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```/i, "")
-    .replace(/```$/i, "")
-    .trim();
-}
-
-function extractJsonCandidate(raw: string): string | null {
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    return null;
-  }
-  return raw.slice(firstBrace, lastBrace + 1).trim();
-}
-
-function parseEvaluationObject(
-  data: Record<string, unknown>
-): PromptEvaluationScore | null {
-  const toInteger = (value: unknown): number | undefined => {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return Math.round(value);
-    }
-    if (typeof value === "string" && value.trim().length > 0) {
-      const parsed = Number.parseFloat(value);
-      if (Number.isFinite(parsed)) {
-        return Math.round(parsed);
-      }
-    }
-    return undefined;
-  };
-
-  const total = toInteger(data.total);
-  if (typeof total !== "number") {
-    return null;
-  }
-
-  const result: PromptEvaluationScore = { total };
-  const clarity = toInteger(data.clarity);
-  if (typeof clarity === "number") {
-    result.clarity = clarity;
-  }
-  const specificity = toInteger(data.specificity);
-  if (typeof specificity === "number") {
-    result.specificity = specificity;
-  }
-  const structure = toInteger(data.structure);
-  if (typeof structure === "number") {
-    result.structure = structure;
-  }
-  const lengthScore = toInteger(data.length);
-  if (typeof lengthScore === "number") {
-    result.length = lengthScore;
-  }
-  if (typeof data.comments === "string") {
-    result.comments = data.comments;
-  }
-  if (Array.isArray(data.advice)) {
-    result.advice = data.advice.filter((item): item is string => typeof item === "string");
-  }
-
-  return result;
-}
-
-function parseEvaluation(raw: string): PromptEvaluationScore | null {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const attempts = new Set<string>();
-  const cleaned = cleanJson(trimmed);
-  if (cleaned) {
-    attempts.add(cleaned);
-  }
-  const bracesCandidate = extractJsonCandidate(trimmed);
-  if (bracesCandidate) {
-    attempts.add(bracesCandidate);
-  }
-
-  let lastError: unknown = null;
-
-  for (const candidate of attempts) {
-    try {
-      const data = JSON.parse(candidate) as Record<string, unknown>;
-      const evaluation = parseEvaluationObject(data);
-      if (evaluation) {
-        return evaluation;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (import.meta.env.DEV && lastError) {
-    // eslint-disable-next-line no-console
-    console.warn("Unable to parse evaluation JSON", lastError);
-  }
-
-  return null;
 }
 
 function SparklesIcon({ className }: { className?: string }): JSX.Element {
@@ -323,6 +218,42 @@ export function PromptEvaluationStep({
   const typedConfig = useMemo(() => normalizeConfig(config), [config]);
   const { onChange, ...content } = typedConfig;
 
+  const typedPayload = useMemo(() => normalizePayload(payload), [payload]);
+
+  const [promptText, setPromptText] = useState<string>(
+    () => typedPayload.prompt || content.defaultText,
+  );
+  const [evaluation, setEvaluation] = useState<PromptEvaluationScore | null>(
+    () => typedPayload.evaluation,
+  );
+  const [rawResponse, setRawResponse] = useState<string>(() => typedPayload.rawResponse);
+  const [comment, setComment] = useState<string>(() => typedPayload.comment);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPromptText(typedPayload.prompt || content.defaultText);
+    setEvaluation(typedPayload.evaluation);
+    setRawResponse(typedPayload.rawResponse);
+    setComment(typedPayload.comment);
+  }, [
+    typedPayload.prompt,
+    typedPayload.evaluation,
+    typedPayload.rawResponse,
+    typedPayload.comment,
+    content.defaultText,
+  ]);
+
+  useEffect(() => {
+    if (isDesigner) {
+      setPromptText(content.defaultText);
+      setEvaluation(null);
+      setRawResponse("");
+      setComment("");
+      setError(null);
+    }
+  }, [isDesigner, content.defaultText]);
+
   const updateConfig = useCallback(
     (patch: Partial<PromptEvaluationStepContent>) => {
       const nextContent: PromptEvaluationStepContent = {
@@ -336,68 +267,33 @@ export function PromptEvaluationStep({
       onChange?.(nextContent);
       effectiveOnUpdateConfig({ ...nextContent, onChange });
     },
-    [content, effectiveOnUpdateConfig, onChange]
+    [content, effectiveOnUpdateConfig, onChange],
   );
 
-  const typedPayload = useMemo(() => normalizePayload(payload), [payload]);
+  const handlePromptChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
+    setPromptText(value);
+    setEvaluation(null);
+    setRawResponse("");
+    setComment("");
+    setError(null);
+  }, []);
 
-  const [promptText, setPromptText] = useState<string>(() =>
-    typedPayload.prompt || content.defaultText
-  );
-  const [evaluationRaw, setEvaluationRaw] = useState<string>(
-    () => typedPayload.rawResponse
-  );
-  const [evaluation, setEvaluation] = useState<PromptEvaluationScore | null>(
-    () => typedPayload.evaluation
-  );
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [parseWarning, setParseWarning] = useState<string | null>(null);
-
-  useEffect(() => {
-    setPromptText(typedPayload.prompt || content.defaultText);
-    setEvaluationRaw(typedPayload.rawResponse);
-    setEvaluation(typedPayload.evaluation);
-  }, [
-    typedPayload.prompt,
-    typedPayload.rawResponse,
-    typedPayload.evaluation,
-    content.defaultText,
-  ]);
-
-  useEffect(() => {
-    if (isDesigner) {
-      setPromptText(content.defaultText);
-      setEvaluation(null);
-      setEvaluationRaw("");
-      setParseWarning(null);
-      setError(null);
-    }
-  }, [isDesigner, content.defaultText]);
-
-  const handlePromptChange = useCallback(
-    (event: ChangeEvent<HTMLTextAreaElement>) => {
-      const value = event.target.value;
-      setPromptText(value);
-      setEvaluation(null);
-      setEvaluationRaw("");
-      setParseWarning(null);
-      setError(null);
-    },
-    []
-  );
+  const handleCommentChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setComment(event.target.value);
+  }, []);
 
   const modelOption = useMemo(
     () => MODEL_OPTIONS.find((option) => option.value === content.model),
-    [content.model]
+    [content.model],
   );
   const verbosityOption = useMemo(
     () => VERBOSITY_OPTIONS.find((option) => option.value === content.verbosity),
-    [content.verbosity]
+    [content.verbosity],
   );
   const thinkingOption = useMemo(
     () => THINKING_OPTIONS.find((option) => option.value === content.thinking),
-    [content.thinking]
+    [content.thinking],
   );
 
   const runtimePrompt = isDesigner ? content.defaultText : promptText;
@@ -405,18 +301,28 @@ export function PromptEvaluationStep({
   const trimmedPrompt = promptText.trim();
 
   const canRequestEvaluation = !isDesigner && !loading && trimmedPrompt.length > 0;
+  const hasEvaluation = evaluation !== null;
   const canContinue =
-    !isDesigner &&
-    !loading &&
-    trimmedPrompt.length > 0 &&
-    evaluationRaw.trim().length > 0;
+    !isDesigner && !loading && hasEvaluation && trimmedPrompt.length > 0;
+
+  const formattedRawResponse = useMemo(() => {
+    if (!rawResponse) {
+      return "";
+    }
+    try {
+      const parsed = JSON.parse(rawResponse);
+      return JSON.stringify(parsed, null, 2);
+    } catch (error) {
+      return rawResponse;
+    }
+  }, [rawResponse]);
 
   const handleEvaluate = useCallback(async () => {
     if (isDesigner) {
       return;
     }
 
-    const text = promptText.trim();
+    const text = trimmedPrompt;
     if (!text) {
       setError("Écris ton prompt avant de demander un score.");
       return;
@@ -424,9 +330,9 @@ export function PromptEvaluationStep({
 
     setLoading(true);
     setError(null);
-    setParseWarning(null);
     setEvaluation(null);
-    setEvaluationRaw("");
+    setRawResponse("");
+    setComment("");
 
     try {
       const headers: HeadersInit = { "Content-Type": "application/json" };
@@ -434,74 +340,70 @@ export function PromptEvaluationStep({
         headers["X-API-Key"] = API_AUTH_KEY;
       }
 
-      const response = await fetch(`${API_BASE_URL}/summary`, {
+      const response = await fetch(`${API_BASE_URL}/prompt-evaluation`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          text: `${content.developerMessage}\n\nPrompt à évaluer:\n${text}`,
+          prompt: text,
+          developerMessage: content.developerMessage,
           model: content.model,
           verbosity: content.verbosity,
           thinking: content.thinking,
         }),
       });
 
-      if (!response.ok || !response.body) {
-        const message = await response.text();
-        throw new Error(message || "Impossible d’évaluer le prompt.");
+      if (!response.ok) {
+        let message = "Impossible d’obtenir le score IA.";
+        try {
+          const data = (await response.json()) as { detail?: unknown };
+          if (typeof data.detail === "string" && data.detail.trim().length > 0) {
+            message = data.detail;
+          }
+        } catch (error) {
+          // Ignore JSON parsing errors and keep the default message.
+        }
+        throw new Error(message);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let raw = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        raw += decoder.decode(value, { stream: true });
-      }
-      raw += decoder.decode();
-
-      const normalized = raw.trim();
-      setEvaluationRaw(normalized);
-      const parsed = parseEvaluation(normalized);
-      setEvaluation(parsed);
-      if (!parsed) {
-        setParseWarning("Impossible d’interpréter automatiquement la réponse de l’IA.");
-      }
-    } catch (requestError) {
+      const data = (await response.json()) as PromptEvaluationApiResponse;
+      setEvaluation(data.evaluation);
+      setRawResponse(typeof data.raw === "string" ? data.raw : JSON.stringify(data.raw));
+    } catch (cause) {
       const message =
-        requestError instanceof Error
-          ? requestError.message
-          : "Erreur inattendue";
+        cause instanceof Error && cause.message
+          ? cause.message
+          : "Une erreur inattendue est survenue.";
       setError(message);
     } finally {
       setLoading(false);
     }
   }, [
+    isDesigner,
+    trimmedPrompt,
     content.developerMessage,
     content.model,
     content.thinking,
     content.verbosity,
-    isDesigner,
-    promptText,
   ]);
 
   const handleAdvanceClick = useCallback(() => {
-    if (!canContinue) {
+    if (!canContinue || !evaluation) {
       return;
     }
 
     effectiveOnAdvance({
-      prompt: promptText,
-      rawResponse: evaluationRaw,
+      prompt: trimmedPrompt,
+      rawResponse,
       evaluation,
+      comment: comment.trim(),
     });
   }, [
     canContinue,
     effectiveOnAdvance,
     evaluation,
-    evaluationRaw,
-    promptText,
+    rawResponse,
+    comment,
+    trimmedPrompt,
   ]);
 
   const promptFieldId = `${definition.id}-prompt`;
@@ -515,28 +417,28 @@ export function PromptEvaluationStep({
       verbosity: `${definition.id}-config-verbosity`,
       thinking: `${definition.id}-config-thinking`,
     }),
-    [definition.id]
+    [definition.id],
   );
 
   const handleDefaultTextConfigChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       updateConfig({ defaultText: event.target.value });
     },
-    [updateConfig]
+    [updateConfig],
   );
 
   const handleDeveloperMessageConfigChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       updateConfig({ developerMessage: event.target.value });
     },
-    [updateConfig]
+    [updateConfig],
   );
 
   const handleModelConfigChange = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
       updateConfig({ model: event.target.value });
     },
-    [updateConfig]
+    [updateConfig],
   );
 
   const handleVerbosityConfigChange = useCallback(
@@ -546,7 +448,7 @@ export function PromptEvaluationStep({
         verbosity: VERBOSITY_VALUES.includes(value) ? value : "low",
       });
     },
-    [updateConfig]
+    [updateConfig],
   );
 
   const handleThinkingConfigChange = useCallback(
@@ -556,8 +458,20 @@ export function PromptEvaluationStep({
         thinking: THINKING_VALUES.includes(value) ? value : "minimal",
       });
     },
-    [updateConfig]
+    [updateConfig],
   );
+
+  const detailScores = (
+    ["clarity", "specificity", "structure", "length"] as DetailedScoreKey[]
+  ).map((key) =>
+    evaluation
+      ? {
+          key,
+          label: SCORE_LABELS[key],
+          value: evaluation[key],
+        }
+      : null,
+  ).filter((item): item is { key: DetailedScoreKey; label: string; value: number } => item !== null);
 
   const developerCard = (
     <section className="space-y-4 rounded-3xl border border-orange-100 bg-orange-50/70 p-6 shadow-sm">
@@ -618,17 +532,119 @@ export function PromptEvaluationStep({
     </section>
   );
 
+  const evaluationCard = (
+    <section className="space-y-4 rounded-3xl border border-emerald-100 bg-emerald-50/70 p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+            Retour de l’évaluation
+          </p>
+          <p className="text-sm text-emerald-700/80">
+            Analyse automatisée de la qualité du prompt.
+          </p>
+        </div>
+        <SparklesIcon className="h-6 w-6 text-emerald-500" />
+      </div>
+      {hasEvaluation ? (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Score global
+            </h3>
+            <span className="inline-flex items-center rounded-full bg-emerald-500 px-4 py-1 text-sm font-semibold text-white">
+              {evaluation.total} / 100
+            </span>
+          </div>
+          <dl className="grid gap-3 sm:grid-cols-2">
+            {detailScores.map((item) => (
+              <div
+                key={item.key}
+                className="rounded-2xl border border-emerald-100 bg-white px-4 py-3 shadow-sm"
+              >
+                <dt className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+                  {item.label}
+                </dt>
+                <dd className="mt-1 text-base font-semibold text-slate-900">
+                  {item.value} / 100
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+              Commentaire de l’IA
+            </p>
+            <p className="rounded-2xl bg-white px-4 py-3 text-sm text-slate-800 shadow-inner">
+              {evaluation.comments}
+            </p>
+          </div>
+          {evaluation.advice.length > 0 ? (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+                Pistes de bonification
+              </p>
+              <ul className="space-y-2 text-sm text-slate-700">
+                {evaluation.advice.map((tip, index) => (
+                  <li key={`${tip}-${index}`} className="flex gap-2">
+                    <span className="mt-1 h-2 w-2 flex-none rounded-full bg-emerald-400" aria-hidden="true" />
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <details className="rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+            <summary className="cursor-pointer font-semibold text-emerald-700">
+              Voir la réponse JSON complète
+            </summary>
+            <pre className="mt-3 max-h-64 overflow-auto rounded-xl bg-slate-900/90 p-4 text-xs text-emerald-100">
+              {formattedRawResponse}
+            </pre>
+          </details>
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-emerald-200 bg-white/60 px-4 py-6 text-sm text-slate-600">
+          Lance une analyse pour obtenir un score détaillé.
+        </p>
+      )}
+    </section>
+  );
+
+  const commentCard = (
+    <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Commentaire
+          </p>
+          <p className="text-sm text-slate-600">
+            Note tes observations après avoir pris connaissance du score IA.
+          </p>
+        </div>
+      </div>
+      <textarea
+        id={`${definition.id}-review-comment`}
+        value={comment}
+        onChange={hasEvaluation && !loading ? handleCommentChange : undefined}
+        readOnly={!hasEvaluation || loading}
+        rows={5}
+        placeholder={
+          hasEvaluation
+            ? "Ajoute ton appréciation ou les prochaines étapes."
+            : "Déclenche d’abord l’évaluation pour consigner un commentaire."
+        }
+        className="w-full rounded-3xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+      />
+    </section>
+  );
+
   const mainContent = (
     <div className="space-y-8">
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">
-              Écris ton prompt
-            </h2>
-            <p className="text-sm text-slate-600">
-              Prépare la consigne à faire analyser.
-            </p>
+            <h2 className="text-xl font-semibold text-slate-900">Écris ton prompt</h2>
+            <p className="text-sm text-slate-600">Prépare la consigne à faire analyser.</p>
           </div>
           <span className="inline-flex items-center rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-600">
             {wordCount} mot{wordCount > 1 ? "s" : ""}
@@ -674,36 +690,13 @@ export function PromptEvaluationStep({
           </span>
         </div>
         {error ? (
-          <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">
-            {error}
-          </p>
-        ) : null}
-        {parseWarning ? (
-          <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            {parseWarning}
-          </p>
+          <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>
         ) : null}
       </section>
 
-      <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
-        <label
-          htmlFor={`${definition.id}-evaluation-raw`}
-          className="text-xs font-semibold uppercase tracking-wide text-slate-500"
-        >
-          Réponse de l’IA
-        </label>
-        <textarea
-          id={`${definition.id}-evaluation-raw`}
-          value={evaluationRaw}
-          readOnly
-          rows={Math.max(4, Math.min(12, evaluationRaw.split(/\n/).length + 1))}
-          className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-700 shadow-inner"
-          placeholder="La réponse JSON de l’IA apparaîtra ici."
-        />
-        <p className="text-xs text-slate-500">
-          Cette sortie est conservée telle quelle pour la suite de l’activité.
-        </p>
-      </section>
+      {evaluationCard}
+
+      {commentCard}
 
       <div className="flex justify-end">
         <button
