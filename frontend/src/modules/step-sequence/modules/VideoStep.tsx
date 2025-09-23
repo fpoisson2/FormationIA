@@ -107,6 +107,27 @@ interface ParsedYouTubeUrl {
   sourceUrl: URL;
 }
 
+const YOUTUBE_ALLOWED_PASSTHROUGH_PARAMS = new Set([
+  "si",
+  "pp",
+  "feature",
+  "widget_referrer",
+  "iv_load_policy",
+  "disablekb",
+  "fs",
+  "color",
+  "hl",
+  "cc_lang_pref",
+  "cc_load_policy",
+  "vq",
+  "autoplay",
+  "mute",
+  "controls",
+  "showinfo",
+  "origin",
+  "enablejsapi",
+]);
+
 function parseYouTubeUrl(url: string): ParsedYouTubeUrl | null {
   if (!url) {
     return null;
@@ -184,7 +205,27 @@ function parseYouTubeTimeValue(value: string | null): number | null {
   return totalSeconds > 0 ? totalSeconds : null;
 }
 
-function getYouTubeEmbedUrl(url: string): string | null {
+const YOUTUBE_RESERVED_PARAMS = new Set([
+  "start",
+  "t",
+  "end",
+  "list",
+  "index",
+  "playlist",
+  "loop",
+  "playsinline",
+  "rel",
+  "modestbranding",
+]);
+
+interface BuildYouTubeEmbedOptions {
+  origin?: string | null;
+}
+
+function getYouTubeEmbedUrl(
+  url: string,
+  options?: BuildYouTubeEmbedOptions
+): string | null {
   const parsed = parseYouTubeUrl(url);
   if (!parsed) {
     return null;
@@ -234,6 +275,26 @@ function getYouTubeEmbedUrl(url: string): string | null {
       embedUrl.searchParams.set("playlist", videoId);
     }
   }
+
+  if (options?.origin) {
+    embedUrl.searchParams.set("origin", options.origin);
+  }
+
+  sourceUrl.searchParams.forEach((value, key) => {
+    if (!value) {
+      return;
+    }
+    if (YOUTUBE_RESERVED_PARAMS.has(key)) {
+      return;
+    }
+    if (!YOUTUBE_ALLOWED_PASSTHROUGH_PARAMS.has(key)) {
+      return;
+    }
+    if (key === "origin" && options?.origin) {
+      return;
+    }
+    embedUrl.searchParams.set(key, value);
+  });
 
   return embedUrl.toString();
 }
@@ -299,6 +360,21 @@ export function VideoStep({
   const { onChange, ...content } = typedConfig;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [autoplayFailed, setAutoplayFailed] = useState(false);
+  const [clientOrigin, setClientOrigin] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const { origin } = window.location;
+      if (origin && origin !== "null") {
+        setClientOrigin(origin);
+      }
+    } catch (error) {
+      setClientOrigin(null);
+    }
+  }, []);
 
   const notifyChange = useCallback(
     (nextContent: VideoStepContent) => {
@@ -322,8 +398,8 @@ export function VideoStep({
   );
   const youtubeSourceUrl = youtubeSource?.url ?? "";
   const youtubeEmbedUrl = useMemo(
-    () => getYouTubeEmbedUrl(youtubeSourceUrl),
-    [youtubeSourceUrl]
+    () => getYouTubeEmbedUrl(youtubeSourceUrl, { origin: clientOrigin }),
+    [clientOrigin, youtubeSourceUrl]
   );
   const mp4Signature = useMemo(
     () => mp4Sources.map((source) => source.url).join("|"),
@@ -613,6 +689,7 @@ export function VideoStep({
                 title="Vidéo YouTube"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 loading="lazy"
+                referrerPolicy="strict-origin-when-cross-origin"
                 allowFullScreen
               />
             </div>
