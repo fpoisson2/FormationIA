@@ -105,6 +105,24 @@ const MIN_TILE_SIZE = 12;
 const MOBILE_VERTICAL_PADDING = 0;
 const DESKTOP_TILE_MAX_SIZE = BASE_TILE_SIZE * 4;
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
+const MUSIC_PREFERENCE_STORAGE_KEY = "explorateur-ia:music-enabled";
+const NON_TYPABLE_INPUT_TYPES = new Set([
+  "button",
+  "checkbox",
+  "color",
+  "date",
+  "datetime-local",
+  "file",
+  "hidden",
+  "image",
+  "month",
+  "radio",
+  "range",
+  "reset",
+  "submit",
+  "time",
+  "week",
+]);
 type TileScaleMode = "contain" | "cover";
 
 type AtlasCategory = "" | "terrain" | "path" | "object" | "character" | "ui";
@@ -124,6 +142,86 @@ type AtlasEntry = {
   overlay: boolean;
   transparent: boolean;
 };
+
+function getStoredMusicPreference(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  try {
+    const stored = window.localStorage.getItem(
+      MUSIC_PREFERENCE_STORAGE_KEY
+    );
+    if (stored === null) {
+      return true;
+    }
+    const normalized = stored.trim().toLowerCase();
+    if (["off", "false", "0"].includes(normalized)) {
+      return false;
+    }
+    if (["on", "true", "1"].includes(normalized)) {
+      return true;
+    }
+    return true;
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("Explorateur IA: unable to read music preference", error);
+    }
+    return true;
+  }
+}
+
+function persistMusicPreference(enabled: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      MUSIC_PREFERENCE_STORAGE_KEY,
+      enabled ? "on" : "off"
+    );
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("Explorateur IA: unable to store music preference", error);
+    }
+  }
+}
+
+function isTextualInputTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) {
+    return false;
+  }
+  let element: HTMLElement | null = target;
+  while (element) {
+    if (element.isContentEditable) {
+      return true;
+    }
+    if (element instanceof HTMLInputElement) {
+      const type = element.type?.toLowerCase() ?? "text";
+      if (!NON_TYPABLE_INPUT_TYPES.has(type)) {
+        return true;
+      }
+    } else if (
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    ) {
+      return true;
+    } else {
+      const role = element.getAttribute("role");
+      if (
+        role &&
+        ["textbox", "searchbox", "combobox", "spinbutton"].includes(
+          role.toLowerCase()
+        )
+      ) {
+        return true;
+      }
+    }
+    element = element.parentElement;
+  }
+  return false;
+}
 
 function parseBooleanAttribute(value: string | null | undefined): boolean {
   if (!value) {
@@ -4039,7 +4137,9 @@ export default function ExplorateurIA({
   const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
-  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
+  const [isMusicEnabled, setIsMusicEnabled] = useState(() =>
+    getStoredMusicPreference()
+  );
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [isMusicSupported, setIsMusicSupported] = useState(false);
   const worldContainerRef = useRef<HTMLDivElement | null>(null);
@@ -4212,9 +4312,35 @@ export default function ExplorateurIA({
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
       const key = event.key.toLowerCase();
-      if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(key)) {
-        event.preventDefault();
+      const target = event.target as EventTarget | null;
+      const typingTarget = isTextualInputTarget(target);
+      const overlayOpen = open !== null || isTerrainModalOpen || isInventoryOpen;
+
+      if (
+        [
+          "arrowup",
+          "arrowdown",
+          "arrowleft",
+          "arrowright",
+          "w",
+          "a",
+          "s",
+          "d",
+        ].includes(key)
+      ) {
+        if (
+          typingTarget ||
+          overlayOpen ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey
+        ) {
+          return;
+        }
         const delta:
           | [number, number]
           | null = key === "arrowup" || key === "w"
@@ -4227,18 +4353,45 @@ export default function ExplorateurIA({
           ? [1, 0]
           : null;
         if (delta) {
+          event.preventDefault();
           move(delta[0], delta[1]);
         }
+        return;
       }
+
       if (key === "enter") {
+        if (typingTarget || overlayOpen) {
+          return;
+        }
         const hit = buildingAt(player.x, player.y);
-        if (hit) setOpen(hit.id);
+        if (hit) {
+          event.preventDefault();
+          setOpen(hit.id);
+        }
+        return;
       }
-      if (key === "escape") setOpen(null);
+
+      if (key === "escape") {
+        if (typingTarget) {
+          return;
+        }
+        if (open !== null) {
+          event.preventDefault();
+          setOpen(null);
+        }
+      }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [player]);
+  }, [
+    buildingAt,
+    isInventoryOpen,
+    isTerrainModalOpen,
+    move,
+    open,
+    player.x,
+    player.y,
+  ]);
 
   useEffect(() => {
     const container = worldContainerRef.current;
@@ -4293,6 +4446,10 @@ export default function ExplorateurIA({
     const timeout = window.setTimeout(() => setBlockedStage(null), 2200);
     return () => window.clearTimeout(timeout);
   }, [blockedStage]);
+
+  useEffect(() => {
+    persistMusicPreference(isMusicEnabled);
+  }, [isMusicEnabled]);
 
   const attemptPlayMusic = useCallback(() => {
     if (!isMusicEnabled || isMusicPlaying) {
@@ -4595,6 +4752,7 @@ export default function ExplorateurIA({
         } satisfies ExplorateurProgress;
       });
       setOpen(null);
+      setBlockedStage(null);
       setCelebrate(true);
       setTimeout(() => setCelebrate(false), 1800);
     },
