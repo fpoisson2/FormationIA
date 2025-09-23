@@ -4179,10 +4179,12 @@ function InventoryView({ items }: { items: InventoryEntry[] }) {
 export default function ExplorateurIA({
   completionId,
   navigateToActivities,
-  isEditMode = false,
+  isEditMode: isEditModeAllowed = false,
 }: ActivityProps) {
   const isMobile = useIsMobile();
-  const tileSize = useResponsiveTileSize(isEditMode ? "contain" : "cover");
+  const tileSize = useResponsiveTileSize("cover");
+  const canEdit = Boolean(isEditModeAllowed);
+  const [isEditing, setIsEditing] = useState(false);
   const cellSize = tileSize + TILE_GAP;
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
@@ -4216,6 +4218,12 @@ export default function ExplorateurIA({
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+
+  useEffect(() => {
+    if (!canEdit && isEditing) {
+      setIsEditing(false);
+    }
+  }, [canEdit, isEditing]);
 
   const isQuarterCompleted = useCallback(
     (id: QuarterId) => {
@@ -4269,7 +4277,7 @@ export default function ExplorateurIA({
 
   const handleThemeChange = useCallback(
     (themeId: TerrainThemeId) => {
-      if (!isEditMode) {
+      if (!isEditing) {
         return;
       }
       const theme = TERRAIN_THEMES[themeId];
@@ -4282,11 +4290,11 @@ export default function ExplorateurIA({
       recomputeWorldMetadata(world);
       forceWorldRefresh((value) => value + 1);
     },
-    [forceWorldRefresh, isEditMode]
+    [forceWorldRefresh, isEditing]
   );
 
   const handleRegenerateWorld = useCallback(() => {
-    if (!isEditMode) {
+    if (!isEditing) {
       return;
     }
     const { seed, start } = regenerateWorldInPlace();
@@ -4300,7 +4308,7 @@ export default function ExplorateurIA({
     recomputeWorldMetadata(world);
     setPlayer({ x: start.x, y: start.y });
     forceWorldRefresh((value) => value + 1);
-  }, [forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
+  }, [forceWorldRefresh, isEditing, selectedTheme, setPlayer]);
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,
@@ -4487,12 +4495,12 @@ export default function ExplorateurIA({
       setMobilePrompt(null);
       return;
     }
-    if (isMobile && !isEditMode) {
+    if (isMobile && !isEditing) {
       setMobilePrompt(hit.id);
       return;
     }
     setOpen(hit.id);
-  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
+  }, [buildingAt, isEditing, isMobile, player.x, player.y]);
 
   const findWalkPath = useCallback(
     (fromX: number, fromY: number, toX: number, toY: number): Coord[] => {
@@ -4734,7 +4742,7 @@ export default function ExplorateurIA({
     [buildingAt, player.x, player.y]
   );
 
-  const showMobileControls = !isEditMode && !open;
+  const showMobileControls = !isEditing && !open;
 
   const mobilePromptBuilding = useMemo(() => {
     if (!mobilePrompt) {
@@ -4776,6 +4784,19 @@ export default function ExplorateurIA({
     setInventoryOpen(false);
   }, []);
 
+  const handleToggleEditor = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    setOpen(null);
+    setInventoryOpen(false);
+    setIsEditing((value) => !value);
+  }, [canEdit]);
+
+  const handleCloseEditor = useCallback(() => {
+    setIsEditing(false);
+  }, []);
+
   useEffect(() => {
     if (!showMobileControls) {
       setMobilePrompt(null);
@@ -4794,45 +4815,16 @@ export default function ExplorateurIA({
 
   return (
     <>
-      <div
-      className={classNames(
-        "relative w-full",
-        isMobile
-          ? "flex flex-1 h-full min-h-[100dvh] flex-col overflow-hidden"
-          : "space-y-6"
-      )}
-    >
+      <div className="relative flex min-h-[100dvh] w-full flex-1 flex-col overflow-hidden">
       <Fireworks show={celebrate} />
-      <div
-        className={
-          isMobile
-            ? "grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0"
-            : classNames(
-                "grid w-full gap-6",
-                isEditMode
-                  ? "md:grid-cols-[minmax(0,1fr)_260px] xl:grid-cols-[minmax(0,1fr)_300px]"
-                  : undefined,
-              )
-        }
-      >
-        <div
-          className={
-            isMobile
-              ? "relative flex min-h-0 flex-1 flex-col"
-              : "relative flex flex-col rounded-2xl border bg-white p-4 shadow"
-          }
-        >
+      <div className="grid min-h-0 flex-1 w-full grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0">
+        <div className="relative flex min-h-0 flex-1 flex-col">
           {!isMobile && (
             <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border bg-slate-100/80 px-2 py-1 text-[11px] text-slate-600 shadow-sm">
               <span className="tracking-wide uppercase">Tiny Town</span>
             </div>
           )}
-          <div
-            className={classNames(
-              "relative w-full",
-              isMobile ? "flex-1 min-h-0" : "mt-4 max-w-full"
-            )}
-          >
+          <div className="relative flex min-h-0 flex-1 flex-col">
             <div
               className="pointer-events-none absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3"
             >
@@ -4869,6 +4861,26 @@ export default function ExplorateurIA({
                     </span>
                   </span>
                 </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={handleToggleEditor}
+                    className={classNames(
+                      "flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-semibold shadow-sm backdrop-blur",
+                      isMobile ? "active:scale-95" : "hover:bg-slate-100",
+                      isEditing
+                        ? "border-emerald-400/70 bg-emerald-50/90 text-emerald-700"
+                        : "border-white/70 bg-white/90 text-slate-700"
+                    )}
+                    aria-pressed={isEditing}
+                    title={isEditing ? "Fermer le panneau d’édition" : "Ouvrir le panneau d’édition"}
+                  >
+                    <span aria-hidden="true" className="text-base leading-none">
+                      🛠️
+                    </span>
+                    <span>Mode édition</span>
+                  </button>
+                )}
                 {isMusicSupported && (
                   <button
                     type="button"
@@ -4899,28 +4911,11 @@ export default function ExplorateurIA({
             )}
             <div
               ref={worldContainerRef}
-              className={classNames(
-                "relative touch-manipulation",
-                isMobile
-                  ? "flex-1 min-h-0 h-full w-full overflow-hidden"
-                  : "max-w-full w-full overflow-hidden rounded-2xl border bg-emerald-50/60 shadow-inner"
-              )}
-              style={
-                isMobile
-                  ? undefined
-                  : { height: "min(85vh, 640px)" }
-              }
+              className="relative flex-1 min-h-0 h-full w-full overflow-hidden bg-emerald-50/60 shadow-inner touch-manipulation"
             >
-              <div
-                className={
-                  isMobile ? "flex h-full w-full" : "inline-block p-3"
-                }
-              >
+              <div className="flex h-full w-full items-center justify-center p-3 sm:p-6">
                 <div
-                  className={classNames(
-                    "grid",
-                    isMobile ? "h-full w-full min-w-max" : "min-w-max"
-                  )}
+                  className="grid min-w-max"
                   style={{
                     gridTemplateColumns: `repeat(${GRID_W}, ${tileSize}px)`,
                     gridTemplateRows: `repeat(${GRID_H}, ${tileSize}px)`,
@@ -5002,7 +4997,7 @@ export default function ExplorateurIA({
                               {!isMobile && (
                                 <button
                                   onClick={(event) => {
-                                    if (isEditMode) {
+                                    if (isEditing) {
                                       event.preventDefault();
                                       event.stopPropagation();
                                       return;
@@ -5046,43 +5041,39 @@ export default function ExplorateurIA({
             @keyframes float { 0%,100%{ transform: translateY(0) } 50%{ transform: translateY(-2px) } }
             @keyframes prompt-pop { 0%{ transform: translateY(18px) scale(0.92); opacity: 0; } 60%{ transform: translateY(-6px) scale(1.04); opacity: 1; } 100%{ transform: translateY(0) scale(1); opacity: 1; } }
           `}</style>
-          {!isMobile && isEditMode && (
-            <div className="mt-3 flex items-center justify-between text-sm">
-              <div>
-                {at ? (
-                  <span>
-                    Vous êtes devant: <span className="font-semibold">{at.label}</span>
-                  </span>
-                ) : (
-                  <span>Explorez la ville et entrez dans un quartier.</span>
-                )}
-              </div>
-              <button
-                onClick={openIfOnBuilding}
-                className="w-full rounded-lg border bg-slate-100 px-3 py-2 sm:w-auto"
-              >
-                Entrer
-              </button>
-            </div>
-          )}
         </div>
       </div>
-      {!isMobile && isEditMode && (
-        <aside className="hidden md:sticky md:top-4 md:block md:space-y-4">
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Progression
-            </div>
-            <ul className="mt-2 text-sm space-y-2">
-              {buildings.map((building) => (
-                <li key={building.id} className="flex items-center justify-between gap-3">
-                  {(() => {
-                    const key = coordKey(building.x, building.y);
-                    const tileBlocked = activeGateKeys.has(key);
-                    const gate = GATE_BY_COORD.get(key);
-                    const lockMessageStage = gate?.stage ?? building.id;
-                    const isLocked = tileBlocked && !isQuarterCompleted(building.id);
-                    return (
+      <Modal
+        open={isInventoryOpen}
+        onClose={handleCloseInventory}
+        title="Inventaire d’explorateur"
+      >
+        <InventoryView items={inventoryEntries} />
+      </Modal>
+
+      {canEdit && (
+        <Modal
+          open={isEditing}
+          onClose={handleCloseEditor}
+          title="Mode édition"
+        >
+          <div className="space-y-6">
+            <section className="space-y-3">
+              <h3 className="text-xs uppercase tracking-wide text-slate-500">
+                Progression
+              </h3>
+              <ul className="space-y-2 text-sm">
+                {buildings.map((building) => {
+                  const key = coordKey(building.x, building.y);
+                  const tileBlocked = activeGateKeys.has(key);
+                  const gate = GATE_BY_COORD.get(key);
+                  const lockMessageStage = gate?.stage ?? building.id;
+                  const isLocked = tileBlocked && !isQuarterCompleted(building.id);
+                  return (
+                    <li
+                      key={building.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/70 bg-slate-50/70 px-3 py-2"
+                    >
                       <button
                         onClick={() => {
                           if (isLocked) {
@@ -5090,10 +5081,11 @@ export default function ExplorateurIA({
                             return;
                           }
                           setOpen(building.id);
+                          handleCloseEditor();
                         }}
                         disabled={isLocked}
                         className={classNames(
-                          "text-left",
+                          "text-left text-sm font-semibold",
                           isLocked
                             ? "cursor-not-allowed opacity-60"
                             : "hover:underline"
@@ -5102,43 +5094,45 @@ export default function ExplorateurIA({
                       >
                         {building.label}
                       </button>
-                    );
-                  })()}
-                  <span className="text-xs px-2 py-0.5 rounded-full border bg-slate-50">
-                    {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
-                    {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
-                    {building.id === "decision" && (progress.decision.done ? "OK" : "À faire")}
-                    {building.id === "ethique" && (progress.ethique.done ? "OK" : "À faire")}
-                    {building.id === "mairie" && "—"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Contrôles
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <DPad onMove={move} />
-              <div className="text-xs text-slate-600 space-y-1">
-                <p>Entrer: Ouvrir</p>
-                <p>Échap: Fermer</p>
-                <p>Clic: Accès direct</p>
+                      <span className="rounded-full border border-slate-200/80 px-2 py-0.5 text-xs text-slate-600">
+                        {building.id === "clarte" && (progress.clarte.done ? "OK" : "À faire")}
+                        {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
+                        {building.id === "decision" && (progress.decision.done ? "OK" : "À faire")}
+                        {building.id === "ethique" && (progress.ethique.done ? "OK" : "À faire")}
+                        {building.id === "mairie" && "—"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-xs uppercase tracking-wide text-slate-500">
+                Contrôles
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200/80 bg-white/80 p-3">
+                  <DPad onMove={move} />
+                </div>
+                <div className="space-y-1 rounded-xl border border-slate-200/80 bg-white/80 p-3 text-xs text-slate-600">
+                  <p>Entrer : Ouvrir</p>
+                  <p>Échap : Fermer</p>
+                  <p>Clic : Accès direct</p>
+                </div>
               </div>
-            </div>
-            {blockedStage && (
-              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
-                Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
-              </div>
-            )}
-          </div>
-          {isEditMode && (
-            <div className="rounded-2xl border bg-white p-4 shadow">
-              <div className="text-xs uppercase tracking-wide text-slate-500">
+              {blockedStage && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-700">
+                  Terminez d'abord {BUILDING_META[blockedStage]?.label ?? "ce quartier"}.
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-xs uppercase tracking-wide text-slate-500">
                 Terrain
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              </h3>
+              <div className="grid grid-cols-2 gap-2 text-sm">
                 {TERRAIN_THEME_ORDER.map((key) => {
                   const theme = TERRAIN_THEMES[key];
                   const isActive = selectedTheme === key;
@@ -5151,7 +5145,7 @@ export default function ExplorateurIA({
                         "rounded-xl border px-3 py-2 text-left transition",
                         isActive
                           ? "border-emerald-400 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-50/80 hover:border-emerald-300 hover:bg-white"
+                          : "border-slate-200 bg-white/80 hover:border-emerald-300 hover:bg-white"
                       )}
                       aria-pressed={isActive}
                     >
@@ -5163,50 +5157,46 @@ export default function ExplorateurIA({
               <button
                 type="button"
                 onClick={handleRegenerateWorld}
-                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:bg-emerald-50"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-emerald-400 hover:bg-emerald-50"
               >
                 Régénérer la forme
               </button>
-              <p className="mt-3 text-xs text-slate-500">
+              <p className="text-xs text-slate-500">
                 Choisissez un style pour changer l'apparence et utilisez le bouton pour régénérer la forme de l'île. Le changement est visible immédiatement.
               </p>
-            </div>
-          )}
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Tileset
-            </div>
-            <TilesetControls ts={tileset} setTs={setTileset} />
-          </div>
-          <div className="rounded-2xl border bg-white p-4 shadow">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Export
-            </div>
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={downloadJSON}
-                className="px-3 py-2 rounded-xl bg-slate-800 text-white"
-              >
-                JSON
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="px-3 py-2 rounded-xl bg-slate-100 border"
-              >
-                PDF
-              </button>
-            </div>
-          </div>
-        </aside>
-      )}
+            </section>
 
-      <Modal
-        open={isInventoryOpen}
-        onClose={handleCloseInventory}
-        title="Inventaire d’explorateur"
-      >
-        <InventoryView items={inventoryEntries} />
-      </Modal>
+            <section className="space-y-3">
+              <h3 className="text-xs uppercase tracking-wide text-slate-500">
+                Tileset
+              </h3>
+              <div className="rounded-xl border border-slate-200/80 bg-white/80 p-3">
+                <TilesetControls ts={tileset} setTs={setTileset} />
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-xs uppercase tracking-wide text-slate-500">
+                Export
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={downloadJSON}
+                  className="rounded-xl bg-slate-800 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+                >
+                  Export JSON
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Imprimer en PDF
+                </button>
+              </div>
+            </section>
+          </div>
+        </Modal>
+      )}
 
       <Modal
         open={open === "clarte"}
