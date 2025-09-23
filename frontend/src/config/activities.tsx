@@ -97,6 +97,7 @@ export interface ActivityProps {
   isEditMode?: boolean;
   enabled?: boolean;
   stepSequence?: StepDefinition[];
+  setStepSequence?: (steps: StepDefinition[] | undefined) => void;
 }
 
 export const COMPONENT_REGISTRY = {
@@ -983,6 +984,16 @@ export function buildActivityElement(
       []
     );
 
+    const handleUpdateStepSequence = useCallback(
+      (steps: StepDefinition[] | undefined) => {
+        setCurrentDefinition((prev) => ({
+          ...prev,
+          stepSequence: steps ? cloneStepSequence(steps) : undefined,
+        }));
+      },
+      []
+    );
+
     const handleSaveActivity = useCallback(async () => {
       const headerOverrides = extractHeaderOverrides(overrides);
       const layoutOverrides = extractLayoutOverrides(overrides);
@@ -1086,6 +1097,7 @@ export function buildActivityElement(
             isEditMode={isEditMode}
             enabled={currentDefinition.enabled !== false}
             stepSequence={currentDefinition.stepSequence}
+            setStepSequence={handleUpdateStepSequence}
           />
         ) : (
           <div className="space-y-4 rounded-3xl border border-red-200 bg-red-50 p-6 text-red-800">

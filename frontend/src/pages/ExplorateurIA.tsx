@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type ReactNode,
   type Ref,
 } from "react";
@@ -14,12 +13,29 @@ import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPa
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import type { ActivityProps } from "../config/activities";
 import {
-  CLARTE_QUESTIONS,
-  CREATION_POOL,
-  DECISIONS,
-  DILEMMAS,
-  type CreationSpec,
-} from "./explorateurIA/worlds/world1";
+  StepSequenceRenderer,
+  type StepSequenceRenderWrapperProps,
+} from "../modules/step-sequence";
+import { createExplorateurExport } from "./explorateurIA/export";
+import {
+  createInitialProgress,
+  updateClarteProgress,
+  updateCreationProgress,
+  updateDecisionProgress,
+  updateEthicsProgress,
+  updateMairieProgress,
+  type ExplorateurProgress,
+  type QuarterPayloadMap,
+} from "./explorateurIA/progress";
+import "./explorateurIA/modules";
+import {
+  WORLD1_QUARTER_STEPS,
+  expandQuarterSteps,
+  flattenQuarterSteps,
+  getQuarterFromStepId,
+  type QuarterSteps,
+} from "./explorateurIA/worlds/world1/steps";
+import { QUARTER_ORDER, type QuarterId } from "./explorateurIA/types";
 import {
   createChiptuneTheme,
   type ChiptuneTheme,
@@ -32,16 +48,6 @@ import {
 // Technologies: React + Tailwind CSS (prévu), aucune dépendance externe requise.
 // Export JSON + impression PDF via window.print().
 // ---
-
-type QuarterId = "clarte" | "creation" | "decision" | "ethique" | "mairie";
-
-type Progress = {
-  clarte: { done: boolean; score: number };
-  creation: { done: boolean; spec?: CreationSpec };
-  decision: { done: boolean; choicePath?: string[] };
-  ethique: { done: boolean; score: number };
-  visited: QuarterId[];
-};
 
 type RewardStage = Exclude<QuarterId, "mairie">;
 
@@ -89,6 +95,8 @@ const INVENTORY_ITEMS: InventoryDefinition[] = [
     icon: "🕯️",
   },
 ];
+
+const MANUAL_ADVANCE_COMPONENTS = new Set<string>(["rich-content", "video"]);
 
 const BASE_TILE_SIZE = 32;
 const TILE_GAP = 0;
@@ -3724,293 +3732,6 @@ function MiniAnimation({ strength }: { strength: number }) {
   );
 }
 
-function CreationBuilder({ onDone }: { onDone: (spec: CreationSpec) => void }) {
-  const [spec, setSpec] = useState<CreationSpec>({
-    action: null,
-    media: null,
-    style: null,
-    theme: null,
-  });
-  const [previewKey, setPreviewKey] = useState(0);
-
-  const ready = spec.action && spec.media && spec.style && spec.theme;
-
-  const setField = <K extends keyof CreationSpec>(key: K, value: CreationSpec[K]) => {
-    setSpec((current) => ({ ...current, [key]: value }));
-  };
-
-  const handleDrop = (slot: keyof CreationSpec, value: string) => {
-    setField(slot, value);
-  };
-
-  return (
-    <div className="grid md:grid-cols-2 gap-6">
-      <div>
-        <h4 className="font-semibold mb-3">Assemblez votre consigne (drag-and-drop ou clic)</h4>
-        <div className="grid grid-cols-2 gap-3">
-          {Object.entries(CREATION_POOL).map(([slot, items]) => (
-            <div key={slot} className="border rounded-xl p-3 bg-slate-50">
-              <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">
-                {slot}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {items.map((item) => (
-                  <DraggablePill
-                    key={item}
-                    label={item}
-                    onPick={() => setField(slot as keyof CreationSpec, item)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 grid grid-cols-4 gap-3">
-          {(["action", "media", "style", "theme"] as const).map((slot) => (
-            <DropSlot
-              key={slot}
-              label={slot}
-              value={spec[slot] ?? undefined}
-              onSelect={(value) => handleDrop(slot, value)}
-              onClear={() => setField(slot, null)}
-            />
-          ))}
-        </div>
-        <button
-          disabled={!ready}
-          onClick={() => ready && onDone(spec)}
-          className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white disabled:opacity-50"
-        >
-          Générer
-        </button>
-      </div>
-      <div>
-        <h4 className="font-semibold mb-3">Aperçu généré (démo locale)</h4>
-        <div className="border rounded-2xl p-4 bg-white shadow">
-          <GeneratedPreview key={previewKey} spec={spec} />
-          <div className="text-xs text-slate-500 mt-3">
-            Note: ici, un vrai backend IA peut remplacer cet aperçu local.
-          </div>
-        </div>
-        <div className="mt-3 flex gap-2">
-          <button
-            className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200"
-            onClick={() => setPreviewKey((count) => count + 1)}
-          >
-            Rafraîchir
-          </button>
-          <button
-            className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200"
-            onClick={() =>
-              setSpec({ action: null, media: null, style: null, theme: null })
-            }
-          >
-            Réinitialiser
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DraggablePill({
-  label,
-  onPick,
-}: {
-  label: string;
-  onPick: () => void;
-}) {
-  const handleDragStart = (event: DragEvent<HTMLButtonElement>) => {
-    event.dataTransfer.setData("text/plain", label);
-  };
-  return (
-    <button
-      draggable
-      onDragStart={handleDragStart}
-      onClick={onPick}
-      className="px-2 py-1 rounded-full bg-white shadow border text-sm hover:bg-emerald-50"
-    >
-      {label}
-    </button>
-  );
-}
-
-function DropSlot({
-  label,
-  value,
-  onSelect,
-  onClear,
-}: {
-  label: string;
-  value?: string;
-  onSelect: (value: string) => void;
-  onClear: () => void;
-}) {
-  const [isOver, setIsOver] = useState(false);
-
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsOver(false);
-    const dropped = event.dataTransfer.getData("text/plain");
-    if (dropped) {
-      onSelect(dropped);
-    }
-  };
-
-  return (
-    <div
-      onDragOver={(event) => {
-        event.preventDefault();
-        setIsOver(true);
-      }}
-      onDragLeave={() => setIsOver(false)}
-      onDrop={handleDrop}
-      className={classNames(
-        "rounded-xl p-3 border text-sm bg-white min-h-[56px]",
-        isOver && "ring-2 ring-emerald-300"
-      )}
-    >
-      <div className="text-[10px] uppercase tracking-wide text-slate-500">{label}</div>
-      {value ? (
-        <div className="mt-1 flex items-center justify-between">
-          <div className="px-2 py-1 rounded-full bg-emerald-100 text-emerald-800">{value}</div>
-          <button onClick={onClear} className="text-slate-500 hover:text-slate-700">
-            ✕
-          </button>
-        </div>
-      ) : (
-        <div className="mt-1 text-slate-400">Glissez ou cliquez un choix…</div>
-      )}
-    </div>
-  );
-}
-
-function GeneratedPreview({ spec }: { spec: CreationSpec }) {
-  const title = [spec.action, spec.media].filter(Boolean).join(" → ") || "Préparez votre consigne";
-  const subtitle = [spec.style, spec.theme].filter(Boolean).join(" • ") || "Complétez les paramètres";
-  return (
-    <div className="grid md:grid-cols-2 gap-4 items-center">
-      <div>
-        <div className="rounded-xl border p-3 bg-gradient-to-br from-slate-50 to-white">
-          <h5 className="font-semibold">{title}</h5>
-          <p className="text-sm text-slate-600">{subtitle}</p>
-          <ul className="mt-2 text-sm list-disc pl-5 text-slate-700 space-y-1">
-            <li>Contrainte: 150–200 mots, ton accessible.</li>
-            <li>Structure: titre, 3 sections, conclusion.</li>
-            <li>Sortie: Markdown.</li>
-          </ul>
-        </div>
-        <p className="text-xs text-slate-500 mt-2">Texte simulé — remplaçable par une API de génération.</p>
-      </div>
-      <div>
-        <svg viewBox="0 0 300 200" className="w-full h-auto rounded-xl border bg-white">
-          <rect x="10" y="10" width="280" height="180" rx="12" fill="#F1F5F9" />
-          <text x="24" y="50" fontSize="16" fontWeight={600} fill="#0F172A">
-            {title || "Affiche / Article"}
-          </text>
-          <text x="24" y="75" fontSize="12" fill="#334155">
-            {subtitle || "Style / Thème"}
-          </text>
-          <circle cx="250" cy="100" r="28" fill="#e2e8f0" />
-          <circle cx="250" cy="100" r="22" fill="#94a3b8" />
-          <g>
-            <rect x="24" y="95" width="160" height="10" fill="#CBD5E1" />
-            <rect x="24" y="115" width="140" height="10" fill="#E2E8F0" />
-            <rect x="24" y="135" width="170" height="10" fill="#E2E8F0" />
-          </g>
-        </svg>
-        <p className="text-xs text-slate-500 mt-2">Image simulée — remplaçable par une API d'image.</p>
-      </div>
-    </div>
-  );
-}
-
-function DecisionPath({ onDone }: { onDone: (path: string[]) => void }) {
-  const [step, setStep] = useState(0);
-  const [path, setPath] = useState<string[]>([]);
-
-  const choose = (id: string) => {
-    const nextOptions = DECISIONS[step];
-    if (!nextOptions) return;
-    const next = nextOptions.options.find((option) => option.id === id)?.next ?? null;
-    const updatedPath = [...path, id];
-    setPath(updatedPath);
-    if (next == null) {
-      onDone(updatedPath);
-    } else {
-      setStep(next);
-    }
-  };
-
-  const current = DECISIONS[step];
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h4 className="font-semibold mb-1">Étape {step + 1}</h4>
-        <p className="text-slate-700">{current.prompt}</p>
-      </div>
-      <div className="grid md:grid-cols-3 gap-3">
-        {current.options.map((option) => (
-          <button
-            key={option.id}
-            onClick={() => choose(option.id)}
-            className="text-left p-3 rounded-xl border bg-white hover:bg-slate-50"
-          >
-            <div className="font-semibold mb-1">{option.title}</div>
-            <div className="text-sm text-slate-600">{option.impact}</div>
-          </button>
-        ))}
-      </div>
-      {path.length > 0 && (
-        <div className="text-xs text-slate-500">Chemin choisi: {path.join(" → ")}</div>
-      )}
-    </div>
-  );
-}
-
-function EthicsDilemmas({ onDone }: { onDone: (score: number) => void }) {
-  const [index, setIndex] = useState(0);
-  const [total, setTotal] = useState(0);
-
-  const answer = (score: number) => {
-    const nextIndex = index + 1;
-    const cumulative = total + score;
-    const last = nextIndex >= DILEMMAS.length;
-    setTotal(cumulative);
-    if (last) {
-      onDone(Math.round(cumulative / DILEMMAS.length));
-    } else {
-      setIndex(nextIndex);
-    }
-  };
-
-  const dilemma = DILEMMAS[index];
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h4 className="font-semibold">
-          Situation {index + 1} / {DILEMMAS.length}
-        </h4>
-        <p className="text-slate-700">{dilemma.s}</p>
-      </div>
-      <div className="grid md:grid-cols-3 gap-3">
-        {dilemma.options.map((option) => (
-          <button
-            key={option.id}
-            onClick={() => answer(option.score)}
-            className="text-left p-3 rounded-xl border bg-white hover:bg-slate-50"
-          >
-            <div className="font-semibold mb-1">{option.label}</div>
-            <div className="text-sm text-slate-600">{option.fb}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ProgressBar({
   value,
   color,
@@ -4031,19 +3752,88 @@ function ProgressBar({
   );
 }
 
+function renderFieldValue(value: unknown): ReactNode {
+  if (Array.isArray(value)) {
+    return (
+      <ul className="list-disc space-y-1 pl-5">
+        {value.map((entry, index) => (
+          <li key={index} className="text-sm text-slate-700">
+            {renderFieldValue(entry)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (value && typeof value === "object") {
+    return (
+      <div className="space-y-2">
+        {Object.entries(value as Record<string, unknown>).map(([key, entry]) => (
+          <div key={key} className="space-y-1">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {key}
+            </div>
+            <div className="text-sm text-slate-700">{renderFieldValue(entry)}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof value === "string") {
+    return <span>{value.trim() || "—"}</span>;
+  }
+  if (value === null || value === undefined) {
+    return <span className="text-slate-400">—</span>;
+  }
+  return <span>{String(value)}</span>;
+}
+
+function StageAnswerSection({
+  title,
+  answer,
+}: {
+  title: string;
+  answer?: Record<string, unknown>;
+}): JSX.Element | null {
+  if (!answer || Object.keys(answer).length === 0) {
+    return null;
+  }
+  return (
+    <section className="space-y-3">
+      <h4 className="text-sm font-semibold text-slate-800">{title}</h4>
+      <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
+        <div className="space-y-3">
+          {Object.entries(answer).map(([fieldId, value]) => (
+            <div key={fieldId} className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {fieldId}
+              </div>
+              <div className="text-sm text-slate-700">{renderFieldValue(value)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function BadgeView({
   progress,
   onDownloadJSON,
 }: {
-  progress: Progress;
+  progress: ExplorateurProgress;
   onDownloadJSON: () => void;
 }) {
+  const creationScore = progress.creation.done ? 100 : 0;
+  const decisionScore = progress.decision.done ? 100 : 0;
+  const ethicsScore = progress.ethique.averageScore ?? 0;
+  const mairieScore = progress.mairie.done ? 100 : 0;
   const total =
     progress.clarte.score +
-    (progress.ethique.score || 0) +
-    (progress.creation.spec ? 100 : 0) +
-    (progress.decision.choicePath ? 100 : 0);
-  const percent = Math.round((total / 400) * 100);
+    creationScore +
+    decisionScore +
+    ethicsScore +
+    mairieScore;
+  const percent = Math.round(total / 5);
 
   return (
     <div className="flex flex-col md:flex-row gap-6 items-start">
@@ -4060,19 +3850,24 @@ function BadgeView({
           <ProgressBar value={progress.clarte.score} color="emerald" />
           <div className="text-sm flex items-center justify-between">
             <span>Création</span>
-            <span className="tabular-nums">{progress.creation.spec ? 100 : 0}</span>
+            <span className="tabular-nums">{creationScore}</span>
           </div>
-          <ProgressBar value={progress.creation.spec ? 100 : 0} color="blue" />
+          <ProgressBar value={creationScore} color="blue" />
           <div className="text-sm flex items-center justify-between">
             <span>Décision</span>
-            <span className="tabular-nums">{progress.decision.choicePath ? 100 : 0}</span>
+            <span className="tabular-nums">{decisionScore}</span>
           </div>
-          <ProgressBar value={progress.decision.choicePath ? 100 : 0} color="rose" />
+          <ProgressBar value={decisionScore} color="rose" />
           <div className="text-sm flex items-center justify-between">
             <span>Éthique</span>
-            <span className="tabular-nums">{progress.ethique.score}</span>
+            <span className="tabular-nums">{ethicsScore}</span>
           </div>
-          <ProgressBar value={progress.ethique.score} color="violet" />
+          <ProgressBar value={ethicsScore} color="violet" />
+          <div className="text-sm flex items-center justify-between">
+            <span>Mairie</span>
+            <span className="tabular-nums">{mairieScore}</span>
+          </div>
+          <ProgressBar value={mairieScore} color="emerald" />
         </div>
         <div className="mt-4 p-3 rounded-xl bg-slate-50 border">
           <div className="text-sm">Indice global</div>
@@ -4100,17 +3895,98 @@ function BadgeView({
         <p className="text-sm text-slate-600">
           Cette carte résume vos actions. Exportez-la pour dépôt ou portfolio.
         </p>
-        {progress.creation.spec && (
-          <div className="mt-4 text-sm text-slate-700">
-            <div className="font-semibold mb-1">Spécification de création</div>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>action: {progress.creation.spec.action}</li>
-              <li>media: {progress.creation.spec.media}</li>
-              <li>style: {progress.creation.spec.style}</li>
-              <li>theme: {progress.creation.spec.theme}</li>
-            </ul>
-          </div>
-        )}
+        <div className="mt-6 space-y-8">
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
+              Quartier Clarté
+            </h3>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-900">
+              <div className="font-semibold">
+                Option sélectionnée : {progress.clarte.selectedOptionId ?? "—"}
+              </div>
+              {progress.clarte.explanation ? (
+                <p className="mt-2 text-emerald-900/80">
+                  {progress.clarte.explanation}
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+              Quartier Création
+            </h3>
+            {progress.creation.spec ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-sm text-blue-900 space-y-1">
+                <div>
+                  <span className="font-semibold">Action :</span> {progress.creation.spec.action ?? "—"}
+                </div>
+                <div>
+                  <span className="font-semibold">Media :</span> {progress.creation.spec.media ?? "—"}
+                </div>
+                <div>
+                  <span className="font-semibold">Style :</span> {progress.creation.spec.style ?? "—"}
+                </div>
+                <div>
+                  <span className="font-semibold">Thème :</span> {progress.creation.spec.theme ?? "—"}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Spécification en attente.</p>
+            )}
+            <StageAnswerSection
+              title="Réflexion"
+              answer={progress.creation.reflection as Record<string, unknown> | undefined}
+            />
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-700">
+              Quartier Décision
+            </h3>
+            {progress.decision.path && progress.decision.path.length ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-4 text-sm text-rose-900">
+                <div className="font-semibold">Trajectoire choisie</div>
+                <p className="mt-1">
+                  {progress.decision.path.join(" → ")}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Aucun choix enregistré pour le moment.</p>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-violet-700">
+              Quartier Éthique
+            </h3>
+            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 text-sm text-violet-900 space-y-2">
+              <div className="font-semibold">
+                Score moyen : {progress.ethique.averageScore}
+              </div>
+              {progress.ethique.answers.length ? (
+                <ul className="space-y-1 text-violet-900/80">
+                  {progress.ethique.answers.map((answer) => (
+                    <li key={`${answer.dilemmaId}-${answer.optionId}`}>
+                      {answer.dilemmaId} → {answer.optionId} ({answer.score})
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Aucune réponse enregistrée.</p>
+              )}
+            </div>
+            <StageAnswerSection
+              title="Engagement"
+              answer={progress.ethique.commitment as Record<string, unknown> | undefined}
+            />
+          </section>
+
+          <StageAnswerSection
+            title="Mairie — Synthèse"
+            answer={progress.mairie.reflection as Record<string, unknown> | undefined}
+          />
+        </div>
       </div>
     </div>
   );
@@ -4180,6 +4056,8 @@ export default function ExplorateurIA({
   completionId,
   navigateToActivities,
   isEditMode = false,
+  stepSequence,
+  setStepSequence,
 }: ActivityProps) {
   const isMobile = useIsMobile();
   const tileSize = useResponsiveTileSize(isMobile ? "cover" : "contain");
@@ -4187,13 +4065,15 @@ export default function ExplorateurIA({
   const [player, setPlayer] = useState(START);
   const [open, setOpen] = useState<QuarterId | null>(null);
   const [mobilePrompt, setMobilePrompt] = useState<QuarterId | null>(null);
-  const [progress, setProgress] = useState<Progress>({
-    clarte: { done: false, score: 0 },
-    creation: { done: false },
-    decision: { done: false },
-    ethique: { done: false, score: 0 },
-    visited: [],
-  });
+  const [progress, setProgress] = useState<ExplorateurProgress>(
+    () => createInitialProgress()
+  );
+  const [quarterSteps, setQuarterSteps] = useState<QuarterSteps>(() =>
+    expandQuarterSteps(stepSequence, WORLD1_QUARTER_STEPS)
+  );
+  useEffect(() => {
+    setQuarterSteps(expandQuarterSteps(stepSequence, WORLD1_QUARTER_STEPS));
+  }, [stepSequence]);
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
   const [tileset, setTileset] = useTileset();
@@ -4229,12 +4109,7 @@ export default function ExplorateurIA({
         case "ethique":
           return progress.ethique.done;
         case "mairie":
-          return (
-            progress.clarte.done &&
-            progress.creation.done &&
-            progress.decision.done &&
-            progress.ethique.done
-          );
+          return progress.mairie.done;
         default:
           return false;
       }
@@ -4266,6 +4141,27 @@ export default function ExplorateurIA({
   );
   const inventoryTotal = inventoryEntries.length;
   const inventoryProgressLabel = `${inventoryCollected}/${inventoryTotal}`;
+
+  const handleStepConfigChange = useCallback(
+    (stepId: string, config: unknown) => {
+      setQuarterSteps((previous) => {
+        const quarter = getQuarterFromStepId(stepId);
+        if (!quarter) {
+          return previous;
+        }
+        const currentSteps = previous[quarter] ?? [];
+        const nextSteps = currentSteps.map((step) =>
+          step.id === stepId ? { ...step, config } : step
+        );
+        const next: QuarterSteps = { ...previous, [quarter]: nextSteps };
+        if (setStepSequence) {
+          setStepSequence(flattenQuarterSteps(next));
+        }
+        return next;
+      });
+    },
+    [setStepSequence]
+  );
 
   const handleThemeChange = useCallback(
     (themeId: TerrainThemeId) => {
@@ -4383,12 +4279,10 @@ export default function ExplorateurIA({
     if (completionTriggered.current) {
       return;
     }
-    if (
-      progress.clarte.done &&
-      progress.creation.done &&
-      progress.decision.done &&
-      progress.ethique.done
-    ) {
+    const allQuartersCompleted = QUARTER_ORDER.every(
+      (quarter) => progress[quarter].done
+    );
+    if (allQuartersCompleted) {
       completionTriggered.current = true;
       void markCompleted({ triggerCompletionCallback: true });
     }
@@ -4677,47 +4571,46 @@ export default function ExplorateurIA({
     player.y,
   ]);
 
-  const complete = (id: QuarterId, payload?: unknown) => {
-    setProgress((previous) => {
-      const visited = previous.visited.includes(id)
-        ? previous.visited
-        : [...previous.visited, id];
-      const next: Progress = {
-        ...previous,
-        visited,
-        clarte:
-          id === "clarte"
-            ? { done: true, score: typeof payload === "number" ? payload : previous.clarte.score }
-            : previous.clarte,
-        creation:
-          id === "creation"
-            ? { done: true, spec: (payload as CreationSpec) ?? previous.creation.spec }
-            : previous.creation,
-        decision:
-          id === "decision"
-            ? {
-                done: true,
-                choicePath: (payload as string[]) ?? previous.decision.choicePath,
-              }
-            : previous.decision,
-        ethique:
-          id === "ethique"
-            ? { done: true, score: typeof payload === "number" ? payload : previous.ethique.score }
-            : previous.ethique,
-      };
-      return next;
-    });
-    setOpen(null);
-    setCelebrate(true);
-    setTimeout(() => setCelebrate(false), 1800);
-  };
+  const complete = useCallback(
+    (id: QuarterId, payloads: QuarterPayloadMap | undefined) => {
+      setProgress((previous) => {
+        const visited = previous.visited.includes(id)
+          ? previous.visited
+          : [...previous.visited, id];
+        return {
+          ...previous,
+          visited,
+          clarte:
+            id === "clarte"
+              ? updateClarteProgress(previous.clarte, payloads)
+              : previous.clarte,
+          creation:
+            id === "creation"
+              ? updateCreationProgress(previous.creation, payloads)
+              : previous.creation,
+          decision:
+            id === "decision"
+              ? updateDecisionProgress(previous.decision, payloads)
+              : previous.decision,
+          ethique:
+            id === "ethique"
+              ? updateEthicsProgress(previous.ethique, payloads)
+              : previous.ethique,
+          mairie:
+            id === "mairie"
+              ? updateMairieProgress(previous.mairie, payloads)
+              : previous.mairie,
+        } satisfies ExplorateurProgress;
+      });
+      setOpen(null);
+      setCelebrate(true);
+      setTimeout(() => setCelebrate(false), 1800);
+    },
+    []
+  );
 
   const downloadJSON = () => {
-    const data = {
-      activity: "Explorateur IA",
-      timestamp: new Date().toISOString(),
-      progress,
-    };
+    const data = createExplorateurExport(progress);
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });
@@ -4728,6 +4621,141 @@ export default function ExplorateurIA({
     anchor.click();
     URL.revokeObjectURL(url);
   };
+
+  const renderQuarterStep = useCallback(
+    ({
+      step,
+      stepIndex,
+      stepCount,
+      StepComponent,
+      componentProps,
+      context,
+      advance,
+    }: StepSequenceRenderWrapperProps) => {
+      if (!open) {
+        return null;
+      }
+      const quarter = getQuarterFromStepId(step.id) ?? open;
+      const meta = BUILDING_META[quarter];
+      const handleClose = () => setOpen(null);
+      const handlePrevious = () => context.goToStep(stepIndex - 1);
+      const handleNext = () => advance();
+      const canGoBack = stepIndex > 0;
+      const isLastStep = stepIndex === stepCount - 1;
+      const canAdvanceManually =
+        MANUAL_ADVANCE_COMPONENTS.has(step.component) || isEditMode;
+      const indicatorLabel = `Étape ${stepIndex + 1} sur ${stepCount}`;
+      const progressPercent = Math.round(((stepIndex + 1) / stepCount) * 100);
+      const continueLabel = isLastStep ? "Terminer" : "Continuer";
+
+      let stepTitle: string | null = null;
+      const rawConfig = componentProps.config;
+      if (rawConfig && typeof rawConfig === "object") {
+        const maybeTitle = (rawConfig as { title?: unknown }).title;
+        if (typeof maybeTitle === "string" && maybeTitle.trim().length > 0) {
+          stepTitle = maybeTitle;
+        }
+      }
+
+      return (
+        <Modal open onClose={handleClose} title={meta?.label ?? "Quartier"}>
+          <div className="space-y-6">
+            <header className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <span>{meta?.label ?? "Quartier"}</span>
+                <span>{indicatorLabel}</span>
+              </div>
+              <div className="h-1 w-full overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              {stepTitle ? (
+                <h2 className="text-xl font-semibold text-slate-900">
+                  {stepTitle}
+                </h2>
+              ) : null}
+              {isEditMode ? (
+                <nav className="flex flex-wrap gap-2 text-xs">
+                  {context.steps.map((definition, index) => (
+                    <button
+                      key={definition.id}
+                      type="button"
+                      onClick={() => context.goToStep(index)}
+                      className={classNames(
+                        "rounded-full px-3 py-1 font-medium transition",
+                        index === stepIndex
+                          ? "bg-emerald-500 text-white"
+                          : "bg-slate-200 text-slate-700 hover:bg-slate-300"
+                      )}
+                    >
+                      Étape {index + 1}
+                    </button>
+                  ))}
+                </nav>
+              ) : null}
+            </header>
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm sm:p-6">
+                <StepComponent {...componentProps} />
+              </div>
+              {quarter === "mairie" ? (
+                <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm sm:p-6">
+                  <BadgeView progress={progress} onDownloadJSON={downloadJSON} />
+                </div>
+              ) : null}
+            </div>
+            <footer className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrevious}
+                  disabled={!canGoBack}
+                  className={classNames(
+                    "rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition",
+                    canGoBack
+                      ? "bg-white hover:border-emerald-400 hover:text-emerald-600"
+                      : "cursor-not-allowed opacity-50"
+                  )}
+                >
+                  Étape précédente
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-emerald-400 hover:text-emerald-600"
+                >
+                  Fermer
+                </button>
+              </div>
+              <div className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+                {!canAdvanceManually && !isEditMode ? (
+                  <p className="text-xs text-slate-500">
+                    Complétez l'étape pour continuer.
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={!canAdvanceManually}
+                  className={classNames(
+                    "rounded-full px-4 py-2 text-sm font-semibold transition",
+                    canAdvanceManually
+                      ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                      : "cursor-not-allowed bg-slate-200 text-slate-500"
+                  )}
+                >
+                  {continueLabel}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </Modal>
+      );
+    },
+    [downloadJSON, isEditMode, open, progress]
+  );
 
   const at = useMemo(
     () => buildingAt(player.x, player.y),
@@ -5091,7 +5119,7 @@ export default function ExplorateurIA({
                     {building.id === "creation" && (progress.creation.done ? "OK" : "À faire")}
                     {building.id === "decision" && (progress.decision.done ? "OK" : "À faire")}
                     {building.id === "ethique" && (progress.ethique.done ? "OK" : "À faire")}
-                    {building.id === "mairie" && "—"}
+                    {building.id === "mairie" && (progress.mairie.done ? "OK" : "À faire")}
                   </span>
                 </li>
               ))}
@@ -5191,59 +5219,16 @@ export default function ExplorateurIA({
         <InventoryView items={inventoryEntries} />
       </Modal>
 
-      <Modal
-        open={open === "clarte"}
-        onClose={() => setOpen(null)}
-        title="Quartier Clarté"
-      >
-        <p className="text-sm text-slate-600 mb-4">
-          Choisissez la meilleure consigne pour obtenir un plan clair. Pas de saisie:
-          uniquement des options.
-        </p>
-        <ClarteQuiz onDone={(score) => complete("clarte", score)} />
-      </Modal>
-
-      <Modal
-        open={open === "creation"}
-        onClose={() => setOpen(null)}
-        title="Quartier Création"
-      >
-        <p className="text-sm text-slate-600 mb-4">
-          Assemblez une consigne en combinant des paramètres. La génération est simulée côté
-          client.
-        </p>
-        <CreationBuilder onDone={(spec) => complete("creation", spec)} />
-      </Modal>
-
-      <Modal
-        open={open === "decision"}
-        onClose={() => setOpen(null)}
-        title="Quartier Décision"
-      >
-        <p className="text-sm text-slate-600 mb-4">
-          Choisissez une trajectoire. Chaque choix révèle avantages et limites.
-        </p>
-        <DecisionPath onDone={(path) => complete("decision", path)} />
-      </Modal>
-
-      <Modal
-        open={open === "ethique"}
-        onClose={() => setOpen(null)}
-        title="Quartier Éthique"
-      >
-        <p className="text-sm text-slate-600 mb-4">
-          Réagissez à des dilemmes. Retour immédiat sur les enjeux.
-        </p>
-        <EthicsDilemmas onDone={(score) => complete("ethique", score)} />
-      </Modal>
-
-      <Modal
-        open={open === "mairie"}
-        onClose={() => setOpen(null)}
-        title="Mairie — Bilan visuel"
-      >
-        <BadgeView progress={progress} onDownloadJSON={downloadJSON} />
-      </Modal>
+      {open ? (
+        <StepSequenceRenderer
+          key={open}
+          steps={quarterSteps[open] ?? []}
+          isEditMode={isEditMode}
+          onComplete={(payloads) => complete(open, payloads)}
+          onStepConfigChange={handleStepConfigChange}
+          renderStepWrapper={renderQuarterStep}
+        />
+      ) : null}
 
       <footer className="hidden text-center text-xs text-slate-500 md:block">
         Module web auto-portant — aucune saisie de texte requise. © Explorateur IA
