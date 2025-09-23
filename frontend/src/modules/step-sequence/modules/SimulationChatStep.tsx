@@ -893,7 +893,6 @@ export function SimulationChatStep({
                 title="À toi de jouer"
                 roleLabel={roleLabels.user}
                 bubbleClassName="bg-white text-[color:var(--brand-black)] border border-[color:var(--brand-red)]/20 shadow-xl md:max-w-none"
-                containerClassName="w
                 containerClassName="w-full"
                 chipClassName="bg-[color:var(--brand-red)]/15 text-[color:var(--brand-red)]"
               >
