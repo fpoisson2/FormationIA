@@ -146,7 +146,7 @@ function extractYouTubeVideoId(url: string): string | null {
   return trimmedId;
 }
 
-function getYouTubeEmbedUrl(url: string): string | null {
+function getYouTubeEmbedUrl(url: string, origin?: string): string | null {
   const videoId = extractYouTubeVideoId(url);
   if (!videoId) {
     return null;
@@ -154,6 +154,11 @@ function getYouTubeEmbedUrl(url: string): string | null {
 
   const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
   embedUrl.searchParams.set("rel", "0");
+  embedUrl.searchParams.set("playsinline", "1");
+  embedUrl.searchParams.set("enablejsapi", "1");
+  if (origin) {
+    embedUrl.searchParams.set("origin", origin);
+  }
   return embedUrl.toString();
 }
 
@@ -218,6 +223,14 @@ export function VideoStep({
   const { onChange, ...content } = typedConfig;
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [autoplayFailed, setAutoplayFailed] = useState(false);
+  const [youtubeOrigin, setYoutubeOrigin] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.location) {
+      return;
+    }
+    setYoutubeOrigin(window.location.origin);
+  }, []);
 
   const notifyChange = useCallback(
     (nextContent: VideoStepContent) => {
@@ -241,8 +254,8 @@ export function VideoStep({
   );
   const youtubeSourceUrl = youtubeSource?.url ?? "";
   const youtubeEmbedUrl = useMemo(
-    () => getYouTubeEmbedUrl(youtubeSourceUrl),
-    [youtubeSourceUrl]
+    () => getYouTubeEmbedUrl(youtubeSourceUrl, youtubeOrigin ?? undefined),
+    [youtubeOrigin, youtubeSourceUrl]
   );
   const mp4Signature = useMemo(
     () => mp4Sources.map((source) => source.url).join("|"),
@@ -526,10 +539,13 @@ export function VideoStep({
           {youtubeEmbedUrl ? (
             <div className="relative aspect-video w-full overflow-hidden rounded-md bg-black">
               <iframe
+                key={youtubeEmbedUrl}
                 className="absolute left-0 top-0 h-full w-full"
                 src={youtubeEmbedUrl}
                 title="Vidéo YouTube"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerPolicy="strict-origin-when-cross-origin"
+                loading="lazy"
                 allowFullScreen
               />
             </div>
