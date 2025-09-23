@@ -48,39 +48,69 @@ export function createArrivalEffect(): ArrivalEffect {
 
     const now = context.currentTime;
 
+    const flightDuration = 2.4;
+    const engineDuration = flightDuration + 0.18;
+    const landingChimeStart = flightDuration - 0.55;
+    const landingChimeEnd = landingChimeStart + 0.55;
+
     const sweepGain = context.createGain();
     sweepGain.gain.setValueAtTime(0.0001, now);
-    sweepGain.gain.exponentialRampToValueAtTime(0.55, now + 0.05);
-    sweepGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.1);
+    sweepGain.gain.exponentialRampToValueAtTime(0.6, now + 0.1);
+    sweepGain.gain.exponentialRampToValueAtTime(0.0001, now + flightDuration);
 
     const sweep = context.createOscillator();
     sweep.type = "sine";
     sweep.frequency.setValueAtTime(880, now);
-    sweep.frequency.exponentialRampToValueAtTime(220, now + 1);
+    sweep.frequency.exponentialRampToValueAtTime(240, now + flightDuration - 0.1);
     sweep.connect(sweepGain);
     sweepGain.connect(masterGain);
     sweep.start(now);
-    sweep.stop(now + 1.1);
+    sweep.stop(now + flightDuration + 0.08);
+
+    const engineGain = context.createGain();
+    engineGain.gain.setValueAtTime(0.0001, now);
+    engineGain.gain.exponentialRampToValueAtTime(0.24, now + 0.18);
+    engineGain.gain.exponentialRampToValueAtTime(0.0001, now + engineDuration);
+
+    const engine = context.createOscillator();
+    engine.type = "sawtooth";
+    engine.frequency.setValueAtTime(180, now);
+    engine.frequency.exponentialRampToValueAtTime(70, now + engineDuration);
+    engine.connect(engineGain);
+    engineGain.connect(masterGain);
+    engine.start(now);
+    engine.stop(now + engineDuration + 0.08);
 
     const blipGain = context.createGain();
-    blipGain.gain.setValueAtTime(0.0001, now + 0.3);
-    blipGain.gain.exponentialRampToValueAtTime(0.35, now + 0.36);
-    blipGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.75);
+    blipGain.gain.setValueAtTime(0.0001, now + landingChimeStart);
+    blipGain.gain.exponentialRampToValueAtTime(0.4, now + landingChimeStart + 0.06);
+    blipGain.gain.exponentialRampToValueAtTime(0.0001, now + landingChimeEnd);
 
     const blip = context.createOscillator();
     blip.type = "triangle";
-    blip.frequency.setValueAtTime(1320, now + 0.3);
-    blip.frequency.exponentialRampToValueAtTime(440, now + 0.65);
+    blip.frequency.setValueAtTime(1320, now + landingChimeStart);
+    blip.frequency.exponentialRampToValueAtTime(420, now + landingChimeEnd - 0.08);
     blip.connect(blipGain);
     blipGain.connect(masterGain);
-    blip.start(now + 0.3);
-    blip.stop(now + 0.75);
+    blip.start(now + landingChimeStart);
+    blip.stop(now + landingChimeEnd + 0.05);
 
     return new Promise<void>((resolve) => {
-      const timeout = window.setTimeout(resolve, 1100);
-      sweep.onended = () => {
-        window.clearTimeout(timeout);
+      let resolved = false;
+      const finish = () => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
         resolve();
+      };
+      const timeout = window.setTimeout(
+        finish,
+        Math.ceil((engineDuration + 0.12) * 1000)
+      );
+      engine.onended = () => {
+        window.clearTimeout(timeout);
+        finish();
       };
     });
   };

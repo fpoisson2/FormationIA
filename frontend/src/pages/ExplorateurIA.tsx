@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
   type Ref,
+  type CSSProperties,
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
@@ -2519,7 +2520,9 @@ const START_MARKER_COORD = atlas("mapTile_179.png");
 const GOAL_MARKER_COORD = [...DEFAULT_ATLAS.map.houses.townHall] as TileCoord;
 const GATE_MARKER_COORD = atlas("mapTile_044.png");
 const ARRIVAL_SHIP_COORD = atlas("mapTile_059.png");
-const ARRIVAL_TOTAL_DURATION_MS = 1500;
+const ARRIVAL_FLIGHT_DURATION_MS = 2400;
+const ARRIVAL_GLOW_DURATION_MS = 2500;
+const ARRIVAL_TOTAL_DURATION_MS = ARRIVAL_GLOW_DURATION_MS + 200;
 
 function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   currentWorldSeed = seed >>> 0;
@@ -2891,28 +2894,28 @@ function PlayerSprite({
 }
 
 function IntroArrival({ tileSize }: { tileSize: number }) {
+  const glowStyle: CSSProperties = {
+    background:
+      "radial-gradient(circle at 50% 60%, rgba(16, 185, 129, 0.45), rgba(16, 185, 129, 0))",
+    filter: "blur(0.5px)",
+    animation: `alien-arrival-glow ${ARRIVAL_GLOW_DURATION_MS}ms ease-out forwards`,
+    willChange: "opacity, transform",
+  };
+
+  const shipStyle: CSSProperties = {
+    animation: `alien-arrival-flight ${ARRIVAL_FLIGHT_DURATION_MS}ms cubic-bezier(0.16, 0.9, 0.22, 1.08) forwards`,
+    willChange: "transform, opacity",
+    "--alien-arrival-unit": `${tileSize}px`,
+  };
+
   return (
     <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
       <div
         className="relative flex items-center justify-center"
         style={{ width: tileSize, height: tileSize }}
       >
-        <div
-          className="absolute inset-0 rounded-full"
-          style={{
-            background:
-              "radial-gradient(circle at 50% 60%, rgba(16, 185, 129, 0.45), rgba(16, 185, 129, 0))",
-            filter: "blur(0.5px)",
-            animation: "alien-arrival-glow 1200ms ease-out forwards",
-          }}
-        />
-        <div
-          className="absolute inset-0 flex items-center justify-center"
-          style={{
-            animation:
-              "alien-arrival-flight 1100ms cubic-bezier(0.18, 0.88, 0.32, 1.08) forwards",
-          }}
-        >
+        <div className="absolute inset-0 rounded-full" style={glowStyle} />
+        <div className="absolute inset-0 flex items-center justify-center" style={shipStyle}>
           <SpriteFromAtlas
             ts={DEFAULT_ATLAS}
             coord={ARRIVAL_SHIP_COORD}
@@ -5341,16 +5344,76 @@ export default function ExplorateurIA({
               100% { transform: translateY(0) scale(1); opacity: 1; }
             }
             @keyframes alien-arrival-flight {
-              0% { transform: translate3d(-140%, -170%, 0) scale(0.85); opacity: 0; }
-              55% { opacity: 1; }
-              70% { transform: translate3d(8%, -6%, 0) scale(1.06); }
-              85% { transform: translate3d(-3%, 2%, 0) scale(0.98); }
-              100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0; }
+              0% {
+                transform: translate3d(
+                    calc(var(--alien-arrival-unit, 32px) * -18),
+                    calc(var(--alien-arrival-unit, 32px) * -15),
+                    0
+                  )
+                  scale(0.6)
+                  rotate(-18deg);
+                opacity: 0;
+              }
+              22% {
+                transform: translate3d(
+                    calc(var(--alien-arrival-unit, 32px) * -11.5),
+                    calc(var(--alien-arrival-unit, 32px) * -11.5),
+                    0
+                  )
+                  scale(0.72)
+                  rotate(-11deg);
+                opacity: 0.85;
+              }
+              46% {
+                transform: translate3d(
+                    calc(var(--alien-arrival-unit, 32px) * -7),
+                    calc(var(--alien-arrival-unit, 32px) * -9.5),
+                    0
+                  )
+                  scale(0.82)
+                  rotate(-7deg);
+                opacity: 1;
+              }
+              68% {
+                transform: translate3d(
+                    calc(var(--alien-arrival-unit, 32px) * 11),
+                    calc(var(--alien-arrival-unit, 32px) * -5.5),
+                    0
+                  )
+                  scale(1.1)
+                  rotate(9deg);
+                opacity: 1;
+              }
+              82% {
+                transform: translate3d(
+                    calc(var(--alien-arrival-unit, 32px) * 5.8),
+                    calc(var(--alien-arrival-unit, 32px) * 4.6),
+                    0
+                  )
+                  scale(1.02)
+                  rotate(4deg);
+                opacity: 1;
+              }
+              92% {
+                transform: translate3d(
+                    calc(var(--alien-arrival-unit, 32px) * -2.6),
+                    calc(var(--alien-arrival-unit, 32px) * 2.1),
+                    0
+                  )
+                  scale(0.94)
+                  rotate(-4deg);
+                opacity: 1;
+              }
+              100% {
+                transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+                opacity: 0;
+              }
             }
             @keyframes alien-arrival-glow {
               0% { opacity: 0; transform: scale(0.6); }
-              40% { opacity: 0.85; transform: scale(1.05); }
-              100% { opacity: 0; transform: scale(1.25); }
+              55% { opacity: 0.9; transform: scale(1.1); }
+              82% { opacity: 0.55; transform: scale(1.35); }
+              100% { opacity: 0; transform: scale(1.5); }
             }
             @keyframes alien-arrival-player {
               0% { transform: translateY(12px) scale(0.75); opacity: 0; }
