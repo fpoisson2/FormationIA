@@ -37,6 +37,8 @@ export {
   registerStepComponent,
 };
 
+export * from "./modules";
+
 export type {
   StepDefinition,
   StepComponentProps,
