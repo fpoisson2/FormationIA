@@ -16,7 +16,7 @@ import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
 import WorkshopExperience from "../pages/WorkshopExperience";
-import { StepSequenceActivity } from "../modules/step-sequence";
+import { StepSequenceActivity, type StepDefinition } from "../modules/step-sequence";
 const LazyExplorateurIA = lazy(() => import("../pages/ExplorateurIA"));
 
 const ExplorateurIALoader: ComponentType<ActivityProps> = (props) => (
@@ -82,6 +82,7 @@ export interface ActivityProps {
   navigateToActivities: () => void;
   isEditMode?: boolean;
   enabled?: boolean;
+  stepSequence?: StepDefinition[];
 }
 
 export const COMPONENT_REGISTRY = {
@@ -101,6 +102,7 @@ interface ActivityCatalogEntryDefaults {
   layout?: ActivityLayoutOptions;
   card: ActivityCardDefinition;
   enabled?: boolean;
+  stepSequence?: StepDefinition[];
 }
 
 interface ActivityCatalogEntry {
@@ -297,6 +299,7 @@ export interface ActivityConfigOverrides {
   layout?: Partial<ActivityLayoutOptions>;
   card?: ActivityCardOverrides;
   completionId?: string;
+  stepSequence?: StepDefinition[];
 }
 
 export interface ActivityConfigEntry {
@@ -308,6 +311,7 @@ export interface ActivityConfigEntry {
   header?: ActivityHeaderConfig;
   layout?: ActivityLayoutOptions;
   card?: ActivityCardDefinition;
+  stepSequence?: StepDefinition[];
   overrides?: ActivityConfigOverrides | null;
 }
 
@@ -321,6 +325,7 @@ export interface ActivityDefinition {
   layout?: ActivityLayoutOptions;
   card: ActivityCardDefinition;
   enabled?: boolean;
+  stepSequence?: StepDefinition[];
 }
 
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
@@ -369,6 +374,43 @@ function cloneCard(card: ActivityCardDefinition): ActivityCardDefinition {
     highlights: [...card.highlights],
     cta: { ...card.cta },
   };
+}
+
+function cloneStepSequence(
+  steps: StepDefinition[] | undefined
+): StepDefinition[] | undefined {
+  if (!steps) {
+    return undefined;
+  }
+  return steps.map((step) => ({ ...step }));
+}
+
+function mergeStepSequence(
+  base: StepDefinition[] | undefined,
+  override: StepDefinition[] | undefined
+): StepDefinition[] | undefined {
+  if (!base && !override) {
+    return undefined;
+  }
+  if (!base || base.length === 0) {
+    return cloneStepSequence(override);
+  }
+  if (!override || override.length === 0) {
+    return cloneStepSequence(base);
+  }
+
+  const baseMap = new Map(base.map((step) => [step.id, step]));
+  const overrideMap = new Map(override.map((step) => [step.id, step]));
+  const mergedBase = base.map((step) => {
+    const overrideStep = overrideMap.get(step.id);
+    return overrideStep ? { ...step, ...overrideStep } : { ...step };
+  });
+
+  const mergedExtra = override
+    .filter((step) => !baseMap.has(step.id))
+    .map((step) => ({ ...step }));
+
+  return [...mergedBase, ...mergedExtra];
 }
 
 function buildFallbackDefinition(
@@ -420,6 +462,7 @@ function buildFallbackDefinition(
     layout: entry?.layout ? cloneLayout(entry.layout) : undefined,
     card: baseCard,
     enabled: entry?.enabled !== false,
+    stepSequence: cloneStepSequence(entry?.stepSequence),
   };
 }
 
@@ -443,6 +486,7 @@ function buildDefinitionFromCatalog(
     layout: cloneLayout(defaults.layout),
     card: cloneCard(defaults.card),
     enabled: defaults.enabled !== false,
+    stepSequence: cloneStepSequence(defaults.stepSequence),
   };
 }
 
@@ -485,6 +529,67 @@ function arraysEqual<T>(a: T[] | undefined, b: T[] | undefined): boolean {
     return false;
   }
   return a.every((value, index) => value === b[index]);
+}
+
+function configsEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (typeof a !== typeof b) {
+    return false;
+  }
+  if (typeof a !== "object" || !a || !b) {
+    return false;
+  }
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("Unable to compare step configurations", error);
+    }
+    return false;
+  }
+}
+
+function stepDefinitionsEqual(
+  a: StepDefinition,
+  b: StepDefinition
+): boolean {
+  return (
+    a.id === b.id &&
+    a.component === b.component &&
+    configsEqual(a.config, b.config)
+  );
+}
+
+function diffStepSequence(
+  base: StepDefinition[] | undefined,
+  current: StepDefinition[] | undefined
+): StepDefinition[] | undefined {
+  const normalizedBase = base ?? [];
+  const normalizedCurrent = current ?? [];
+
+  if (normalizedCurrent.length === 0) {
+    return normalizedBase.length === 0 ? undefined : [];
+  }
+
+  if (normalizedBase.length !== normalizedCurrent.length) {
+    return normalizedCurrent.map((step) => ({ ...step }));
+  }
+
+  const hasDifference = normalizedCurrent.some((step, index) => {
+    const baseStep = normalizedBase[index];
+    if (!baseStep) {
+      return true;
+    }
+    return !stepDefinitionsEqual(baseStep, step);
+  });
+
+  if (!hasDifference) {
+    return undefined;
+  }
+
+  return normalizedCurrent.map((step) => ({ ...step }));
 }
 
 function diffHeader(
@@ -561,6 +666,7 @@ export function resolveActivityDefinition(
   const layoutOverride = overrides?.layout ?? entry.layout;
   const cardOverride = overrides?.card ?? entry.card;
   const completionOverride = overrides?.completionId ?? entry.completionId;
+  const stepSequenceOverride = overrides?.stepSequence ?? entry.stepSequence;
 
   const header = headerOverride
     ? { ...base.header, ...headerOverride }
@@ -581,6 +687,8 @@ export function resolveActivityDefinition(
       }
     : base.card;
 
+  const stepSequence = mergeStepSequence(base.stepSequence, stepSequenceOverride);
+
   const enabled =
     entry.enabled !== undefined
       ? entry.enabled !== false
@@ -599,6 +707,7 @@ export function resolveActivityDefinition(
     layout,
     card,
     enabled,
+    stepSequence,
   };
 }
 
@@ -621,6 +730,14 @@ export function serializeActivityDefinition(
   const cardDiff = diffCard(base.card, definition.card);
   if (cardDiff) {
     overrides.card = cardDiff;
+  }
+
+  const stepSequenceDiff = diffStepSequence(
+    base.stepSequence,
+    definition.stepSequence
+  );
+  if (stepSequenceDiff !== undefined) {
+    overrides.stepSequence = stepSequenceDiff;
   }
 
   if (
@@ -928,6 +1045,7 @@ export function buildActivityElement(
             navigateToActivities={handleNavigateToActivities}
             isEditMode={isEditMode}
             enabled={currentDefinition.enabled !== false}
+            stepSequence={currentDefinition.stepSequence}
           />
         ) : (
           <div className="space-y-4 rounded-3xl border border-red-200 bg-red-50 p-6 text-red-800">
