@@ -1,4 +1,4 @@
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState, useId } from "react";
 
 import InfoCard from "../../../components/InfoCard";
 import {
@@ -58,6 +58,9 @@ export interface DualModelComparisonCopyConfig {
   title?: string;
   description?: string;
   backCtaLabel?: string;
+  promptLabel?: string;
+  promptPlaceholder?: string;
+  promptHelper?: string;
   launchCta?: DualModelComparisonLaunchCtaConfig;
   variantTitles?: Partial<Record<DualModelComparisonVariant, string>>;
   variantTitlePattern?: string;
@@ -88,6 +91,7 @@ export interface DualModelComparisonPayload {
   configB: ModelConfig;
   summaryA: string;
   summaryB: string;
+  prompt: string;
 }
 
 export type DualModelComparisonStepState = DualModelComparisonPayload;
@@ -127,6 +131,9 @@ interface NormalizedCopyConfig {
   title: string;
   description?: string;
   backCtaLabel?: string;
+  promptLabel: string;
+  promptPlaceholder: string;
+  promptHelper?: string;
   launchCta: NormalizedLaunchCtaConfig;
   variantTitles: Record<DualModelComparisonVariant, string>;
   variantStatus: NormalizedStatusConfig;
@@ -155,7 +162,7 @@ const DEFAULT_VARIANT_TITLES: Record<DualModelComparisonVariant, string> = {
 const DEFAULT_LAUNCH_CTA: NormalizedLaunchCtaConfig = {
   idle: "Lancer les deux requêtes",
   loading: "Réponses en cours…",
-  missingContext: "Ajoutez un texte source avant de lancer la génération.",
+  missingContext: "Ajoutez un prompt avant de lancer la génération.",
 };
 
 const DEFAULT_STATUS: NormalizedStatusConfig = {
@@ -178,6 +185,8 @@ const DEFAULT_SUMMARY: NormalizedSummaryConfig = {
 
 const DEFAULT_COPY: NormalizedCopyConfig = {
   title: "Comparez deux configurations IA",
+  promptLabel: "Décrivez la consigne à soumettre",
+  promptPlaceholder: "Décrivez le besoin ou la tâche attendue pour vos deux variantes.",
   launchCta: DEFAULT_LAUNCH_CTA,
   variantTitles: { ...DEFAULT_VARIANT_TITLES },
   variantStatus: DEFAULT_STATUS,
@@ -261,6 +270,21 @@ const normalizeCopy = (
 
   if (typeof copy.backCtaLabel === "string" && copy.backCtaLabel.trim()) {
     base.backCtaLabel = copy.backCtaLabel;
+  }
+
+  if (typeof copy.promptLabel === "string" && copy.promptLabel.trim()) {
+    base.promptLabel = copy.promptLabel;
+  }
+
+  if (
+    typeof copy.promptPlaceholder === "string" &&
+    copy.promptPlaceholder.trim()
+  ) {
+    base.promptPlaceholder = copy.promptPlaceholder;
+  }
+
+  if (typeof copy.promptHelper === "string" && copy.promptHelper.trim()) {
+    base.promptHelper = copy.promptHelper;
   }
 
   if (copy.launchCta && isPlainObject(copy.launchCta)) {
@@ -502,7 +526,8 @@ const normalizeConfig = (
 
 const buildInitialState = (
   payload: unknown,
-  defaults: NormalizedDualModelComparisonConfig
+  defaults: NormalizedDualModelComparisonConfig,
+  fallbackPrompt: string
 ): DualModelComparisonPayload => {
   if (
     payload &&
@@ -512,11 +537,14 @@ const buildInitialState = (
   ) {
     const typed = payload as DualModelComparisonPayload;
     if (isModelConfig(typed.configA) && isModelConfig(typed.configB)) {
+      const promptFromPayload =
+        typeof typed.prompt === "string" ? typed.prompt : "";
       return {
         configA: { ...typed.configA },
         configB: { ...typed.configB },
         summaryA: typeof typed.summaryA === "string" ? typed.summaryA : "",
         summaryB: typeof typed.summaryB === "string" ? typed.summaryB : "",
+        prompt: promptFromPayload.trim().length ? promptFromPayload : fallbackPrompt,
       };
     }
   }
@@ -526,6 +554,7 @@ const buildInitialState = (
     configB: { ...defaults.variants.B.defaultConfig },
     summaryA: "",
     summaryB: "",
+    prompt: fallbackPrompt,
   };
 };
 
@@ -560,8 +589,8 @@ export function DualModelComparisonStep({
   }, [payloads, normalizedConfig.contextField, normalizedConfig.contextStepId]);
 
   const initialState = useMemo(
-    () => buildInitialState(payload, normalizedConfig),
-    [payload, normalizedConfig]
+    () => buildInitialState(payload, normalizedConfig, contextState.sourceText),
+    [payload, normalizedConfig, contextState.sourceText]
   );
 
   const [configA, setConfigA] = useState<ModelConfig>(initialState.configA);
@@ -572,24 +601,25 @@ export function DualModelComparisonStep({
   const [loadingB, setLoadingB] = useState(false);
   const [errorA, setErrorA] = useState<string | null>(null);
   const [errorB, setErrorB] = useState<string | null>(null);
+  const [promptText, setPromptText] = useState(initialState.prompt);
+  const [promptError, setPromptError] = useState<string | null>(null);
+
+  const promptFieldId = useId();
 
   useEffect(() => {
     setConfigA(initialState.configA);
     setConfigB(initialState.configB);
     setSummaryA(initialState.summaryA);
     setSummaryB(initialState.summaryB);
+    setPromptText(initialState.prompt);
+    setPromptError(null);
   }, [
     initialState.configA,
     initialState.configB,
     initialState.summaryA,
     initialState.summaryB,
+    initialState.prompt,
   ]);
-
-  useEffect(() => {
-    if (!contextState.sourceText.trim() && normalizedConfig.contextStepId) {
-      goToStep(normalizedConfig.contextStepId);
-    }
-  }, [contextState.sourceText, goToStep, normalizedConfig.contextStepId]);
 
   const handleConfigChange = useCallback(
     (
@@ -608,8 +638,8 @@ export function DualModelComparisonStep({
   );
 
   const disabled = useMemo(
-    () => !contextState.sourceText.trim() || isEditMode,
-    [contextState.sourceText, isEditMode]
+    () => !promptText.trim() || isEditMode,
+    [promptText, isEditMode]
   );
 
   const canProceed = useMemo(
@@ -618,11 +648,16 @@ export function DualModelComparisonStep({
   );
 
   const handleLaunch = useCallback(async () => {
-    if (disabled) {
-      setErrorA(normalizedConfig.copy.launchCta.missingContext);
-      setErrorB(normalizedConfig.copy.launchCta.missingContext);
+    const trimmedPrompt = promptText.trim();
+    if (!trimmedPrompt || isEditMode) {
+      const message = normalizedConfig.copy.launchCta.missingContext;
+      setPromptError(message);
+      setErrorA(message);
+      setErrorB(message);
       return;
     }
+
+    setPromptError(null);
 
     const variants: Record<DualModelComparisonVariant, VariantRequestParameters> = {
       A: {
@@ -645,20 +680,20 @@ export function DualModelComparisonStep({
       },
     };
 
-    await runComparisonRequests(contextState.sourceText, variants, {
+    await runComparisonRequests(trimmedPrompt, variants, {
       endpoint: normalizedConfig.request.endpoint,
       systemPrompt: normalizedConfig.request.systemPrompt,
     });
   }, [
     configA,
     configB,
-    contextState.sourceText,
-    disabled,
     normalizedConfig.request.endpoint,
     normalizedConfig.request.systemPrompt,
     normalizedConfig.variants.A.preset,
     normalizedConfig.variants.B.preset,
     normalizedConfig.copy.launchCta.missingContext,
+    promptText,
+    isEditMode,
   ]);
 
   const handleAdvance = useCallback(() => {
@@ -670,11 +705,51 @@ export function DualModelComparisonStep({
       configB,
       summaryA,
       summaryB,
+      prompt: promptText.trim(),
     });
-  }, [canProceed, configA, configB, isEditMode, onAdvance, summaryA, summaryB]);
+  }, [
+    canProceed,
+    configA,
+    configB,
+    isEditMode,
+    onAdvance,
+    summaryA,
+    summaryB,
+    promptText,
+  ]);
 
   return (
     <div className="space-y-12">
+      <section className="page-section landing-panel bg-white/95 animate-section">
+        <div className="space-y-3">
+          <label
+            htmlFor={promptFieldId}
+            className="text-sm font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]"
+          >
+            {normalizedConfig.copy.promptLabel}
+          </label>
+          <textarea
+            id={promptFieldId}
+            value={promptText}
+            onChange={(event) => {
+              setPromptText(event.target.value);
+              setPromptError(null);
+            }}
+            placeholder={normalizedConfig.copy.promptPlaceholder}
+            className="min-h-[160px] w-full rounded-3xl border border-white/60 bg-white/80 p-4 text-sm text-[color:var(--brand-black)] shadow-inner focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+            disabled={isEditMode}
+          />
+          {normalizedConfig.copy.promptHelper && (
+            <p className="text-xs text-[color:var(--brand-charcoal)]/80">
+              {normalizedConfig.copy.promptHelper}
+            </p>
+          )}
+          {promptError && (
+            <p className="text-xs text-red-600">{promptError}</p>
+          )}
+        </div>
+      </section>
+
       <section className="page-section landing-panel bg-white/95 animate-section">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">

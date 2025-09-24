@@ -40,13 +40,13 @@ const resolveEndpoint = (
 };
 
 const buildRequestBody = (
-  sourceText: string,
+  prompt: string,
   config: ModelConfig,
   systemPrompt: string | undefined,
   preset: Record<string, unknown> | undefined
 ): Record<string, unknown> => {
   const body: Record<string, unknown> = {
-    text: sourceText,
+    text: prompt,
     model: config.model,
     verbosity: config.verbosity,
     thinking: config.thinking,
@@ -77,7 +77,7 @@ const createHeaders = (): HeadersInit => {
 
 const streamVariantResponse = async (
   url: string,
-  sourceText: string,
+  prompt: string,
   options: ComparisonRequestOptions,
   { config, handlers, preset }: VariantRequestParameters
 ): Promise<void> => {
@@ -91,7 +91,7 @@ const streamVariantResponse = async (
     const response = await fetch(url, {
       method: "POST",
       headers: createHeaders(),
-      body: JSON.stringify(buildRequestBody(sourceText, config, options.systemPrompt, preset)),
+      body: JSON.stringify(buildRequestBody(prompt, config, options.systemPrompt, preset)),
     });
 
     if (!response.ok || !response.body) {
@@ -121,7 +121,7 @@ const streamVariantResponse = async (
 };
 
 export const runComparisonRequests = async (
-  sourceText: string,
+  prompt: string,
   variants: Record<ComparisonVariant, VariantRequestParameters>,
   options: ComparisonRequestOptions
 ): Promise<void> => {
@@ -129,7 +129,7 @@ export const runComparisonRequests = async (
 
   await Promise.all(
     (Object.keys(variants) as ComparisonVariant[]).map((key) =>
-      streamVariantResponse(url, sourceText, options, variants[key])
+      streamVariantResponse(url, prompt, options, variants[key])
     )
   );
 };
