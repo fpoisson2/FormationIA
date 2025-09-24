@@ -14,9 +14,11 @@ import type {
 import {
   StepSequenceContext,
   type StepComponentProps,
+  type StepComponentWithMetadata,
   type StepDefinition,
   type StepRegistry,
   type StepSequenceContextValue,
+  type StepSequenceWrapperPreference,
 } from "./types";
 
 export function StepSequenceContainer(
@@ -57,4 +59,6 @@ export type {
   StepSequenceContextValue,
   StepSequenceRendererProps,
   StepSequenceRenderWrapperProps,
+  StepComponentWithMetadata,
+  StepSequenceWrapperPreference,
 };

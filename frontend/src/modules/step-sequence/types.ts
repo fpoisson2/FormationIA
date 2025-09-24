@@ -17,7 +17,13 @@ export interface StepComponentProps {
   onUpdateConfig: (config: unknown) => void;
 }
 
-export type StepRegistry = Record<string, ComponentType<StepComponentProps>>;
+export type StepSequenceWrapperPreference = "default" | "bare";
+
+export type StepComponentWithMetadata = ComponentType<StepComponentProps> & {
+  stepSequenceWrapper?: StepSequenceWrapperPreference;
+};
+
+export type StepRegistry = Record<string, StepComponentWithMetadata>;
 
 export interface StepSequenceContextValue {
   stepIndex: number;

@@ -5,13 +5,18 @@ import ExplorateurIA, {
   type ExplorateurIATerrainConfig,
 } from "../../../../pages/ExplorateurIA";
 import { registerStepComponent } from "../../registry";
-import type { StepComponentProps } from "../../types";
+import type {
+  StepComponentProps,
+  StepComponentWithMetadata,
+} from "../../types";
 
 export function ExplorateurWorldStep(
   props: StepComponentProps
 ): JSX.Element {
   return <ExplorateurIA {...props} />;
 }
+
+(ExplorateurWorldStep as StepComponentWithMetadata).stepSequenceWrapper = "bare";
 
 registerStepComponent("explorateur-world", ExplorateurWorldStep);
 

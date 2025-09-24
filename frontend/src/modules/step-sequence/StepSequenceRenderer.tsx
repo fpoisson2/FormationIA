@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentType,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { getStepComponent } from "./registry";
 import { StepSequenceContext } from "./types";
@@ -12,13 +6,14 @@ import type {
   StepComponentProps,
   StepDefinition,
   StepSequenceContextValue,
+  StepComponentWithMetadata,
 } from "./types";
 
 export interface StepSequenceRenderWrapperProps {
   step: StepDefinition;
   stepIndex: number;
   stepCount: number;
-  StepComponent: ComponentType<StepComponentProps>;
+  StepComponent: StepComponentWithMetadata;
   componentProps: StepComponentProps;
   context: StepSequenceContextValue;
   advance: (payload?: unknown) => void;

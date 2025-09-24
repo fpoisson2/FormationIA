@@ -5,7 +5,7 @@ import {
   StepSequenceRenderer,
   type StepSequenceRenderWrapperProps,
 } from "./StepSequenceRenderer";
-import type { StepDefinition } from "./types";
+import type { StepDefinition, StepSequenceWrapperPreference } from "./types";
 import { useActivityCompletion } from "../../hooks/useActivityCompletion";
 
 export type StepSequenceActivityConfig = {
@@ -128,6 +128,13 @@ export function StepSequenceActivity({
       context,
       advance,
     }: StepSequenceRenderWrapperProps) => {
+      const wrapperPreference: StepSequenceWrapperPreference =
+        StepComponent.stepSequenceWrapper ?? "default";
+
+      if (wrapperPreference === "bare") {
+        return <StepComponent {...componentProps} />;
+      }
+
       const canGoBack = stepIndex > 0;
       const isLastStep = stepIndex === stepCount - 1;
       const showContinueButton =
