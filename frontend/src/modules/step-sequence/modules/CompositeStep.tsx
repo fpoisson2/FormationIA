@@ -89,6 +89,14 @@ export function CompositeStep({
     () => pickInitialPayloads(modules, payload)
   );
 
+  const aggregatedPayloads = useMemo(() => {
+    const basePayloads = parentContext ? parentContext.payloads : {};
+    return {
+      ...basePayloads,
+      ...modulePayloads,
+    };
+  }, [modulePayloads, parentContext]);
+
   useEffect(() => {
     setModulePayloads(pickInitialPayloads(modules, payload));
   }, [modules, payload]);
@@ -162,10 +170,7 @@ export function CompositeStep({
       const childContext: StepSequenceContextValue = parentContext
         ? {
             ...parentContext,
-            payloads: {
-              ...parentContext.payloads,
-              [module.id]: modulePayloads[module.id],
-            },
+            payloads: aggregatedPayloads,
             onAdvance: (childPayload?: unknown) =>
               handleModuleAdvance(module.id, childPayload),
             onUpdateConfig: (nextConfig: unknown) =>
@@ -179,7 +184,7 @@ export function CompositeStep({
               component: item.component,
               config: item.config,
             })),
-            payloads: { [module.id]: modulePayloads[module.id] },
+            payloads: aggregatedPayloads,
             isEditMode: effectiveIsEditMode,
             onAdvance: (childPayload?: unknown) =>
               handleModuleAdvance(module.id, childPayload),
@@ -219,6 +224,7 @@ export function CompositeStep({
     isActive,
     modules,
     modulePayloads,
+    aggregatedPayloads,
     parentContext,
     updateModuleConfig,
   ]);

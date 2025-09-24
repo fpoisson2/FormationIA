@@ -1,5 +1,5 @@
 import { describe, expect, beforeEach, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { StepSequenceRenderer } from "../../src/modules/step-sequence/StepSequenceRenderer";
 import {
@@ -7,6 +7,7 @@ import {
   registerStepComponent,
 } from "../../src/modules/step-sequence/registry";
 import { CompositeStep } from "../../src/modules/step-sequence/modules/CompositeStep";
+import { useStepSequence } from "../../src/modules/step-sequence";
 import type { StepComponentProps } from "../../src/modules/step-sequence/types";
 
 describe("CompositeStep", () => {
@@ -67,6 +68,52 @@ describe("CompositeStep", () => {
         "module-a": { ready: true },
         "module-b": { done: true },
       },
+    });
+  });
+
+  it("makes each module payload available through the step sequence context", async () => {
+    registerStepComponent(
+      "module-publisher",
+      function ModulePublisher({ onAdvance }: StepComponentProps) {
+        return (
+          <button type="button" onClick={() => onAdvance({ status: "ready" })}>
+            Publish payload
+          </button>
+        );
+      }
+    );
+
+    registerStepComponent(
+      "module-consumer",
+      function ModuleConsumer() {
+        const { payloads } = useStepSequence();
+        const status = (payloads["module-publisher"] as { status?: string } | undefined)?.status ?? "pending";
+        return <div data-testid="consumer-status">{status}</div>;
+      }
+    );
+
+    render(
+      <StepSequenceRenderer
+        steps={[
+          {
+            id: "composite-step",
+            composite: {
+              modules: [
+                { id: "module-publisher", component: "module-publisher" },
+                { id: "module-consumer", component: "module-consumer" },
+              ],
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("consumer-status").textContent).toBe("pending");
+
+    fireEvent.click(screen.getByRole("button", { name: /publish payload/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("consumer-status").textContent).toBe("ready");
     });
   });
 });
