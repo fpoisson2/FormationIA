@@ -27,6 +27,7 @@ describe("ClarityMapStep", () => {
     const config: ClarityMapStepConfig = {
       obstacleCount: 3,
       initialTarget: { x: 4, y: 5 },
+      promptStepId: "prompt-step",
     };
 
     const props: StepComponentProps = {
@@ -42,8 +43,10 @@ describe("ClarityMapStep", () => {
     render(<ClarityMapStep {...props} />);
 
     expect(screen.getByLabelText(/obstacles/i)).toBeTruthy();
+    expect(screen.getByLabelText(/étape prompt/i)).toBeTruthy();
     expect(screen.getByLabelText(/cible x/i)).toBeTruthy();
     expect(screen.getByLabelText(/cible y/i)).toBeTruthy();
+    expect(screen.getByLabelText(/autoriser la saisie/i)).toBeTruthy();
   });
 
   it("submits the current target, obstacles and optional instruction", () => {
@@ -65,10 +68,10 @@ describe("ClarityMapStep", () => {
 
     render(<ClarityMapStep {...props} />);
 
-    const textarea = screen.getAllByLabelText(/consigne initiale/i)[0];
+    const textarea = screen.getByPlaceholderText(/consigne reçue/i);
     fireEvent.change(textarea, { target: { value: "Avance de 2 cases." } });
 
-    const submitButton = screen.getAllByRole("button", { name: /continuer/i })[0];
+    const submitButton = screen.getByRole("button", { name: /continuer/i });
     fireEvent.click(submitButton);
 
     expect(onAdvance).toHaveBeenCalledTimes(1);
@@ -80,7 +83,7 @@ describe("ClarityMapStep", () => {
     expect(payload.instruction).toBe("Avance de 2 cases.");
   });
 
-  it("falls back to the start position when no target is configured", () => {
+  it("falls back to a random target when none is configured", () => {
     const onAdvance = vi.fn();
     const props: StepComponentProps = {
       definition: { id: "clarity-map", component: "clarity-map" },
@@ -94,7 +97,7 @@ describe("ClarityMapStep", () => {
 
     render(<ClarityMapStep {...props} />);
 
-    const submitButton = screen.getAllByRole("button", { name: /continuer/i })[0];
+    const submitButton = screen.getByRole("button", { name: /continuer/i });
     fireEvent.click(submitButton);
 
     const payload = onAdvance.mock.calls[0][0] as {
@@ -141,10 +144,7 @@ describe("ClarityMapStep", () => {
       expect(onAdvance).toHaveBeenCalled();
     });
 
-    const initialCall = onAdvance.mock.calls[0][0] as ClarityMapStepPayload;
-    expect(initialCall.runId).toBeTruthy();
-
-    const textarea = screen.getByPlaceholderText(/décris le trajet/i);
+    const textarea = screen.getByPlaceholderText(/consigne reçue/i);
     fireEvent.change(textarea, { target: { value: "Nouvelle consigne" } });
 
     await waitFor(() => {
@@ -153,7 +153,7 @@ describe("ClarityMapStep", () => {
     });
   });
 
-  it("affiche la trajectoire issue de l’étape de contrôle lorsque les runs correspondent", () => {
+  it("affiche la commande reçue depuis le module prompt configuré", () => {
     const mapPayload: ClarityMapStepPayload = {
       runId: "run-shared",
       target: { x: 4, y: 5 },
@@ -162,8 +162,8 @@ describe("ClarityMapStep", () => {
     };
 
     const props: StepComponentProps = {
-      definition: { id: "map-step", component: "clarity-map", config: { controlStepId: "control-step" } },
-      config: { controlStepId: "control-step" },
+      definition: { id: "map-step", component: "clarity-map", config: { promptStepId: "prompt-step" } },
+      config: { promptStepId: "prompt-step" },
       payload: mapPayload,
       isActive: true,
       isEditMode: false,
@@ -176,10 +176,7 @@ describe("ClarityMapStep", () => {
       stepCount: 2,
       steps: [],
       payloads: {
-        "control-step": {
-          runId: "run-shared",
-          trail: [START_POSITION, { x: 2, y: 3 }],
-        },
+        "prompt-step": { instruction: "Tourne à droite" },
       },
       isEditMode: false,
       onAdvance: vi.fn(),
@@ -193,10 +190,7 @@ describe("ClarityMapStep", () => {
       </StepSequenceContext.Provider>
     );
 
-    expect(screen.queryByText(/Trajectoire reçue depuis l’étape de contrôle/i)).not.toBeNull();
-    const playerIcon = screen.getByLabelText("Bonhomme");
-    const style = playerIcon.getAttribute("style") ?? "";
-    expect(style).toContain("left: 25%");
-    expect(style).toContain("top: 35%");
+    expect(screen.getByDisplayValue("Tourne à droite")).toBeTruthy();
+    expect(screen.getByText(/commande synchronisée/i)).toBeTruthy();
   });
 });
