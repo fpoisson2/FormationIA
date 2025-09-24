@@ -19,7 +19,10 @@ import {
   gridKey,
 } from "../../../clarity";
 import type { GridCoord } from "../../../clarity";
-import type { StepComponentProps } from "../../types";
+import type {
+  CompositeStepModuleDefinition,
+  StepComponentProps,
+} from "../../types";
 import { StepSequenceContext } from "../../types";
 
 import type { ClarityPromptStepPayload } from "./ClarityPromptStep";
@@ -190,15 +193,57 @@ export function ClarityMapStep({
   const activeStepId = sequenceContext?.steps?.[sequenceContext.stepIndex]?.id;
   const shouldAutoPublish = Boolean(sequenceContext) && activeStepId !== definition.id;
   const sequencePayloads = sequenceContext?.payloads ?? null;
+  const compositeModules = sequenceContext?.compositeModules ?? null;
+
+  const detectedPromptStepId = useMemo(() => {
+    if (!compositeModules) {
+      return "";
+    }
+
+    const moduleId = definition.id;
+    if (typeof moduleId !== "string" || !moduleId) {
+      return "";
+    }
+
+    for (const modules of Object.values(compositeModules)) {
+      if (!Array.isArray(modules)) {
+        continue;
+      }
+      const isSameComposite = modules.some((module) => module.id === moduleId);
+      if (!isSameComposite) {
+        continue;
+      }
+
+      const promptModule = modules.find(
+        (module: CompositeStepModuleDefinition) =>
+          module.component === "clarity-prompt" && module.id !== moduleId
+      );
+      if (promptModule && typeof promptModule.id === "string") {
+        return promptModule.id;
+      }
+    }
+
+    return "";
+  }, [compositeModules, definition.id]);
 
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
+  const effectivePromptStepId = normalizedConfig.promptStepId || detectedPromptStepId;
   const promptInstruction = useMemo(() => {
-    if (!normalizedConfig.promptStepId || !sequencePayloads) {
+    if (!effectivePromptStepId || !sequencePayloads) {
       return null;
     }
-    return sanitizePromptPayload(sequencePayloads[normalizedConfig.promptStepId]);
-  }, [normalizedConfig.promptStepId, sequencePayloads]);
+    return sanitizePromptPayload(sequencePayloads[effectivePromptStepId]);
+  }, [effectivePromptStepId, sequencePayloads]);
+  const promptSourceLabel = useMemo(() => {
+    if (normalizedConfig.promptStepId) {
+      return normalizedConfig.promptStepId;
+    }
+    if (detectedPromptStepId) {
+      return `${detectedPromptStepId} (auto)`;
+    }
+    return "";
+  }, [detectedPromptStepId, normalizedConfig.promptStepId]);
 
   const defaultTarget = mapPayload?.target ?? normalizedConfig.initialTarget ?? createRandomTarget();
   const [target, setTarget] = useState<GridCoord>(defaultTarget);
@@ -401,6 +446,9 @@ export function ClarityMapStep({
                 placeholder="ID du module prompt"
                 className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
               />
+              <span className="text-xs text-[color:var(--brand-charcoal)]/70">
+                Laisse vide pour relier automatiquement le module prompt du composite.
+              </span>
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1">
@@ -487,7 +535,7 @@ export function ClarityMapStep({
           </label>
           {promptInstruction !== null && (
             <p className="text-sm text-white/70">
-              Commande synchronisée depuis le module « {normalizedConfig.promptStepId || "?"} ».
+              Commande synchronisée depuis le module « {promptSourceLabel || "?"} ».
             </p>
           )}
         </div>

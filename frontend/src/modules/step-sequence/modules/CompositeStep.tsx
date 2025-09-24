@@ -97,6 +97,13 @@ export function CompositeStep({
     };
   }, [modulePayloads, parentContext]);
 
+  const parentCompositeModules = parentContext?.compositeModules;
+  const compositeModulesMap = useMemo(() => {
+    const base = parentCompositeModules ? { ...parentCompositeModules } : {};
+    base[definition.id] = modules;
+    return base;
+  }, [definition.id, modules, parentCompositeModules]);
+
   useEffect(() => {
     setModulePayloads(pickInitialPayloads(modules, payload));
   }, [modules, payload]);
@@ -175,6 +182,7 @@ export function CompositeStep({
               handleModuleAdvance(module.id, childPayload),
             onUpdateConfig: (nextConfig: unknown) =>
               updateModuleConfig(module.id, nextConfig),
+            compositeModules: compositeModulesMap,
           }
         : {
             stepIndex: 0,
@@ -192,6 +200,7 @@ export function CompositeStep({
               updateModuleConfig(module.id, nextConfig),
             goToStep: () => {},
             activityContext: null,
+            compositeModules: compositeModulesMap,
           };
 
       const moduleProps: StepComponentProps = {
@@ -227,6 +236,7 @@ export function CompositeStep({
     aggregatedPayloads,
     parentContext,
     updateModuleConfig,
+    compositeModulesMap,
   ]);
 
   const partitioned = useMemo(() => {

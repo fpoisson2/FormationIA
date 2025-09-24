@@ -193,4 +193,44 @@ describe("ClarityMapStep", () => {
     expect(screen.getByDisplayValue("Tourne à droite")).toBeTruthy();
     expect(screen.getByText(/commande synchronisée/i)).toBeTruthy();
   });
+
+  it("détecte automatiquement le module prompt lorsqu'il est présent dans le composite", () => {
+    const props: StepComponentProps = {
+      definition: { id: "map-module", component: "clarity-map" },
+      config: undefined,
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+    };
+
+    const context = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [],
+      payloads: {
+        "prompt-module": { instruction: "Dirige-toi vers le nord" },
+      },
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+      compositeModules: {
+        "composite-step": [
+          { id: "prompt-module", component: "clarity-prompt" },
+          { id: "map-module", component: "clarity-map" },
+        ],
+      },
+    };
+
+    render(
+      <StepSequenceContext.Provider value={context}>
+        <ClarityMapStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    expect(screen.getByDisplayValue("Dirige-toi vers le nord")).toBeTruthy();
+    expect(screen.getByText(/prompt-module \(auto\)/i)).toBeTruthy();
+  });
 });
