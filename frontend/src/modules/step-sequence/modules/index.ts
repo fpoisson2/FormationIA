@@ -5,6 +5,16 @@ import { RichContentStep } from "./RichContentStep";
 import { SimulationChatStep } from "./SimulationChatStep";
 import { VideoStep } from "./VideoStep";
 import { PromptEvaluationStep } from "./PromptEvaluationStep";
+import { DualModelComparisonStep } from "./DualModelComparisonStep";
+import type {
+  DualModelComparisonConfig,
+  DualModelComparisonStepState,
+  DualModelComparisonVariant,
+  DualModelComparisonVariantConfig,
+  DualModelComparisonCopyConfig,
+  DualModelComparisonInfoCardConfig,
+  DualModelComparisonRequestConfig,
+} from "./DualModelComparisonStep";
 import type { FormStepConfig, FormStepValidationFn } from "./FormStep";
 import {
   createDefaultFieldSpec,
@@ -41,6 +51,7 @@ registerStepComponent("rich-content", RichContentStep);
 registerStepComponent("simulation-chat", SimulationChatStep);
 registerStepComponent("video", VideoStep);
 registerStepComponent("prompt-evaluation", PromptEvaluationStep);
+registerStepComponent("ai-comparison", DualModelComparisonStep);
 
 /**
  * Configuration attendue par le module `rich-content`.
@@ -85,5 +96,16 @@ export type {
   PromptEvaluationStepPayload,
 } from "./PromptEvaluationStep";
 export { PromptEvaluationStep };
+
+export type {
+  DualModelComparisonConfig,
+  DualModelComparisonCopyConfig,
+  DualModelComparisonInfoCardConfig,
+  DualModelComparisonRequestConfig,
+  DualModelComparisonStepState,
+  DualModelComparisonVariant,
+  DualModelComparisonVariantConfig,
+} from "./DualModelComparisonStep";
+export { DualModelComparisonStep };
 
 export * from "./workshop";
