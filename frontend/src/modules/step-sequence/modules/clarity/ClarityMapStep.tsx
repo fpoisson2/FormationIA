@@ -1,6 +1,7 @@
 import {
   FormEvent,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -18,6 +19,7 @@ import {
 } from "../../../clarity";
 import type { GridCoord } from "../../../clarity";
 import type { StepComponentProps } from "../../types";
+import { StepSequenceContext } from "../../types";
 
 export interface ClarityMapStepPayload {
   runId: string;
@@ -152,7 +154,12 @@ export function ClarityMapStep({
   isEditMode,
   onAdvance,
   onUpdateConfig,
+  definition,
 }: StepComponentProps): JSX.Element {
+  const sequenceContext = useContext(StepSequenceContext);
+  const activeStepId = sequenceContext?.steps?.[sequenceContext.stepIndex]?.id;
+  const shouldAutoPublish = Boolean(sequenceContext) && activeStepId !== definition.id;
+
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
 
@@ -166,6 +173,7 @@ export function ClarityMapStep({
   });
   const [instruction, setInstruction] = useState(mapPayload?.instruction ?? "");
   const runIdRef = useRef(mapPayload?.runId ?? createRunId());
+  const lastPublishedRef = useRef<string | null>(null);
 
   const targetFromConfig = normalizedConfig.initialTarget;
   const obstacleCount = normalizedConfig.obstacleCount;
@@ -255,17 +263,39 @@ export function ClarityMapStep({
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      const trimmed = instruction.trim();
+      if (shouldAutoPublish) {
+        return;
+      }
       const payloadToSend: ClarityMapStepPayload = {
         runId: runIdRef.current,
         target,
         blocked,
-        instruction: trimmed ? trimmed : undefined,
+        instruction: instruction.trim() ? instruction.trim() : undefined,
       };
       onAdvance(payloadToSend);
     },
-    [blocked, instruction, onAdvance, target]
+    [blocked, instruction, onAdvance, shouldAutoPublish, target]
   );
+
+  useEffect(() => {
+    if (!shouldAutoPublish) {
+      lastPublishedRef.current = null;
+      return;
+    }
+    const trimmed = instruction.trim();
+    const payloadToSend: ClarityMapStepPayload = {
+      runId: runIdRef.current,
+      target,
+      blocked,
+      instruction: trimmed ? trimmed : undefined,
+    };
+    const serialized = JSON.stringify(payloadToSend);
+    if (lastPublishedRef.current === serialized) {
+      return;
+    }
+    lastPublishedRef.current = serialized;
+    onAdvance(payloadToSend);
+  }, [blocked, instruction, onAdvance, shouldAutoPublish, target]);
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
@@ -365,11 +395,13 @@ export function ClarityMapStep({
         </label>
       )}
 
-      <div className="flex justify-end">
-        <button type="submit" className="cta-button cta-button--primary">
-          Continuer
-        </button>
-      </div>
+      {!shouldAutoPublish && (
+        <div className="flex justify-end">
+          <button type="submit" className="cta-button cta-button--primary">
+            Continuer
+          </button>
+        </div>
+      )}
     </form>
   );
 }

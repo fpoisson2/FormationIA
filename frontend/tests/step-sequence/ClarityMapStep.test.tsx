@@ -1,7 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { STEP_COMPONENT_REGISTRY, type StepComponentProps } from "../../src/modules/step-sequence";
+import {
+  STEP_COMPONENT_REGISTRY,
+  StepSequenceContext,
+  type StepComponentProps,
+} from "../../src/modules/step-sequence";
 import {
   ClarityMapStep,
   type ClarityMapStepConfig,
@@ -102,5 +106,50 @@ describe("ClarityMapStep", () => {
 
     expect(payload.target).not.toEqual(START_POSITION);
     expect(payload.blocked.every((coord) => coord.x !== payload.target.x || coord.y !== payload.target.y)).toBe(true);
+  });
+
+  it("publishes updates automatically when rendered inside a composite module", async () => {
+    const onAdvance = vi.fn();
+    const props: StepComponentProps = {
+      definition: { id: "map-module", component: "clarity-map" },
+      config: { obstacleCount: 0 },
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance,
+      onUpdateConfig: vi.fn(),
+    };
+
+    const compositeContext = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [{ id: "composite-step", component: "composite", composite: { modules: [] } }],
+      payloads: {},
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+    };
+
+    render(
+      <StepSequenceContext.Provider value={compositeContext}>
+        <ClarityMapStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    await waitFor(() => {
+      expect(onAdvance).toHaveBeenCalled();
+    });
+
+    const initialCall = onAdvance.mock.calls[0][0] as ClarityMapStepPayload;
+    expect(initialCall.runId).toBeTruthy();
+
+    const textarea = screen.getByPlaceholderText(/décris le trajet/i);
+    fireEvent.change(textarea, { target: { value: "Nouvelle consigne" } });
+
+    await waitFor(() => {
+      const lastCall = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityMapStepPayload;
+      expect(lastCall.instruction).toBe("Nouvelle consigne");
+    });
   });
 });
