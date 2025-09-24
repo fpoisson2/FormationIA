@@ -1,5 +1,6 @@
 import { registerStepComponent } from "../registry";
 
+import { CompositeStep } from "./CompositeStep";
 import { FormStep } from "./FormStep";
 import { RichContentStep } from "./RichContentStep";
 import { SimulationChatStep } from "./SimulationChatStep";
@@ -46,6 +47,7 @@ import type {
   VideoSourceType,
 } from "./VideoStep";
 
+registerStepComponent("composite", CompositeStep);
 registerStepComponent("form", FormStep);
 registerStepComponent("rich-content", RichContentStep);
 registerStepComponent("simulation-chat", SimulationChatStep);
@@ -62,6 +64,8 @@ registerStepComponent("ai-comparison", DualModelComparisonStep);
  * @property sidebar Bloc optionnel situé dans la colonne latérale (astuces ou checklist).
  * @property onChange Callback déclenché en mode édition à chaque modification des champs.
  */
+export type { CompositeStepConfig, CompositeStepModuleDefinition } from "../types";
+export { CompositeStep };
 export type { FormStepConfig, FormStepValidationFn };
 export {
   FormStep,

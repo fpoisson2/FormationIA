@@ -26,6 +26,9 @@ import {
   getStepComponent,
   STEP_COMPONENT_REGISTRY,
   StepSequenceContext,
+  isCompositeStepDefinition,
+  resolveStepComponentKey,
+  type CompositeStepConfig,
   type StepDefinition,
 } from "../modules/step-sequence";
 import "../modules/step-sequence/modules";
@@ -37,6 +40,7 @@ const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
 const STEP_SEQUENCE_COMPONENT_KEY = "step-sequence";
 
 const STEP_TYPE_LABELS: Record<string, string> = {
+  composite: "Étape composite",
   form: "Formulaire",
   "rich-content": "Contenu riche",
   video: "Vidéo",
@@ -140,7 +144,11 @@ function StepSequenceStepCard({
   onChangeType,
   onUpdateConfig,
 }: StepSequenceStepCardProps): JSX.Element {
-  const StepComponent = useMemo(() => getStepComponent(step.component), [step.component]);
+  const componentKey = resolveStepComponentKey(step);
+  const StepComponent = useMemo(
+    () => (componentKey ? getStepComponent(componentKey) : undefined),
+    [componentKey]
+  );
 
   const handleTypeChange = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
@@ -159,11 +167,16 @@ function StepSequenceStepCard({
   const contextValue = useMemo(
     () => ({
       stepIndex: 0,
+      stepCount: 1,
+      steps: [step],
+      payloads: {},
       isEditMode: true,
       onAdvance: NOOP,
       onUpdateConfig: handleConfigUpdate,
+      goToStep: () => {},
+      activityContext: null,
     }),
-    [handleConfigUpdate]
+    [handleConfigUpdate, step]
   );
 
   return (
@@ -204,7 +217,7 @@ function StepSequenceStepCard({
         <label className="flex flex-col gap-1 text-xs font-semibold text-orange-700">
           Type d'étape
           <select
-            value={step.component}
+            value={componentKey ?? ""}
             onChange={handleTypeChange}
             className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
           >
@@ -220,7 +233,7 @@ function StepSequenceStepCard({
             <StepSequenceContext.Provider value={contextValue}>
               <StepComponent
                 definition={step}
-                config={step.config}
+                config={isCompositeStepDefinition(step) ? step.composite : step.config}
                 payload={undefined}
                 isActive
                 isEditMode
@@ -230,7 +243,7 @@ function StepSequenceStepCard({
             </StepSequenceContext.Provider>
           ) : (
             <p className="text-sm text-orange-700">
-              Aucun composant enregistré pour « {step.component} ».
+              Aucun composant enregistré pour « {componentKey ?? "inconnu"} ».
             </p>
           )}
         </div>
@@ -718,12 +731,20 @@ function ActivitySelector(): JSX.Element {
           while (existingIds.has(stepId)) {
             stepId = generateUniqueId("step");
           }
+          const nextStep: StepDefinition =
+            component === "composite"
+              ? {
+                  id: stepId,
+                  component,
+                  composite: { modules: [] },
+                }
+              : {
+                  id: stepId,
+                  component,
+                };
           const nextSteps: StepDefinition[] = [
             ...baseSteps.map((step) => ({ ...step })),
-            {
-              id: stepId,
-              component,
-            },
+            nextStep,
           ];
           return {
             ...activity,
@@ -809,8 +830,18 @@ function ActivitySelector(): JSX.Element {
               return { ...step };
             }
             updated = true;
+            if (component === "composite") {
+              const existingComposite = isCompositeStepDefinition(step)
+                ? step.composite
+                : undefined;
+              return {
+                id: step.id,
+                component,
+                composite: existingComposite ?? { modules: [] },
+              };
+            }
             return {
-              ...step,
+              id: step.id,
               component,
               config: undefined,
             };
@@ -844,6 +875,12 @@ function ActivitySelector(): JSX.Element {
               return { ...step };
             }
             updated = true;
+            if (isCompositeStepDefinition(step)) {
+              return {
+                ...step,
+                composite: (config as CompositeStepConfig) ?? { modules: [] },
+              };
+            }
             return {
               ...step,
               config,

@@ -1,4 +1,7 @@
-import type { StepDefinition } from "../../../../modules/step-sequence";
+import {
+  isCompositeStepDefinition,
+  type StepDefinition,
+} from "../../../../modules/step-sequence";
 
 import {
   DEFAULT_CLARTE_QUIZ_CONFIG,
@@ -29,6 +32,12 @@ function cloneConfig<T>(value: T): T {
 }
 
 function cloneStep(step: StepDefinition): StepDefinition {
+  if (isCompositeStepDefinition(step)) {
+    return {
+      ...step,
+      composite: cloneConfig(step.composite),
+    };
+  }
   return {
     ...step,
     config: step.config ? cloneConfig(step.config) : undefined,

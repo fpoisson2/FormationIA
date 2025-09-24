@@ -6,6 +6,7 @@ import {
   type StepSequenceRenderWrapperProps,
 } from "./StepSequenceRenderer";
 import type { StepDefinition } from "./types";
+import { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
 import { useActivityCompletion } from "../../hooks/useActivityCompletion";
 
 export type StepSequenceActivityConfig = {
@@ -26,11 +27,19 @@ const isStepDefinitionArray = (
 ): value is StepDefinition[] =>
   Array.isArray(value) &&
   value.every(
-    (step) =>
-      step !== null &&
-      typeof step === "object" &&
-      typeof step.id === "string" &&
-      typeof step.component === "string"
+    (step) => {
+      if (!step || typeof step !== "object") {
+        return false;
+      }
+      const typed = step as StepDefinition;
+      if (typeof typed.id !== "string") {
+        return false;
+      }
+      if (isCompositeStepDefinition(typed)) {
+        return Array.isArray(typed.composite?.modules);
+      }
+      return typeof typed.component === "string";
+    }
   );
 
 export function StepSequenceActivity({
@@ -130,8 +139,12 @@ export function StepSequenceActivity({
     }: StepSequenceRenderWrapperProps) => {
       const canGoBack = stepIndex > 0;
       const isLastStep = stepIndex === stepCount - 1;
+      const resolvedComponentKey = resolveStepComponentKey(step);
       const showContinueButton =
-        context.isEditMode || MANUAL_ADVANCE_COMPONENTS.has(step.component);
+        context.isEditMode ||
+        (resolvedComponentKey
+          ? MANUAL_ADVANCE_COMPONENTS.has(resolvedComponentKey)
+          : false);
       const indicatorLabel = `Étape ${stepIndex + 1} sur ${stepCount}`;
       const progressPercent =
         stepCount > 0 ? Math.round(((stepIndex + 1) / stepCount) * 100) : 0;

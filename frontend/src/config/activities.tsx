@@ -15,7 +15,12 @@ import { useAdminAuth } from "../providers/AdminAuthProvider";
 import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
-import { StepSequenceActivity, type StepDefinition } from "../modules/step-sequence";
+import {
+  StepSequenceActivity,
+  isCompositeStepDefinition,
+  resolveStepComponentKey,
+  type StepDefinition,
+} from "../modules/step-sequence";
 import type { ModelConfig } from "../config";
 const LazyExplorateurIA = lazy(() => import("../pages/ExplorateurIA"));
 
@@ -596,11 +601,24 @@ function stepDefinitionsEqual(
   a: StepDefinition,
   b: StepDefinition
 ): boolean {
-  return (
-    a.id === b.id &&
-    a.component === b.component &&
-    configsEqual(a.config, b.config)
-  );
+  if (a.id !== b.id) {
+    return false;
+  }
+
+  const componentA = resolveStepComponentKey(a);
+  const componentB = resolveStepComponentKey(b);
+  if (componentA !== componentB) {
+    return false;
+  }
+
+  if (isCompositeStepDefinition(a) || isCompositeStepDefinition(b)) {
+    if (!isCompositeStepDefinition(a) || !isCompositeStepDefinition(b)) {
+      return false;
+    }
+    return configsEqual(a.composite, b.composite);
+  }
+
+  return configsEqual(a.config, b.config);
 }
 
 function diffStepSequence(
