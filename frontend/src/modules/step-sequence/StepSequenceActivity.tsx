@@ -5,7 +5,11 @@ import {
   StepSequenceRenderer,
   type StepSequenceRenderWrapperProps,
 } from "./StepSequenceRenderer";
-import type { StepDefinition, StepSequenceWrapperPreference } from "./types";
+import type {
+  StepDefinition,
+  StepSequenceActivityContextBridge,
+  StepSequenceWrapperPreference,
+} from "./types";
 import { useActivityCompletion } from "../../hooks/useActivityCompletion";
 
 export type StepSequenceActivityConfig = {
@@ -47,6 +51,7 @@ export function StepSequenceActivity({
   header,
   card,
   layout,
+  layoutOverrides,
 }: StepSequenceActivityProps): JSX.Element {
   const metadataSteps = metadata?.steps;
   const resolvedSteps = useMemo(() => {
@@ -95,7 +100,7 @@ export function StepSequenceActivity({
     [finalizeSequence, onComplete]
   );
 
-  const activityContext = useMemo(
+  const activityContext = useMemo<StepSequenceActivityContextBridge>(
     () => ({
       activityId,
       completionId,
@@ -105,6 +110,7 @@ export function StepSequenceActivity({
       header,
       card,
       layout,
+      layoutOverrides,
     }),
     [
       activityId,
@@ -112,6 +118,7 @@ export function StepSequenceActivity({
       completionId,
       header,
       layout,
+      layoutOverrides,
       navigateToActivities,
       resetLayoutOverrides,
       setLayoutOverrides,

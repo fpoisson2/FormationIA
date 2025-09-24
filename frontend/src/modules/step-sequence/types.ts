@@ -19,8 +19,18 @@ export interface StepComponentProps {
 
 export type StepSequenceWrapperPreference = "default" | "bare";
 
+export type StepSequenceLayoutOverrides = Record<string, unknown>;
+
+export interface StepSequenceActivityContextBridge {
+  layoutOverrides?: StepSequenceLayoutOverrides;
+  setLayoutOverrides?: (overrides: StepSequenceLayoutOverrides) => void;
+  resetLayoutOverrides?: () => void;
+  [key: string]: unknown;
+}
+
 export type StepComponentWithMetadata = ComponentType<StepComponentProps> & {
   stepSequenceWrapper?: StepSequenceWrapperPreference;
+  stepSequenceLayoutOverrides?: StepSequenceLayoutOverrides;
 };
 
 export type StepRegistry = Record<string, StepComponentWithMetadata>;
@@ -34,7 +44,7 @@ export interface StepSequenceContextValue {
   onAdvance: (payload?: unknown) => void;
   onUpdateConfig: (config: unknown) => void;
   goToStep: (target: number | string) => void;
-  activityContext?: Record<string, unknown> | null;
+  activityContext?: StepSequenceActivityContextBridge | null;
 }
 
 export const StepSequenceContext = createContext<StepSequenceContextValue | undefined>(

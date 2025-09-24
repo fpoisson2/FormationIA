@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getStepComponent } from "./registry";
 import { StepSequenceContext } from "./types";
@@ -7,6 +7,8 @@ import type {
   StepDefinition,
   StepSequenceContextValue,
   StepComponentWithMetadata,
+  StepSequenceActivityContextBridge,
+  StepSequenceLayoutOverrides,
 } from "./types";
 
 export interface StepSequenceRenderWrapperProps {
@@ -24,7 +26,7 @@ export interface StepSequenceRendererProps {
   initialIndex?: number;
   isEditMode?: boolean;
   onComplete?: (payloads: Record<string, unknown>) => void;
-  activityContext?: Record<string, unknown> | null;
+  activityContext?: StepSequenceActivityContextBridge | null;
   onStepConfigChange?: (stepId: string, config: unknown) => void;
   renderStepWrapper?: (props: StepSequenceRenderWrapperProps) => JSX.Element;
 }
@@ -172,6 +174,98 @@ export function StepSequenceRenderer({
     onAdvance: handleAdvance,
     onUpdateConfig: handleConfigUpdate,
   };
+
+  const layoutBridge = useMemo(() => {
+    if (!activityContext || typeof activityContext !== "object") {
+      return null;
+    }
+
+    const bridge = activityContext as StepSequenceActivityContextBridge;
+    if (typeof bridge.setLayoutOverrides !== "function") {
+      return null;
+    }
+
+    return {
+      layoutOverrides: bridge.layoutOverrides,
+      setLayoutOverrides:
+        bridge.setLayoutOverrides as (overrides: StepSequenceLayoutOverrides) => void,
+      resetLayoutOverrides:
+        typeof bridge.resetLayoutOverrides === "function"
+          ? (bridge.resetLayoutOverrides as () => void)
+          : undefined,
+    } as const;
+  }, [activityContext]);
+
+  const previousLayoutOverridesRef = useRef<{
+    stepId: string | null;
+    value: StepSequenceLayoutOverrides | undefined;
+  }>({ stepId: null, value: undefined });
+
+  const latestLayoutBridgeRef = useRef(layoutBridge);
+  useEffect(() => {
+    latestLayoutBridgeRef.current = layoutBridge;
+  }, [layoutBridge]);
+
+  const restoreLayoutOverrides = useCallback((bridge: typeof layoutBridge) => {
+    const state = previousLayoutOverridesRef.current;
+    if (state.stepId === null) {
+      return;
+    }
+
+    previousLayoutOverridesRef.current = { stepId: null, value: undefined };
+
+    if (!bridge) {
+      return;
+    }
+
+    const previous = state.value;
+    if (previous !== undefined) {
+      bridge.setLayoutOverrides(previous);
+      return;
+    }
+
+    if (bridge.resetLayoutOverrides) {
+      bridge.resetLayoutOverrides();
+      return;
+    }
+
+    bridge.setLayoutOverrides({});
+  }, []);
+
+  useEffect(() => {
+    if (!StepComponent || !layoutBridge) {
+      return;
+    }
+
+    const desiredOverrides = StepComponent.stepSequenceLayoutOverrides;
+    if (!desiredOverrides) {
+      restoreLayoutOverrides(layoutBridge);
+      return;
+    }
+
+    const state = previousLayoutOverridesRef.current;
+    if (state.stepId === null) {
+      previousLayoutOverridesRef.current = {
+        stepId: activeStep.id,
+        value: layoutBridge.layoutOverrides,
+      };
+    } else {
+      previousLayoutOverridesRef.current = {
+        stepId: activeStep.id,
+        value: state.value,
+      };
+    }
+
+    if (layoutBridge.layoutOverrides !== desiredOverrides) {
+      layoutBridge.setLayoutOverrides(desiredOverrides);
+    }
+  }, [StepComponent, activeStep.id, layoutBridge, restoreLayoutOverrides]);
+
+  useEffect(() => {
+    return () => {
+      restoreLayoutOverrides(latestLayoutBridgeRef.current);
+    };
+  }, [restoreLayoutOverrides]);
 
   if (renderStepWrapper) {
     const wrapperProps: StepSequenceRenderWrapperProps = {
