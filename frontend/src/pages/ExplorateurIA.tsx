@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -12,10 +13,12 @@ import {
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
 import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
 import { useActivityCompletion } from "../hooks/useActivityCompletion";
-import type { ActivityProps } from "../config/activities";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 import {
   StepSequenceRenderer,
+  StepSequenceContext,
+  type StepComponentProps,
+  type StepDefinition,
   type StepSequenceRenderWrapperProps,
 } from "../modules/step-sequence";
 import { createExplorateurExport } from "./explorateurIA/export";
@@ -801,7 +804,11 @@ const TERRAIN_THEMES = {
   },
 } as const satisfies Record<string, TerrainThemeConfig>;
 
-type TerrainThemeId = keyof typeof TERRAIN_THEMES;
+export type TerrainThemeId = keyof typeof TERRAIN_THEMES;
+
+function isTerrainThemeId(value: unknown): value is TerrainThemeId {
+  return typeof value === "string" && value in TERRAIN_THEMES;
+}
 
 const TERRAIN_THEME_ORDER: TerrainThemeId[] = [
   "sand",
@@ -2375,6 +2382,125 @@ const WORLD_WIDTH = 25;
 const WORLD_HEIGHT = 25;
 const WORLD_SEED = 1247;
 let currentWorldSeed = WORLD_SEED;
+
+const DEFAULT_TERRAIN_THEME_ID: TerrainThemeId = "sand";
+
+export interface ExplorateurIATerrainConfig {
+  themeId: TerrainThemeId;
+  seed: number;
+}
+
+export interface ExplorateurIAConfig {
+  terrain: ExplorateurIATerrainConfig;
+  steps: StepDefinition[];
+}
+
+function cloneStepConfig<T>(value: T): T {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn("[ExplorateurIA] Unable to clone step configuration", error);
+    }
+    return value;
+  }
+}
+
+function cloneStepDefinition(step: StepDefinition): StepDefinition {
+  return {
+    id: step.id,
+    component: step.component,
+    config:
+      step.config === undefined ? undefined : cloneStepConfig(step.config),
+  } satisfies StepDefinition;
+}
+
+function sanitizeTerrainConfig(
+  value: unknown
+): ExplorateurIATerrainConfig {
+  if (!value || typeof value !== "object") {
+    return { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED };
+  }
+  const base = value as Partial<ExplorateurIATerrainConfig> & {
+    theme?: unknown;
+    themeId?: unknown;
+    seed?: unknown;
+  };
+  const rawTheme = base.themeId ?? base.theme;
+  const themeId = isTerrainThemeId(rawTheme)
+    ? rawTheme
+    : DEFAULT_TERRAIN_THEME_ID;
+  const seed =
+    typeof base.seed === "number" && Number.isFinite(base.seed)
+      ? Math.trunc(base.seed)
+      : WORLD_SEED;
+  return { themeId, seed } satisfies ExplorateurIATerrainConfig;
+}
+
+function sanitizeSteps(value: unknown): StepDefinition[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const steps: StepDefinition[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const candidate = item as Partial<StepDefinition> & {
+      id?: unknown;
+      component?: unknown;
+      config?: unknown;
+    };
+    if (typeof candidate.id !== "string" || typeof candidate.component !== "string") {
+      continue;
+    }
+    steps.push({
+      id: candidate.id,
+      component: candidate.component,
+      config:
+        candidate.config === undefined
+          ? undefined
+          : cloneStepConfig(candidate.config),
+    });
+  }
+  return steps;
+}
+
+function getDefaultExplorateurSteps(): StepDefinition[] {
+  return flattenQuarterSteps(WORLD1_QUARTER_STEPS).map(cloneStepDefinition);
+}
+
+export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
+  return {
+    terrain: { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED },
+    steps: getDefaultExplorateurSteps(),
+  };
+}
+
+export function sanitizeExplorateurIAConfig(
+  config: unknown
+): ExplorateurIAConfig {
+  if (!config || typeof config !== "object") {
+    return createDefaultExplorateurIAConfig();
+  }
+  const base = config as Partial<ExplorateurIAConfig> & {
+    terrain?: unknown;
+    steps?: unknown;
+  };
+  const terrain = sanitizeTerrainConfig(base.terrain);
+  const steps = sanitizeSteps(base.steps);
+  return {
+    terrain,
+    steps: steps.length > 0 ? steps : getDefaultExplorateurSteps(),
+  };
+}
 
 const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
   mairie: { x: 12, y: 12 },
@@ -4161,12 +4287,35 @@ function InventoryView({ items }: { items: InventoryEntry[] }) {
 }
 
 export default function ExplorateurIA({
-  completionId,
-  navigateToActivities,
-  isEditMode = false,
-  stepSequence,
-  setStepSequence,
-}: ActivityProps) {
+  config,
+  isEditMode: isEditModeProp,
+  onUpdateConfig,
+}: StepComponentProps): JSX.Element {
+  const context = useContext(StepSequenceContext);
+  const isEditMode = context?.isEditMode ?? isEditModeProp ?? false;
+  const effectiveOnUpdateConfig =
+    context?.onUpdateConfig ?? onUpdateConfig ?? (() => {});
+  const activityContext = context?.activityContext ?? null;
+  const rawCompletionId =
+    typeof activityContext?.completionId === "string"
+      ? activityContext.completionId
+      : typeof activityContext?.activityId === "string"
+      ? activityContext.activityId
+      : undefined;
+  const completionId =
+    rawCompletionId && rawCompletionId.trim().length > 0
+      ? rawCompletionId
+      : "explorateur-ia";
+  const navigateToActivities =
+    typeof activityContext?.navigateToActivities === "function"
+      ? (activityContext.navigateToActivities as () => void)
+      : () => {};
+
+  const sanitizedConfig = useMemo(
+    () => sanitizeExplorateurIAConfig(config),
+    [config]
+  );
+
   const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
   const tileSize = useResponsiveTileSize("cover", {
@@ -4181,16 +4330,25 @@ export default function ExplorateurIA({
     () => createInitialProgress()
   );
   const [quarterSteps, setQuarterSteps] = useState<QuarterSteps>(() =>
-    expandQuarterSteps(stepSequence, WORLD1_QUARTER_STEPS)
+    expandQuarterSteps(sanitizedConfig.steps, WORLD1_QUARTER_STEPS)
   );
   useEffect(() => {
-    setQuarterSteps(expandQuarterSteps(stepSequence, WORLD1_QUARTER_STEPS));
-  }, [stepSequence]);
+    setQuarterSteps(
+      expandQuarterSteps(sanitizedConfig.steps, WORLD1_QUARTER_STEPS)
+    );
+  }, [sanitizedConfig.steps]);
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
   const [tileset] = useTileset();
   const [worldVersion, forceWorldRefresh] = useState(0);
-  const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>("sand");
+  const [selectedTheme, setSelectedTheme] = useState<TerrainThemeId>(
+    sanitizedConfig.terrain.themeId
+  );
+  useEffect(() => {
+    if (sanitizedConfig.terrain.themeId !== selectedTheme) {
+      setSelectedTheme(sanitizedConfig.terrain.themeId);
+    }
+  }, [sanitizedConfig.terrain.themeId, selectedTheme]);
   const [blockedStage, setBlockedStage] = useState<QuarterId | null>(null);
   const [walkStep, setWalkStep] = useState(0);
   const [isIntroPlaying, setIsIntroPlaying] = useState(true);
@@ -4213,6 +4371,41 @@ export default function ExplorateurIA({
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+
+  const emitConfig = useCallback(
+    (patch: Partial<ExplorateurIAConfig>) => {
+      const next: ExplorateurIAConfig = {
+        terrain: {
+          themeId:
+            patch.terrain?.themeId ?? sanitizedConfig.terrain.themeId,
+          seed: patch.terrain?.seed ?? sanitizedConfig.terrain.seed,
+        },
+        steps: (patch.steps ?? sanitizedConfig.steps).map(cloneStepDefinition),
+      };
+      effectiveOnUpdateConfig(next);
+    },
+    [effectiveOnUpdateConfig, sanitizedConfig]
+  );
+
+  useEffect(() => {
+    if (sanitizedConfig.terrain.seed === currentWorldSeed) {
+      return;
+    }
+    const { start } = regenerateWorldInPlace(sanitizedConfig.terrain.seed);
+    setPlayer({ x: start.x, y: start.y });
+    forceWorldRefresh((value) => value + 1);
+  }, [forceWorldRefresh, sanitizedConfig.terrain.seed]);
+
+  useEffect(() => {
+    const theme = TERRAIN_THEMES[selectedTheme];
+    if (!theme) {
+      return;
+    }
+    applyTerrainThemeToWorld(world, theme);
+    repopulateTerrainObjects(world, currentWorldSeed, selectedTheme);
+    recomputeWorldMetadata(world);
+    forceWorldRefresh((value) => value + 1);
+  }, [forceWorldRefresh, selectedTheme]);
 
   const canToggleEditMode = useMemo(() => {
     if (adminStatus !== "authenticated") {
@@ -4336,13 +4529,11 @@ export default function ExplorateurIA({
           step.id === stepId ? { ...step, config } : step
         );
         const next: QuarterSteps = { ...previous, [quarter]: nextSteps };
-        if (setStepSequence) {
-          setStepSequence(flattenQuarterSteps(next));
-        }
+        emitConfig({ steps: flattenQuarterSteps(next) });
         return next;
       });
     },
-    [setStepSequence]
+    [emitConfig]
   );
 
   const handleThemeChange = useCallback(
@@ -4350,17 +4541,19 @@ export default function ExplorateurIA({
       if (!isEditMode) {
         return;
       }
+      if (themeId === selectedTheme) {
+        return;
+      }
       const theme = TERRAIN_THEMES[themeId];
       if (!theme) {
         return;
       }
       setSelectedTheme(themeId);
-      applyTerrainThemeToWorld(world, theme);
-      repopulateTerrainObjects(world, currentWorldSeed, themeId);
-      recomputeWorldMetadata(world);
-      forceWorldRefresh((value) => value + 1);
+      emitConfig({
+        terrain: { themeId },
+      });
     },
-    [forceWorldRefresh, isEditMode]
+    [emitConfig, isEditMode, selectedTheme]
   );
 
   const handleRegenerateWorld = useCallback(() => {
@@ -4378,7 +4571,8 @@ export default function ExplorateurIA({
     recomputeWorldMetadata(world);
     setPlayer({ x: start.x, y: start.y });
     forceWorldRefresh((value) => value + 1);
-  }, [forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
+    emitConfig({ terrain: { seed } });
+  }, [emitConfig, forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
 
   const { markCompleted } = useActivityCompletion({
     activityId: completionId,

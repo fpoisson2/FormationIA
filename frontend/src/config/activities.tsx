@@ -1,5 +1,4 @@
-import React, {
-  lazy,
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -15,22 +14,12 @@ import { useAdminAuth } from "../providers/AdminAuthProvider";
 import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
-import { StepSequenceActivity, type StepDefinition } from "../modules/step-sequence";
+import {
+  StepSequenceActivity,
+  createDefaultExplorateurWorldConfig,
+  type StepDefinition,
+} from "../modules/step-sequence";
 import type { ModelConfig } from "../config";
-const LazyExplorateurIA = lazy(() => import("../pages/ExplorateurIA"));
-
-const ExplorateurIALoader: ComponentType<ActivityProps> = (props) => (
-  <React.Suspense
-    fallback={
-      <div className="p-8 text-center text-sm text-slate-500">
-        Chargement de l'activité Explorateur IA…
-      </div>
-    }
-  >
-    <LazyExplorateurIA {...props} />
-  </React.Suspense>
-);
-
 const WORKSHOP_DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
 
 const WORKSHOP_DEFAULT_CONFIG_A: ModelConfig = {
@@ -105,7 +94,7 @@ export const COMPONENT_REGISTRY = {
   "prompt-dojo": PromptDojo,
   "clarity-path": ClarityPath,
   "clarte-dabord": ClarteDabord,
-  "explorateur-ia": ExplorateurIALoader,
+  "explorateur-ia": StepSequenceActivity,
   "step-sequence": StepSequenceActivity,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
 
@@ -285,7 +274,7 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
     },
   },
   "explorateur-ia": {
-    componentKey: "explorateur-ia",
+    componentKey: "step-sequence",
     path: "/explorateur-ia",
     defaults: {
       completionId: "explorateur-ia",
@@ -325,6 +314,13 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
           to: "/explorateur-ia",
         },
       },
+      stepSequence: [
+        {
+          id: "explorateur:world",
+          component: "explorateur-world",
+          config: createDefaultExplorateurWorldConfig(),
+        },
+      ],
     },
   },
 };

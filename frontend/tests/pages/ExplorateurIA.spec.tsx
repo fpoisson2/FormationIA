@@ -20,10 +20,24 @@ vi.mock("../../src/api", () => ({
   updateActivityProgress: vi.fn().mockResolvedValue(undefined),
 }));
 
-import ExplorateurIA from "../../src/pages/ExplorateurIA";
-import type { ActivityProps } from "../../src/config/activities";
+import {
+  StepSequenceActivity,
+  type StepDefinition,
+  type StepSequenceActivityProps,
+  createDefaultExplorateurWorldConfig,
+} from "../../src/modules/step-sequence";
 
-const defaultActivityProps: ActivityProps = {
+function createExplorateurSteps(): StepDefinition[] {
+  return [
+    {
+      id: "explorateur:world",
+      component: "explorateur-world",
+      config: createDefaultExplorateurWorldConfig(),
+    },
+  ];
+}
+
+const defaultActivityProps: StepSequenceActivityProps = {
   activityId: "explorateur-ia",
   completionId: "explorateur-ia",
   header: { eyebrow: "", title: "Explorateur IA" },
@@ -42,6 +56,7 @@ const defaultActivityProps: ActivityProps = {
   enabled: true,
   stepSequence: undefined,
   setStepSequence: vi.fn(),
+  steps: createExplorateurSteps(),
 };
 
 const matchMediaMock = vi.fn().mockImplementation(() => ({
@@ -80,12 +95,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderExplorateurIA(props?: Partial<ActivityProps>) {
-  const mergedProps: ActivityProps = {
+function renderExplorateurIA(props?: Partial<StepSequenceActivityProps>) {
+  const mergedProps: StepSequenceActivityProps = {
     ...defaultActivityProps,
+    steps: createExplorateurSteps(),
     ...props,
-  } as ActivityProps;
-  return render(<ExplorateurIA {...mergedProps} />);
+  } as StepSequenceActivityProps;
+  if (!mergedProps.steps) {
+    mergedProps.steps = createExplorateurSteps();
+  }
+  return render(<StepSequenceActivity {...mergedProps} />);
 }
 
 describe("Explorateur IA", () => {
