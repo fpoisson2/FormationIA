@@ -152,4 +152,51 @@ describe("ClarityMapStep", () => {
       expect(lastCall.instruction).toBe("Nouvelle consigne");
     });
   });
+
+  it("affiche la trajectoire issue de l’étape de contrôle lorsque les runs correspondent", () => {
+    const mapPayload: ClarityMapStepPayload = {
+      runId: "run-shared",
+      target: { x: 4, y: 5 },
+      blocked: [],
+      instruction: "",
+    };
+
+    const props: StepComponentProps = {
+      definition: { id: "map-step", component: "clarity-map", config: { controlStepId: "control-step" } },
+      config: { controlStepId: "control-step" },
+      payload: mapPayload,
+      isActive: true,
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+    };
+
+    const context = {
+      stepIndex: 1,
+      stepCount: 2,
+      steps: [],
+      payloads: {
+        "control-step": {
+          runId: "run-shared",
+          trail: [START_POSITION, { x: 2, y: 3 }],
+        },
+      },
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+    };
+
+    render(
+      <StepSequenceContext.Provider value={context}>
+        <ClarityMapStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    expect(screen.queryByText(/Trajectoire reçue depuis l’étape de contrôle/i)).not.toBeNull();
+    const playerIcon = screen.getByLabelText("Bonhomme");
+    const style = playerIcon.getAttribute("style") ?? "";
+    expect(style).toContain("left: 25%");
+    expect(style).toContain("top: 35%");
+  });
 });

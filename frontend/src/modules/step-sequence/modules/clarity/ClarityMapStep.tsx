@@ -34,6 +34,7 @@ export interface ClarityMapStepConfig {
   allowInstructionInput?: boolean;
   instructionLabel?: string;
   instructionPlaceholder?: string;
+  controlStepId?: string;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -43,6 +44,7 @@ interface NormalizedClarityMapConfig {
   allowInstructionInput: boolean;
   instructionLabel: string;
   instructionPlaceholder: string;
+  controlStepId: string;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -101,6 +103,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
       allowInstructionInput: true,
       instructionLabel: "Consigne initiale (optionnelle)",
       instructionPlaceholder: "Décris le trajet attendu…",
+      controlStepId: "",
     };
   }
   const raw = config as ClarityMapStepConfig;
@@ -119,6 +122,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     typeof raw.instructionPlaceholder === "string" && raw.instructionPlaceholder.trim()
       ? raw.instructionPlaceholder.trim()
       : "Décris le trajet attendu…";
+  const controlStepId = typeof raw.controlStepId === "string" ? raw.controlStepId.trim() : "";
 
   return {
     obstacleCount,
@@ -126,6 +130,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     allowInstructionInput,
     instructionLabel,
     instructionPlaceholder,
+    controlStepId,
     onChange: raw.onChange,
   };
 }
@@ -148,6 +153,39 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
   return { runId, target, blocked, instruction };
 }
 
+interface LinkedControlState {
+  runId: string;
+  trail: GridCoord[];
+}
+
+function sanitizeControlPayload(payload: unknown): LinkedControlState | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const source = payload as { runId?: unknown; trail?: unknown };
+  const runId = typeof source.runId === "string" && source.runId.trim() ? source.runId.trim() : null;
+  if (!runId || !Array.isArray(source.trail)) {
+    return null;
+  }
+  const trail = source.trail
+    .map(sanitizeGridCoord)
+    .filter((coord): coord is GridCoord => Boolean(coord));
+  if (!trail.length) {
+    return { runId, trail: [] };
+  }
+  const deduped: GridCoord[] = [];
+  const seen = new Set<string>();
+  for (const coord of trail) {
+    const key = gridKey(coord);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(coord);
+  }
+  return { runId, trail: deduped };
+}
+
 export function ClarityMapStep({
   config,
   payload,
@@ -159,6 +197,7 @@ export function ClarityMapStep({
   const sequenceContext = useContext(StepSequenceContext);
   const activeStepId = sequenceContext?.steps?.[sequenceContext.stepIndex]?.id;
   const shouldAutoPublish = Boolean(sequenceContext) && activeStepId !== definition.id;
+  const sequencePayloads = sequenceContext?.payloads ?? null;
 
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
@@ -172,8 +211,14 @@ export function ClarityMapStep({
     return createRandomObstacles(defaultTarget, normalizedConfig.obstacleCount);
   });
   const [instruction, setInstruction] = useState(mapPayload?.instruction ?? "");
-  const runIdRef = useRef(mapPayload?.runId ?? createRunId());
+  const [runId, setRunId] = useState(mapPayload?.runId ?? createRunId());
   const lastPublishedRef = useRef<string | null>(null);
+  const controlState = useMemo(() => {
+    if (!normalizedConfig.controlStepId || !sequencePayloads) {
+      return null;
+    }
+    return sanitizeControlPayload(sequencePayloads[normalizedConfig.controlStepId]);
+  }, [normalizedConfig.controlStepId, sequencePayloads]);
 
   const targetFromConfig = normalizedConfig.initialTarget;
   const obstacleCount = normalizedConfig.obstacleCount;
@@ -185,7 +230,7 @@ export function ClarityMapStep({
     setTarget(mapPayload.target);
     setBlocked(mapPayload.blocked);
     setInstruction(mapPayload.instruction ?? "");
-    runIdRef.current = mapPayload.runId;
+    setRunId(mapPayload.runId);
   }, [mapPayload]);
 
   useEffect(() => {
@@ -194,7 +239,7 @@ export function ClarityMapStep({
     }
     setTarget(targetFromConfig);
     setBlocked(createRandomObstacles(targetFromConfig, obstacleCount));
-    runIdRef.current = createRunId();
+    setRunId(createRunId());
   }, [mapPayload, targetFromConfig, obstacleCount]);
 
   useEffect(() => {
@@ -208,8 +253,6 @@ export function ClarityMapStep({
       return createRandomObstacles(target, obstacleCount);
     });
   }, [mapPayload, obstacleCount, target]);
-
-  const visited = useMemo(() => new Set<string>(), []);
 
   const handleConfigChange = useCallback(
     (next: ClarityMapStepConfig) => {
@@ -250,14 +293,14 @@ export function ClarityMapStep({
     setTarget((previous) => {
       const next = createRandomTarget(previous);
       setBlocked(createRandomObstacles(next, obstacleCount));
-      runIdRef.current = createRunId();
+      setRunId(createRunId());
       return next;
     });
   }, [obstacleCount]);
 
   const handleShuffleObstacles = useCallback(() => {
     setBlocked(createRandomObstacles(target, obstacleCount));
-    runIdRef.current = createRunId();
+    setRunId(createRunId());
   }, [obstacleCount, target]);
 
   const handleSubmit = useCallback(
@@ -267,14 +310,14 @@ export function ClarityMapStep({
         return;
       }
       const payloadToSend: ClarityMapStepPayload = {
-        runId: runIdRef.current,
+        runId,
         target,
         blocked,
         instruction: instruction.trim() ? instruction.trim() : undefined,
       };
       onAdvance(payloadToSend);
     },
-    [blocked, instruction, onAdvance, shouldAutoPublish, target]
+    [blocked, instruction, onAdvance, runId, shouldAutoPublish, target]
   );
 
   useEffect(() => {
@@ -284,7 +327,7 @@ export function ClarityMapStep({
     }
     const trimmed = instruction.trim();
     const payloadToSend: ClarityMapStepPayload = {
-      runId: runIdRef.current,
+      runId,
       target,
       blocked,
       instruction: trimmed ? trimmed : undefined,
@@ -295,7 +338,25 @@ export function ClarityMapStep({
     }
     lastPublishedRef.current = serialized;
     onAdvance(payloadToSend);
-  }, [blocked, instruction, onAdvance, shouldAutoPublish, target]);
+  }, [blocked, instruction, onAdvance, runId, shouldAutoPublish, target]);
+
+  const controlRunMatches = controlState && controlState.runId === runId;
+
+  const visited = useMemo(() => {
+    if (!controlRunMatches || !controlState?.trail.length) {
+      return new Set<string>();
+    }
+    const set = new Set<string>();
+    controlState.trail.forEach((coord) => set.add(gridKey(coord)));
+    return set;
+  }, [controlRunMatches, controlState]);
+
+  const playerPosition = useMemo(() => {
+    if (controlRunMatches && controlState?.trail.length) {
+      return controlState.trail[controlState.trail.length - 1];
+    }
+    return START_POSITION;
+  }, [controlRunMatches, controlState]);
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
@@ -348,6 +409,22 @@ export function ClarityMapStep({
                 />
               </label>
             </div>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Étape contrôle liée
+              </span>
+              <input
+                type="text"
+                value={normalizedConfig.controlStepId}
+                onChange={(event) =>
+                  handleConfigChange({ ...normalizedConfig, controlStepId: event.target.value.trim() })
+                }
+                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+              <span className="text-xs text-[color:var(--brand-charcoal)]/70">
+                Optionnel · Permet d’afficher la trajectoire renvoyée par l’étape de contrôle.
+              </span>
+            </label>
           </div>
         </fieldset>
       )}
@@ -374,7 +451,12 @@ export function ClarityMapStep({
             </button>
           </div>
         </div>
-        <ClarityGrid player={START_POSITION} target={target} blocked={blocked} visited={visited} />
+        <ClarityGrid player={playerPosition} target={target} blocked={blocked} visited={visited} />
+        {controlRunMatches && controlState?.trail.length ? (
+          <p className="text-xs text-[color:var(--brand-charcoal)]/70">
+            Trajectoire reçue depuis l’étape de contrôle.
+          </p>
+        ) : null}
       </div>
 
       {normalizedConfig.allowInstructionInput && (
@@ -390,7 +472,7 @@ export function ClarityMapStep({
             className="rounded-2xl border border-white/60 bg-white/80 px-4 py-3 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
           />
           <span className="text-xs text-[color:var(--brand-charcoal)]/70">
-            Optionnel · Le texte est transmis tel quel à l’étape de contrôle.
+            Optionnel · Ce texte sera proposé par défaut dans l’étape de contrôle.
           </span>
         </label>
       )}
