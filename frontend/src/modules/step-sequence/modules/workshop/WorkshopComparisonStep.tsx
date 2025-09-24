@@ -1,17 +1,7 @@
-import {
-  ChangeEvent,
-  Dispatch,
-  SetStateAction,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import InfoCard from "../../../../components/InfoCard";
 import {
-  API_AUTH_KEY,
-  API_BASE_URL,
   MODEL_OPTIONS,
   THINKING_OPTIONS,
   VERBOSITY_OPTIONS,
@@ -20,6 +10,11 @@ import {
 import type { StepComponentProps } from "../../types";
 import { useStepSequence } from "../..";
 import type { WorkshopContextStepState } from "./WorkshopContextStep";
+import {
+  runComparisonRequests,
+  type ComparisonVariant,
+  type VariantRequestParameters,
+} from "../runComparisonRequests";
 
 interface WorkshopComparisonStepConfig {
   contextStepId: string;
@@ -110,64 +105,6 @@ const buildInitialState = (
   };
 };
 
-type SummarySetter = Dispatch<SetStateAction<string>>;
-type ErrorSetter = Dispatch<SetStateAction<string | null>>;
-type LoadingSetter = Dispatch<SetStateAction<boolean>>;
-
-const runSummaryRequest = async (
-  sourceText: string,
-  config: ModelConfig,
-  setSummary: SummarySetter,
-  setError: ErrorSetter,
-  setLoading: LoadingSetter
-) => {
-  setError(null);
-  setSummary("");
-  setLoading(true);
-
-  try {
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-    };
-    if (API_AUTH_KEY) {
-      headers["X-API-Key"] = API_AUTH_KEY;
-    }
-
-    const response = await fetch(`${API_BASE_URL}/summary`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        text: sourceText,
-        model: config.model,
-        verbosity: config.verbosity,
-        thinking: config.thinking,
-      }),
-    });
-
-    if (!response.ok || !response.body) {
-      const message = await response.text();
-      throw new Error(message || "Impossible de contacter le serveur");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      if (chunk) {
-        setSummary((prev) => prev + chunk);
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Erreur inattendue";
-    setError(message);
-  } finally {
-    setLoading(false);
-  }
-};
-
 export type WorkshopComparisonStepState = WorkshopComparisonPayload;
 
 export function WorkshopComparisonStep({
@@ -249,10 +186,28 @@ export function WorkshopComparisonStep({
       return;
     }
 
-    await Promise.all([
-      runSummaryRequest(contextState.sourceText, configA, setSummaryA, setErrorA, setLoadingA),
-      runSummaryRequest(contextState.sourceText, configB, setSummaryB, setErrorB, setLoadingB),
-    ]);
+    const variants: Record<ComparisonVariant, VariantRequestParameters> = {
+      A: {
+        config: configA,
+        handlers: {
+          setSummary: setSummaryA,
+          setError: setErrorA,
+          setLoading: setLoadingA,
+        },
+      },
+      B: {
+        config: configB,
+        handlers: {
+          setSummary: setSummaryB,
+          setError: setErrorB,
+          setLoading: setLoadingB,
+        },
+      },
+    };
+
+    await runComparisonRequests(contextState.sourceText, variants, {
+      endpoint: "/summary",
+    });
   }, [configA, configB, contextState.sourceText, disabled]);
 
   const handleAdvance = useCallback(() => {
