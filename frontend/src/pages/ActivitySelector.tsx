@@ -44,6 +44,8 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   form: "Formulaire",
   "rich-content": "Contenu riche",
   video: "Vidéo",
+  "explorateur-world": "Explorateur IA",
+  custom: "Explorateur IA · Module personnalisé",
   "workshop-context": "Atelier · Contexte",
   "workshop-comparison": "Atelier · Comparaison",
   "workshop-synthesis": "Atelier · Synthèse",
