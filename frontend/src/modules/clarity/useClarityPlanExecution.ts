@@ -18,6 +18,10 @@ export interface ClarityPlanExecutionRequest {
   blocked: GridCoord[];
   runId: string;
   start?: GridCoord;
+  model?: string;
+  verbosity?: "low" | "medium" | "high";
+  thinking?: "minimal" | "medium" | "high";
+  developerPrompt?: string;
 }
 
 export interface ClarityPlanExecutionOutcome {
@@ -122,7 +126,17 @@ export function useClarityPlanExecution() {
   );
 
   const execute = useCallback(
-    async ({ instruction, goal, blocked, runId, start = START_POSITION }: ClarityPlanExecutionRequest) => {
+    async ({
+      instruction,
+      goal,
+      blocked,
+      runId,
+      start = START_POSITION,
+      model,
+      verbosity,
+      thinking,
+      developerPrompt,
+    }: ClarityPlanExecutionRequest) => {
       if (!instruction.trim()) {
         setMessage("Entre une consigne claire pour lancer l’IA.");
         setStatus("idle");
@@ -161,16 +175,31 @@ export function useClarityPlanExecution() {
             headers["x-api-key"] = API_AUTH_KEY;
           }
 
+          const requestBody: Record<string, unknown> = {
+            start,
+            goal,
+            blocked: blocked.map((cell) => [cell.x, cell.y]),
+            instruction: instruction.trim(),
+            runId,
+          };
+
+          if (model) {
+            requestBody.model = model;
+          }
+          if (verbosity) {
+            requestBody.verbosity = verbosity;
+          }
+          if (thinking) {
+            requestBody.thinking = thinking;
+          }
+          if (developerPrompt) {
+            requestBody.developerPrompt = developerPrompt;
+          }
+
           const response = await fetch(`${API_BASE_URL}/plan`, {
             method: "POST",
             headers,
-            body: JSON.stringify({
-              start,
-              goal,
-              blocked: blocked.map((cell) => [cell.x, cell.y]),
-              instruction: instruction.trim(),
-              runId,
-            }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal,
           });
 

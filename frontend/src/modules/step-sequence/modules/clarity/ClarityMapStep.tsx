@@ -74,6 +74,9 @@ interface NormalizedClarityMapConfig {
 const MIN_OBSTACLE_COUNT = 0;
 const MAX_OBSTACLE_COUNT = 24;
 const DEFAULT_OBSTACLE_COUNT = 6;
+const DEFAULT_PLAN_MODEL = "gpt-5-mini";
+const DEFAULT_PLAN_VERBOSITY: "low" | "medium" | "high" = "medium";
+const DEFAULT_PLAN_THINKING: "minimal" | "medium" | "high" = "medium";
 
 function clampToGrid(value: number): number {
   if (!Number.isFinite(value)) {
@@ -293,6 +296,19 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
   const trail = sanitizeTrail(source.trail);
   const status = sanitizeStatus(source.status);
   const message = sanitizeMessage(source.message);
+  const model = typeof source.model === "string" && source.model.trim() ? source.model.trim() : undefined;
+  const verbosity =
+    source.verbosity === "low" || source.verbosity === "medium" || source.verbosity === "high"
+      ? source.verbosity
+      : undefined;
+  const thinking =
+    source.thinking === "minimal" || source.thinking === "medium" || source.thinking === "high"
+      ? source.thinking
+      : undefined;
+  const developerPrompt =
+    typeof source.developerPrompt === "string" && source.developerPrompt.trim()
+      ? source.developerPrompt.trim()
+      : undefined;
 
   return {
     runId,
@@ -305,6 +321,10 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
     trail,
     status,
     message,
+    model,
+    verbosity,
+    thinking,
+    developerPrompt,
   };
 }
 
@@ -396,9 +416,23 @@ export function ClarityMapStep({
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
   const effectivePromptStepId = normalizedConfig.promptStepId || detectedPromptStepId;
-  const { instruction: promptInstruction, triggerId: promptTriggerId } = useMemo(() => {
+  const {
+    instruction: promptInstruction,
+    triggerId: promptTriggerId,
+    model: promptModel,
+    verbosity: promptVerbosity,
+    thinking: promptThinking,
+    developerPrompt: promptDeveloperPrompt,
+  } = useMemo(() => {
     if (!effectivePromptStepId || !sequencePayloads) {
-      return { instruction: null, triggerId: null };
+      return {
+        instruction: null,
+        triggerId: null,
+        model: null,
+        verbosity: null,
+        thinking: null,
+        developerPrompt: null,
+      };
     }
     return sanitizePromptPayload(sequencePayloads[effectivePromptStepId]);
   }, [effectivePromptStepId, sequencePayloads]);
@@ -478,7 +512,6 @@ export function ClarityMapStep({
   const fallbackTrail = mapPayload?.trail ?? [START_POSITION];
   const fallbackStatus = mapPayload?.status ?? "idle";
   const fallbackMessage = mapPayload?.message ?? "";
-
   const hasLiveOutcome =
     executionStatus !== "idle" ||
     Boolean(executionMessage) ||
@@ -492,6 +525,10 @@ export function ClarityMapStep({
   const effectiveStatus = hasLiveOutcome ? executionStatus : fallbackStatus;
   const effectiveMessage = hasLiveOutcome && executionMessage ? executionMessage : fallbackMessage;
   const trimmedInstruction = instruction.trim();
+  const effectiveModel = promptModel ?? mapPayload?.model ?? DEFAULT_PLAN_MODEL;
+  const effectiveVerbosity = promptVerbosity ?? mapPayload?.verbosity ?? DEFAULT_PLAN_VERBOSITY;
+  const effectiveThinking = promptThinking ?? mapPayload?.thinking ?? DEFAULT_PLAN_THINKING;
+  const effectiveDeveloperPrompt = promptDeveloperPrompt ?? mapPayload?.developerPrompt ?? "";
   const playerPosition =
     effectiveTrail.length > 0 ? effectiveTrail[effectiveTrail.length - 1] : START_POSITION;
   const visited = useMemo(() => {
@@ -511,7 +548,8 @@ export function ClarityMapStep({
     }
   }, [effectiveStatus]);
 
-  const shouldShowInstructionPanel = Boolean(normalizedConfig.allowInstructionInput);
+  const shouldShowInstructionPanel =
+    normalizedConfig.allowInstructionInput || promptInstruction === null;
 
   const blockedSignature = useMemo(
     () => blocked.map((cell) => gridKey(cell)).sort().join("|"),
@@ -593,6 +631,9 @@ export function ClarityMapStep({
   }, [obstacleCount, target]);
 
   const handleExecute = useCallback(async () => {
+    if (!trimmedInstruction) {
+      return;
+    }
     try {
       await execute({
         instruction: trimmedInstruction,
@@ -600,14 +641,31 @@ export function ClarityMapStep({
         blocked,
         runId,
         start: START_POSITION,
+        model: effectiveModel,
+        verbosity: effectiveVerbosity,
+        thinking: effectiveThinking,
+        developerPrompt: effectiveDeveloperPrompt || undefined,
       });
     } catch {
       // The hook exposes validation feedback via its own message state.
     }
-  }, [blocked, execute, runId, target, trimmedInstruction]);
+  }, [
+    blocked,
+    effectiveDeveloperPrompt,
+    effectiveModel,
+    effectiveThinking,
+    effectiveVerbosity,
+    execute,
+    runId,
+    target,
+    trimmedInstruction,
+  ]);
 
   useEffect(() => {
     if (!promptTriggerId) {
+      return;
+    }
+    if (!shouldAutoPublish) {
       return;
     }
     if (lastPromptTriggerRef.current === promptTriggerId) {
@@ -618,7 +676,7 @@ export function ClarityMapStep({
       return;
     }
     handleExecute();
-  }, [handleExecute, promptTriggerId, trimmedInstruction]);
+  }, [handleExecute, promptTriggerId, shouldAutoPublish, trimmedInstruction]);
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -638,18 +696,26 @@ export function ClarityMapStep({
         trail: effectiveTrail,
         status: effectiveStatus,
         message: effectiveMessage ? effectiveMessage : undefined,
+        model: effectiveModel,
+        verbosity: effectiveVerbosity,
+        thinking: effectiveThinking,
+        developerPrompt: effectiveDeveloperPrompt || undefined,
       };
 
       onAdvance(payloadToSend);
     },
     [
       blocked,
+      effectiveDeveloperPrompt,
       effectiveMessage,
       effectiveNotes,
       effectivePlan,
       effectiveStatus,
       effectiveStats,
       effectiveTrail,
+      effectiveModel,
+      effectiveThinking,
+      effectiveVerbosity,
       onAdvance,
       runId,
       shouldAutoPublish,
@@ -675,6 +741,10 @@ export function ClarityMapStep({
       trail: effectiveTrail,
       status: effectiveStatus,
       message: effectiveMessage ? effectiveMessage : undefined,
+      model: effectiveModel,
+      verbosity: effectiveVerbosity,
+      thinking: effectiveThinking,
+      developerPrompt: effectiveDeveloperPrompt || undefined,
     };
     const serialized = JSON.stringify(payloadToSend);
     if (lastPublishedRef.current === serialized) {
@@ -691,6 +761,10 @@ export function ClarityMapStep({
     effectiveStatus,
     effectiveStats,
     effectiveTrail,
+    effectiveDeveloperPrompt,
+    effectiveModel,
+    effectiveThinking,
+    effectiveVerbosity,
     onAdvance,
     runId,
     shouldAutoPublish,
