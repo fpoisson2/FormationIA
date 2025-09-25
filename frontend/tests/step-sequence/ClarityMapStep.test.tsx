@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   STEP_COMPONENT_REGISTRY,
@@ -14,8 +14,27 @@ import {
 import { START_POSITION } from "../../src/modules/clarity";
 import type { GridCoord } from "../../src/modules/clarity";
 
+const encoder = new TextEncoder();
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => ({ done: true, value: encoder.encode("") }),
+          }),
+        },
+      } as unknown as Response)
+    )
+  );
+});
+
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("ClarityMapStep", () => {

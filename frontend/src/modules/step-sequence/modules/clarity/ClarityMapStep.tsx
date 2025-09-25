@@ -12,13 +12,20 @@ import {
 import {
   ClarityGrid,
   GRID_SIZE,
+  PlanPreview,
   START_POSITION,
   createRandomObstacles,
   createRandomTarget,
   createRunId,
   gridKey,
+  useClarityPlanExecution,
 } from "../../../clarity";
-import type { GridCoord } from "../../../clarity";
+import type {
+  ClientStats,
+  GridCoord,
+  PlanAction,
+  RunStatus,
+} from "../../../clarity";
 import type {
   CompositeStepModuleDefinition,
   StepComponentProps,
@@ -32,6 +39,12 @@ export interface ClarityMapStepPayload {
   target: GridCoord;
   blocked: GridCoord[];
   instruction?: string;
+  plan?: PlanAction[];
+  notes?: string;
+  status?: RunStatus;
+  message?: string;
+  stats?: ClientStats | null;
+  trail?: GridCoord[];
 }
 
 export interface ClarityMapStepConfig {
@@ -108,6 +121,102 @@ function sanitizeBlocked(value: unknown, target: GridCoord): GridCoord[] {
   return obstacles;
 }
 
+const VALID_DIRECTIONS: ReadonlySet<PlanAction["dir"]> = new Set([
+  "left",
+  "right",
+  "up",
+  "down",
+]);
+
+function sanitizePlanActions(value: unknown): PlanAction[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const actions: PlanAction[] = [];
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+    const dir = (item as { dir?: string }).dir;
+    const steps = (item as { steps?: number }).steps;
+    if (!dir || !VALID_DIRECTIONS.has(dir as PlanAction["dir"])) {
+      return;
+    }
+    if (typeof steps !== "number" || !Number.isFinite(steps)) {
+      return;
+    }
+    const normalizedSteps = Math.max(1, Math.min(20, Math.round(steps)));
+    actions.push({ dir: dir as PlanAction["dir"], steps: normalizedSteps });
+  });
+  return actions;
+}
+
+function sanitizeTrail(value: unknown): GridCoord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => sanitizeGridCoord(item))
+    .filter((coord): coord is GridCoord => coord !== null);
+}
+
+function sanitizeStatus(value: unknown): RunStatus | undefined {
+  if (value === "idle" || value === "running" || value === "success" || value === "blocked" || value === "error") {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeStats(value: unknown): ClientStats | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const source = value as Partial<ClientStats> & { finalPosition?: unknown };
+  const runId = typeof source.runId === "string" ? source.runId : null;
+  const attempts =
+    typeof source.attempts === "number" && Number.isFinite(source.attempts)
+      ? Math.max(0, Math.round(source.attempts))
+      : null;
+  const stepsExecuted =
+    typeof source.stepsExecuted === "number" && Number.isFinite(source.stepsExecuted)
+      ? Math.max(0, Math.round(source.stepsExecuted))
+      : null;
+  const finalPosition = sanitizeGridCoord(source.finalPosition ?? null);
+  const durationMs =
+    typeof source.durationMs === "number" && Number.isFinite(source.durationMs)
+      ? Math.max(0, source.durationMs)
+      : null;
+  if (!runId || attempts === null || stepsExecuted === null || !finalPosition || durationMs === null) {
+    return null;
+  }
+  const optimalPathLength =
+    source.optimalPathLength === null || typeof source.optimalPathLength === "number"
+      ? source.optimalPathLength ?? null
+      : null;
+  const surcout =
+    source.surcout === null || typeof source.surcout === "number"
+      ? source.surcout ?? null
+      : null;
+  if (typeof source.success !== "boolean") {
+    return null;
+  }
+
+  const stats: ClientStats = {
+    runId,
+    attempts,
+    stepsExecuted,
+    optimalPathLength,
+    surcout,
+    success: source.success,
+    finalPosition,
+    ambiguity: typeof source.ambiguity === "string" ? source.ambiguity : undefined,
+    durationMs,
+  };
+  return stats;
+}
+
 function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
   if (!config || typeof config !== "object") {
     return {
@@ -164,8 +273,43 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
   const blocked = sanitizeBlocked(source.blocked, target);
   const instruction =
     typeof source.instruction === "string" && source.instruction.trim() ? source.instruction.trim() : undefined;
+  const plan = sanitizePlanActions((source as { plan?: unknown }).plan);
+  const notes =
+    typeof (source as { notes?: unknown }).notes === "string"
+      ? ((source as { notes?: string }).notes ?? "").trim()
+      : undefined;
+  const status = sanitizeStatus((source as { status?: unknown }).status);
+  const message =
+    typeof (source as { message?: unknown }).message === "string"
+      ? (source as { message?: string }).message
+      : undefined;
+  const stats = sanitizeStats((source as { stats?: unknown }).stats);
+  const trail = sanitizeTrail((source as { trail?: unknown }).trail);
 
-  return { runId, target, blocked, instruction };
+  const sanitized: ClarityMapStepPayload = { runId, target, blocked };
+  if (instruction) {
+    sanitized.instruction = instruction;
+  }
+  if (plan.length > 0) {
+    sanitized.plan = plan;
+  }
+  if (notes) {
+    sanitized.notes = notes;
+  }
+  if (status) {
+    sanitized.status = status;
+  }
+  if (message) {
+    sanitized.message = message;
+  }
+  if (stats) {
+    sanitized.stats = stats;
+  }
+  if (trail.length > 0) {
+    sanitized.trail = trail;
+  }
+
+  return sanitized;
 }
 
 function sanitizePromptPayload(value: unknown): string | null {
@@ -256,6 +400,19 @@ export function ClarityMapStep({
   const [instruction, setInstruction] = useState<string>(mapPayload?.instruction ?? "");
   const [runId, setRunId] = useState<string>(mapPayload?.runId ?? createRunId());
   const lastPublishedRef = useRef<string | null>(null);
+  const lastExecutionRef = useRef<string | null>(null);
+
+  const {
+    execute,
+    abort,
+    status,
+    isLoading,
+    message,
+    plan,
+    notes,
+    stats,
+    trail,
+  } = useClarityPlanExecution();
 
   useEffect(() => {
     if (!mapPayload) {
@@ -372,6 +529,46 @@ export function ClarityMapStep({
     setRunId(createRunId());
   }, [obstacleCount, target]);
 
+  const trimmedInstruction = instruction.trim();
+
+  const triggerExecution = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!trimmedInstruction) {
+        lastExecutionRef.current = null;
+        abort();
+        return null;
+      }
+
+      const signature = JSON.stringify({
+        instruction: trimmedInstruction,
+        target,
+        blocked: blocked.map((cell) => [cell.x, cell.y]),
+        runId,
+      });
+
+      if (!force && lastExecutionRef.current === signature) {
+        return null;
+      }
+
+      lastExecutionRef.current = signature;
+      try {
+        const outcome = await execute({
+          instruction: trimmedInstruction,
+          goal: target,
+          blocked,
+          runId,
+        });
+        return outcome;
+      } catch (error) {
+        if (force) {
+          throw error;
+        }
+        return null;
+      }
+    },
+    [abort, blocked, execute, runId, target, trimmedInstruction]
+  );
+
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -383,17 +580,53 @@ export function ClarityMapStep({
         runId,
         target,
         blocked,
-        instruction: instruction.trim() ? instruction.trim() : undefined,
       };
 
+      if (trimmedInstruction) {
+        payloadToSend.instruction = trimmedInstruction;
+      }
+
       onAdvance(payloadToSend);
+      if (trimmedInstruction) {
+        void triggerExecution({ force: true }).catch(() => {});
+      }
     },
-    [blocked, instruction, onAdvance, runId, shouldAutoPublish, target]
+    [blocked, onAdvance, runId, shouldAutoPublish, target, trimmedInstruction, triggerExecution]
   );
+
+  useEffect(() => {
+    if (!shouldAutoPublish || isEditMode) {
+      return;
+    }
+
+    if (!trimmedInstruction) {
+      lastExecutionRef.current = null;
+      abort();
+      return;
+    }
+
+    void triggerExecution().catch(() => {});
+  }, [abort, isEditMode, shouldAutoPublish, triggerExecution, trimmedInstruction]);
+
+  const resolvedPlan = plan.length > 0 ? plan : mapPayload?.plan ?? [];
+  const resolvedNotes = notes || mapPayload?.notes || "";
+  const resolvedStats = stats ?? mapPayload?.stats ?? null;
+  const resolvedTrail = trail.length > 0 ? trail : mapPayload?.trail ?? [];
+  const resolvedStatus: RunStatus =
+    status !== "idle" || resolvedPlan.length > 0 || resolvedNotes || message
+      ? status
+      : mapPayload?.status ?? "idle";
+  const resolvedMessage = message || mapPayload?.message || "";
 
   useEffect(() => {
     if (!shouldAutoPublish) {
       lastPublishedRef.current = null;
+      lastExecutionRef.current = null;
+    }
+  }, [shouldAutoPublish]);
+
+  useEffect(() => {
+    if (!shouldAutoPublish || isEditMode) {
       return;
     }
 
@@ -401,8 +634,30 @@ export function ClarityMapStep({
       runId,
       target,
       blocked,
-      instruction: instruction.trim() ? instruction.trim() : undefined,
     };
+
+    if (trimmedInstruction) {
+      payloadToSend.instruction = trimmedInstruction;
+    }
+    if (resolvedPlan.length > 0) {
+      payloadToSend.plan = resolvedPlan;
+    }
+    if (resolvedNotes) {
+      payloadToSend.notes = resolvedNotes;
+    }
+    if (resolvedStatus && resolvedStatus !== "idle") {
+      payloadToSend.status = resolvedStatus;
+    }
+    if (resolvedMessage) {
+      payloadToSend.message = resolvedMessage;
+    }
+    if (resolvedStats) {
+      payloadToSend.stats = resolvedStats;
+    }
+    if (resolvedTrail.length > 0) {
+      payloadToSend.trail = resolvedTrail;
+    }
+
     const serialized = JSON.stringify(payloadToSend);
     if (lastPublishedRef.current === serialized) {
       return;
@@ -410,9 +665,33 @@ export function ClarityMapStep({
 
     lastPublishedRef.current = serialized;
     onAdvance(payloadToSend);
-  }, [blocked, instruction, onAdvance, runId, shouldAutoPublish, target]);
+  }, [
+    blocked,
+    onAdvance,
+    resolvedMessage,
+    resolvedNotes,
+    resolvedPlan,
+    resolvedStats,
+    resolvedStatus,
+    resolvedTrail,
+    runId,
+    shouldAutoPublish,
+    target,
+    isEditMode,
+    trimmedInstruction,
+  ]);
 
-  const visited = useMemo(() => new Set<string>(), []);
+  const visited = useMemo(() => {
+    const set = new Set<string>();
+    resolvedTrail.forEach((cell) => {
+      set.add(gridKey(cell));
+    });
+    return set;
+  }, [resolvedTrail]);
+
+  const handleExecuteClick = useCallback(() => {
+    void triggerExecution({ force: true });
+  }, [triggerExecution]);
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
@@ -538,6 +817,29 @@ export function ClarityMapStep({
               Commande synchronisée depuis le module « {promptSourceLabel || "?"} ».
             </p>
           )}
+          <div className="rounded-2xl border border-white/30 bg-white/10 p-4 text-white/80 shadow-inner">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-sm font-semibold text-white/90">Plan IA</span>
+              <button
+                type="button"
+                onClick={handleExecuteClick}
+                disabled={isLoading || !trimmedInstruction}
+                className={`inline-flex items-center justify-center rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                  isLoading || !trimmedInstruction
+                    ? "cursor-not-allowed bg-white/20 text-white/60"
+                    : "bg-white/80 text-[color:var(--brand-red)] hover:bg-white"
+                }`}
+              >
+                {isLoading ? "Analyse en cours…" : shouldAutoPublish ? "Relancer l’IA" : "Tester la consigne"}
+              </button>
+            </div>
+            {resolvedMessage && (
+              <p className="mt-3 text-sm text-white/80">{resolvedMessage}</p>
+            )}
+            <div className="mt-3">
+              <PlanPreview plan={resolvedPlan} notes={resolvedNotes} />
+            </div>
+          </div>
         </div>
       </div>
 
