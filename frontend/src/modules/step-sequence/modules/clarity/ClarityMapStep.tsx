@@ -371,16 +371,6 @@ export function ClarityMapStep({
     }
     return sanitizePromptPayload(sequencePayloads[effectivePromptStepId]);
   }, [effectivePromptStepId, sequencePayloads]);
-  const promptSourceLabel = useMemo(() => {
-    if (normalizedConfig.promptStepId) {
-      return normalizedConfig.promptStepId;
-    }
-    if (detectedPromptStepId) {
-      return `${detectedPromptStepId} (auto)`;
-    }
-    return "";
-  }, [detectedPromptStepId, normalizedConfig.promptStepId]);
-
   const defaultTarget = mapPayload?.target ?? normalizedConfig.initialTarget ?? createRandomTarget();
   const [target, setTarget] = useState<GridCoord>(defaultTarget);
   const [blocked, setBlocked] = useState<GridCoord[]>(() => {
@@ -480,12 +470,12 @@ export function ClarityMapStep({
   const messageToneClass = useMemo(() => {
     switch (effectiveStatus) {
       case "success":
-        return "text-emerald-200";
+        return "text-emerald-600";
       case "blocked":
       case "error":
-        return "text-[color:var(--brand-yellow)]";
+        return "text-[color:var(--brand-red)]";
       default:
-        return "text-white/80";
+        return "text-[color:var(--brand-charcoal)]";
     }
   }, [effectiveStatus]);
 
@@ -768,44 +758,43 @@ export function ClarityMapStep({
           </div>
         </div>
         <div className="space-y-3">
-          <label className="flex flex-col gap-2">
-            <span className="text-sm font-semibold text-white/90">{normalizedConfig.instructionLabel}</span>
-            <textarea
-              rows={6}
-              value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
-              placeholder={normalizedConfig.instructionPlaceholder}
-              readOnly={!normalizedConfig.allowInstructionInput && promptInstruction !== null}
-              className={`min-h-[160px] rounded-2xl border border-white/30 px-4 py-3 text-base text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none ${
-                !normalizedConfig.allowInstructionInput && promptInstruction !== null
-                  ? "bg-white/20 text-white/80"
-                  : "bg-white/10"
-              }`}
-            />
-          </label>
-          {promptInstruction !== null && (
-            <p className="text-sm text-white/70">
-              Commande synchronisée depuis le module « {promptSourceLabel || "?"} ».
-            </p>
-          )}
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleExecute}
-              disabled={isExecuting || !trimmedInstruction}
-              className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isExecuting ? "Exécution en cours…" : "Lancer la consigne"}
-            </button>
-            {isExecuting && (
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-[color:var(--brand-black)]">
+                {normalizedConfig.instructionLabel}
+              </span>
+              <textarea
+                rows={6}
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder={normalizedConfig.instructionPlaceholder}
+                readOnly={!normalizedConfig.allowInstructionInput && promptInstruction !== null}
+                className={`min-h-[160px] rounded-2xl border border-white/60 px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-[color:var(--brand-charcoal)]/50 focus:border-[color:var(--brand-red)] focus:outline-none ${
+                  !normalizedConfig.allowInstructionInput && promptInstruction !== null
+                    ? "bg-white/70 text-[color:var(--brand-charcoal)]/80"
+                    : "bg-white"
+                }`}
+              />
+            </label>
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={handleAbort}
-                className="inline-flex items-center justify-center rounded-full border border-white/50 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10"
+                onClick={handleExecute}
+                disabled={isExecuting || !trimmedInstruction}
+                className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Interrompre
+                {isExecuting ? "Exécution en cours…" : "Lancer la consigne"}
               </button>
-            )}
+              {isExecuting && (
+                <button
+                  type="button"
+                  onClick={handleAbort}
+                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-semibold text-[color:var(--brand-charcoal)] transition hover:bg-white/60"
+                >
+                  Interrompre
+                </button>
+              )}
+            </div>
           </div>
           {(isExecuting || effectiveMessage) && (
             <p className={`text-sm ${messageToneClass}`}>
