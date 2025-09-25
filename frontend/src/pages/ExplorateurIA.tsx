@@ -131,6 +131,7 @@ updateDerivedQuarterCaches(DEFAULT_DERIVED_QUARTERS);
 
 function applyDerivedQuarterData(next: DerivedQuarterData) {
   updateDerivedQuarterCaches(next);
+  rebuildLandmarkAssignments();
   rebuildBuildings();
   rebuildBuildingLookup();
   rebuildPathGates();
@@ -2810,6 +2811,30 @@ const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
+function rebuildLandmarkAssignments() {
+  const assignments = assignLandmarksFromPath(generatedWorld.path);
+  const assignedIds = new Set(
+    Object.keys(assignments) as QuarterId[]
+  );
+
+  const existingIds = Object.keys(
+    generatedWorld.landmarks
+  ) as QuarterId[];
+  for (const id of existingIds) {
+    if (!assignedIds.has(id)) {
+      delete generatedWorld.landmarks[id];
+    }
+  }
+
+  for (const id of assignedIds) {
+    const coord = assignments[id];
+    if (!coord) {
+      continue;
+    }
+    generatedWorld.landmarks[id] = { x: coord.x, y: coord.y };
+  }
+}
+
 const MARKER_COORD_BY_KEY = new Map<string, TileCoord>();
 function updateMarkerCoordCache(markers: PathMarkerPlacement[]) {
   MARKER_COORD_BY_KEY.clear();
@@ -2838,15 +2863,18 @@ const buildings: Array<{
 }> = [];
 function rebuildBuildings() {
   buildings.splice(0, buildings.length, ...BUILDING_DISPLAY_ORDER.map((id) => {
-    const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
+    const landmark =
+      generatedWorld.landmarks[id] ??
+      FALLBACK_LANDMARKS[id] ??
+      FALLBACK_LANDMARKS.mairie;
     const meta = BUILDING_META[id];
     return {
       id,
-      x: landmark.x,
-      y: landmark.y,
-      label: meta.label,
-      color: meta.color,
-      number: meta.number,
+      x: landmark?.x ?? 0,
+      y: landmark?.y ?? 0,
+      label: meta?.label ?? id,
+      color: meta?.color ?? "#ffffff",
+      number: meta?.number,
     };
   }));
 }
