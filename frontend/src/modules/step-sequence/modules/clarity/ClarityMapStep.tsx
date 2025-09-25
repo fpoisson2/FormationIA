@@ -486,8 +486,7 @@ export function ClarityMapStep({
     }
   }, [effectiveStatus]);
 
-  const shouldShowInstructionPanel =
-    normalizedConfig.allowInstructionInput || promptInstruction === null;
+  const shouldShowInstructionPanel = Boolean(normalizedConfig.allowInstructionInput);
 
   const blockedSignature = useMemo(
     () => blocked.map((cell) => gridKey(cell)).sort().join("|"),

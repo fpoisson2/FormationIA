@@ -56,6 +56,11 @@ describe("ClarityPromptStep", () => {
 
     expect(screen.getByLabelText(/libellé/i)).toBeTruthy();
     expect(screen.getByLabelText(/placeholder/i)).toBeTruthy();
+    expect(screen.getByLabelText(/modèle par défaut/i)).toBeTruthy();
+    expect(screen.getByLabelText(/verbosité par défaut/i)).toBeTruthy();
+    expect(screen.getByLabelText(/raisonnement par défaut/i)).toBeTruthy();
+    expect(screen.getByLabelText(/prompt développeur/i)).toBeTruthy();
+    expect(screen.getByLabelText(/affichage des paramètres/i)).toBeTruthy();
   });
 
   it("submits the instruction when continuing", () => {
@@ -75,12 +80,22 @@ describe("ClarityPromptStep", () => {
     const textarea = screen.getByPlaceholderText(/décris l'action/i);
     fireEvent.change(textarea, { target: { value: "Avance vers la droite" } });
 
+    expect(screen.queryByRole("button", { name: /lancer la consigne/i })).toBeNull();
+    expect(screen.queryByText(/paramètres IA/i)).toBeNull();
+
     const button = screen.getByRole("button", { name: /continuer/i });
     fireEvent.click(button);
 
     expect(onAdvance).toHaveBeenCalledTimes(1);
     const payload = onAdvance.mock.calls[0][0] as ClarityPromptStepPayload;
-    expect(payload).toEqual({ instruction: "Avance vers la droite", triggerId: undefined });
+    expect(payload).toMatchObject({
+      instruction: "Avance vers la droite",
+      triggerId: undefined,
+      model: "gpt-5-mini",
+      verbosity: "medium",
+      thinking: "medium",
+      developerPrompt: "",
+    });
   });
 
   it("publishes updates automatically when rendered inside a composite module", async () => {
@@ -122,6 +137,89 @@ describe("ClarityPromptStep", () => {
     await waitFor(() => {
       const lastCall = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityPromptStepPayload;
       expect(lastCall.instruction).toBe("Nouvelle consigne");
+      expect(lastCall.model).toBe("gpt-5-mini");
+    });
+  });
+
+  it("affiche les paramètres en lecture seule lorsqu'ils sont exposés", () => {
+    const config: ClarityPromptStepConfig = {
+      settingsMode: "read-only",
+      model: "gpt-5",
+      verbosity: "high",
+      thinking: "high",
+      developerPrompt: "Toujours valider les contraintes métier.",
+    };
+
+    const props: StepComponentProps = {
+      definition: { id: "prompt", component: "clarity-prompt", config },
+      config,
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+    };
+
+    render(<ClarityPromptStep {...props} />);
+
+    expect(screen.getByText(/paramètres ia/i)).toBeTruthy();
+    expect(screen.getByText(/gpt-5/i)).toBeTruthy();
+    expect(screen.getByText(/élevée/i)).toBeTruthy();
+    expect(screen.getByText(/approfondi/i)).toBeTruthy();
+    expect(screen.getByText(/Toujours valider les contraintes métier\./i)).toBeTruthy();
+    expect(screen.queryByDisplayValue("gpt-5")).toBeNull();
+  });
+
+  it("permet à l’utilisateur d’ajuster les paramètres quand l’édition est activée", () => {
+    const config: ClarityPromptStepConfig = {
+      settingsMode: "editable",
+      model: "gpt-5-nano",
+      verbosity: "low",
+      thinking: "minimal",
+      developerPrompt: "Initial system message",
+    };
+
+    const onAdvance = vi.fn();
+    const props: StepComponentProps = {
+      definition: { id: "prompt", component: "clarity-prompt", config },
+      config,
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance,
+      onUpdateConfig: vi.fn(),
+    };
+
+    render(<ClarityPromptStep {...props} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/décris l'action/i), {
+      target: { value: "Collecte les pièces" },
+    });
+
+    fireEvent.change(screen.getByLabelText(/^Modèle$/i), {
+      target: { value: "gpt-5" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Verbosité$/i), {
+      target: { value: "medium" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Raisonnement$/i), {
+      target: { value: "high" },
+    });
+    fireEvent.change(screen.getByLabelText(/Prompt développeur/i), {
+      target: { value: "Respecte le ton pédagogique" },
+    });
+
+    const continueButton = screen.getByRole("button", { name: /continuer/i });
+    fireEvent.click(continueButton);
+
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    const payload = onAdvance.mock.calls[0][0] as ClarityPromptStepPayload;
+    expect(payload).toMatchObject({
+      instruction: "Collecte les pièces",
+      model: "gpt-5",
+      verbosity: "medium",
+      thinking: "high",
+      developerPrompt: "Respecte le ton pédagogique",
     });
   });
 
@@ -173,6 +271,7 @@ describe("ClarityPromptStep", () => {
       expect(payload.instruction).toBe("Avance de trois cases vers le haut");
       expect(typeof payload.triggerId).toBe("string");
       expect(payload.triggerId).toMatch(/trigger|[0-9a-f-]{8}/i);
+      expect(payload.model).toBe("gpt-5-mini");
     });
   });
 });
