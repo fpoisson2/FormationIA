@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   STEP_COMPONENT_REGISTRY,
@@ -18,8 +18,26 @@ import {
   DEFAULT_CLARITY_VERBOSITY,
 } from "../../src/modules/step-sequence/modules/clarity/ClarityPromptStep";
 
+const encoder = new TextEncoder();
+let fetchMock: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  fetchMock = vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: async () => ({ done: true, value: encoder.encode("") }),
+        }),
+      },
+    } as unknown as Response)
+  );
+  vi.stubGlobal("fetch", fetchMock);
+});
+
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("ClarityPromptStep", () => {
@@ -140,5 +158,61 @@ describe("ClarityPromptStep", () => {
       expect(lastCall.verbosity).toBe(DEFAULT_CLARITY_VERBOSITY);
       expect(lastCall.thinking).toBe(DEFAULT_CLARITY_THINKING);
     });
+  });
+
+  it("permet de lancer une requête IA depuis le prompt", async () => {
+    const props: StepComponentProps = {
+      definition: { id: "prompt-module", component: "clarity-prompt" },
+      config: undefined,
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+    };
+
+    const context = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [props.definition],
+      payloads: {
+        "map-module": {
+          runId: "run-123",
+          target: { x: 4, y: 5 },
+          blocked: [],
+        },
+      },
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+      compositeModules: {
+        "composite-step": [
+          { id: "prompt-module", component: "clarity-prompt" },
+          { id: "map-module", component: "clarity-map" },
+        ],
+      },
+    };
+
+    render(
+      <StepSequenceContext.Provider value={context}>
+        <ClarityPromptStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    const textarea = screen.getByPlaceholderText(/décris l'action/i);
+    fireEvent.change(textarea, { target: { value: "Atteins la cible en deux mouvements" } });
+
+    const testButton = screen.getByRole("button", { name: /tester la consigne/i });
+    fireEvent.click(testButton);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+
+    const call = fetchMock.mock.calls[0];
+    expect(call[0]).toContain("/plan");
+    const requestInit = call[1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
   });
 });
