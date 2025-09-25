@@ -6,7 +6,9 @@ export type FieldType =
   | "table_menu_full"
   | "textarea_with_counter"
   | "two_bullets"
-  | "reference_line";
+  | "reference_line"
+  | "single_choice"
+  | "multiple_choice";
 
 export interface BaseFieldSpec {
   id: string;
@@ -49,13 +51,33 @@ export interface ReferenceLineFieldSpec extends BaseFieldSpec {
   type: "reference_line";
 }
 
+export interface ChoiceFieldOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface SingleChoiceFieldSpec extends BaseFieldSpec {
+  type: "single_choice";
+  options: ChoiceFieldOption[];
+}
+
+export interface MultipleChoiceFieldSpec extends BaseFieldSpec {
+  type: "multiple_choice";
+  options: ChoiceFieldOption[];
+  minSelections?: number;
+  maxSelections?: number;
+}
+
 export type FieldSpec =
   | BulletedListFieldSpec
   | TableMenuDayFieldSpec
   | TableMenuFullFieldSpec
   | TextareaWithCounterFieldSpec
   | TwoBulletsFieldSpec
-  | ReferenceLineFieldSpec;
+  | ReferenceLineFieldSpec
+  | SingleChoiceFieldSpec
+  | MultipleChoiceFieldSpec;
 
 export interface MissionStage {
   prompt: string;

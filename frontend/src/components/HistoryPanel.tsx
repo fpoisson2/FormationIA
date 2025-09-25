@@ -1,4 +1,11 @@
-import type { Mission, StageRecord, TableMenuDayValue, TableMenuFullValue } from "../api";
+import type {
+  Mission,
+  MultipleChoiceFieldSpec,
+  SingleChoiceFieldSpec,
+  StageRecord,
+  TableMenuDayValue,
+  TableMenuFullValue,
+} from "../api";
 
 interface HistoryPanelProps {
   mission: Mission;
@@ -141,6 +148,44 @@ function HistoryPanel({ mission, entries }: HistoryPanelProps): JSX.Element {
                               <li key={`${field.id}-${index}`}>{bullet}</li>
                             ))}
                           </ul>
+                        </div>
+                      );
+                    }
+                    case "single_choice": {
+                      const spec = field as SingleChoiceFieldSpec;
+                      const selected = typeof value === "string" ? value : "";
+                      const option = spec.options.find((item) => item.value === selected);
+                      return (
+                        <div key={field.id} className="space-y-1">
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
+                            {field.label}
+                          </h4>
+                          <p className="rounded-2xl bg-white/70 p-3 text-sm leading-relaxed">
+                            {option ? option.label : "—"}
+                          </p>
+                        </div>
+                      );
+                    }
+                    case "multiple_choice": {
+                      const spec = field as MultipleChoiceFieldSpec;
+                      const selections = Array.isArray(value) ? (value as string[]) : [];
+                      const labels = selections
+                        .map((item) => spec.options.find((option) => option.value === item)?.label)
+                        .filter((label): label is string => Boolean(label));
+                      return (
+                        <div key={field.id}>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
+                            {field.label}
+                          </h4>
+                          {labels.length > 0 ? (
+                            <ul className="mt-1 list-disc space-y-1 pl-5">
+                              {labels.map((label, index) => (
+                                <li key={`${field.id}-${index}`}>{label}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="rounded-2xl bg-white/70 p-3 text-sm leading-relaxed">—</p>
+                          )}
                         </div>
                       );
                     }

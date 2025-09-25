@@ -12,6 +12,8 @@ import type {
   BulletedListFieldSpec,
   FieldSpec,
   FieldType,
+  MultipleChoiceFieldSpec,
+  SingleChoiceFieldSpec,
   StageAnswer,
   StageRecord,
   TableMenuDayValue,
@@ -92,6 +94,20 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
       return {
         ...spec,
         forbidWords: spec.forbidWords ? [...spec.forbidWords] : undefined,
+      };
+    }
+    case "single_choice": {
+      const spec = field as SingleChoiceFieldSpec;
+      return {
+        ...spec,
+        options: spec.options.map((option) => ({ ...option })),
+      };
+    }
+    case "multiple_choice": {
+      const spec = field as MultipleChoiceFieldSpec;
+      return {
+        ...spec,
+        options: spec.options.map((option) => ({ ...option })),
       };
     }
     default:
@@ -335,6 +351,31 @@ function renderHistoryValue(field: FieldSpec, value: unknown): JSX.Element | nul
     case "reference_line": {
       const text = typeof value === "string" ? value : "";
       return <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm leading-relaxed">{text || "—"}</p>;
+    }
+    case "single_choice": {
+      const spec = field as SingleChoiceFieldSpec;
+      const selected = typeof value === "string" ? value : "";
+      const option = spec.options.find((item) => item.value === selected);
+      return (
+        <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm leading-relaxed">{option ? option.label : "—"}</p>
+      );
+    }
+    case "multiple_choice": {
+      const spec = field as MultipleChoiceFieldSpec;
+      const selections = Array.isArray(value) ? (value as string[]) : [];
+      const labels = selections
+        .map((item) => spec.options.find((option) => option.value === item)?.label)
+        .filter((label): label is string => Boolean(label));
+      if (labels.length === 0) {
+        return <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm leading-relaxed">—</p>;
+      }
+      return (
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          {labels.map((label, index) => (
+            <li key={`${field.id}-${index}`}>{label}</li>
+          ))}
+        </ul>
+      );
     }
     default:
       return null;
@@ -1061,6 +1102,8 @@ export function SimulationChatStep({
                     <option value="textarea_with_counter">Zone de texte</option>
                     <option value="bulleted_list">Liste à puces</option>
                     <option value="two_bullets">Deux puces</option>
+                    <option value="single_choice">Choix unique</option>
+                    <option value="multiple_choice">Choix multiples</option>
                     <option value="table_menu_day">Table · journée</option>
                     <option value="table_menu_full">Table · complète</option>
                     <option value="reference_line">Référence</option>

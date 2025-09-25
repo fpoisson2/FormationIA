@@ -7,12 +7,15 @@ import {
   useMemo,
   useState,
 } from "react";
+import type { KeyboardEvent } from "react";
 
 import type {
   BulletedListFieldSpec,
   FieldSpec,
   FieldType,
   FieldValue,
+  MultipleChoiceFieldSpec,
+  SingleChoiceFieldSpec,
   StageAnswer,
   TableMenuDayValue,
   TableMenuFullValue,
@@ -32,6 +35,8 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   textarea_with_counter: "Zone de texte",
   two_bullets: "Deux puces",
   reference_line: "Référence",
+  single_choice: "Choix unique",
+  multiple_choice: "Choix multiples",
 };
 
 const FIELD_TYPES: FieldType[] = [
@@ -41,12 +46,16 @@ const FIELD_TYPES: FieldType[] = [
   "textarea_with_counter",
   "two_bullets",
   "reference_line",
+  "single_choice",
+  "multiple_choice",
 ];
 
 type NormalizeOptions = {
   fillDefaults: boolean;
   trim: boolean;
 };
+
+type ChoiceFieldSpec = SingleChoiceFieldSpec | MultipleChoiceFieldSpec;
 
 export type FormStepValidationResult = Record<string, string>;
 
@@ -94,9 +103,27 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
         forbidWords: spec.forbidWords ? [...spec.forbidWords] : undefined,
       };
     }
+    case "single_choice": {
+      const spec = field as SingleChoiceFieldSpec;
+      return {
+        ...spec,
+        options: spec.options.map((option) => ({ ...option })),
+      };
+    }
+    case "multiple_choice": {
+      const spec = field as MultipleChoiceFieldSpec;
+      return {
+        ...spec,
+        options: spec.options.map((option) => ({ ...option })),
+      };
+    }
     default:
       return { ...field };
   }
+}
+
+function isChoiceField(field: FieldSpec): field is ChoiceFieldSpec {
+  return field.type === "single_choice" || field.type === "multiple_choice";
 }
 
 function normalizeFieldValue(
@@ -171,6 +198,28 @@ function normalizeFieldValue(
       const text = typeof raw === "string" ? raw : "";
       return options.trim ? text.replace(/\s+/g, " ").trim() : text;
     }
+    case "single_choice": {
+      const spec = field as SingleChoiceFieldSpec;
+      const value = typeof raw === "string" ? raw : "";
+      const normalized = options.trim ? value.replace(/\s+/g, " ").trim() : value;
+      const isValid = spec.options.some((option) => option.value === normalized);
+      return isValid ? normalized : "";
+    }
+    case "multiple_choice": {
+      const spec = field as MultipleChoiceFieldSpec;
+      const source = Array.isArray(raw) ? (raw as unknown[]) : [];
+      const cleaned = source
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => (options.trim ? item.replace(/\s+/g, " ").trim() : item))
+        .filter((item) => item.length > 0);
+      const unique = Array.from(new Set(cleaned));
+      const validSet = new Set(
+        unique.filter((item) => spec.options.some((option) => option.value === item))
+      );
+      return spec.options
+        .map((option) => option.value)
+        .filter((value) => validSet.has(value));
+    }
     default:
       return (raw as FieldValue) ?? null;
   }
@@ -227,6 +276,29 @@ export function createDefaultFieldSpec(type: FieldType): FieldSpec {
         type,
         label: "Référence",
       };
+    case "single_choice":
+      return {
+        id,
+        type,
+        label: "Question à choix unique",
+        options: [
+          { value: `${id}-option-a`, label: "Option A" },
+          { value: `${id}-option-b`, label: "Option B" },
+          { value: `${id}-option-c`, label: "Option C" },
+        ],
+      } satisfies SingleChoiceFieldSpec;
+    case "multiple_choice":
+      return {
+        id,
+        type,
+        label: "Question à choix multiples",
+        options: [
+          { value: `${id}-option-a`, label: "Option A" },
+          { value: `${id}-option-b`, label: "Option B" },
+          { value: `${id}-option-c`, label: "Option C" },
+        ],
+        minSelections: 1,
+      } satisfies MultipleChoiceFieldSpec;
     default:
       return {
         id,
@@ -309,6 +381,69 @@ export function validateFieldSpec(spec: unknown): spec is FieldSpec {
     }
     case "reference_line":
       return true;
+    case "single_choice": {
+      const typed = spec as SingleChoiceFieldSpec;
+      if (!Array.isArray(typed.options) || typed.options.length === 0) {
+        return false;
+      }
+      return typed.options.every(
+        (option) =>
+          typeof option.value === "string" &&
+          option.value.length > 0 &&
+          typeof option.label === "string" &&
+          option.label.length > 0 &&
+          (option.description === undefined || typeof option.description === "string")
+      );
+    }
+    case "multiple_choice": {
+      const typed = spec as MultipleChoiceFieldSpec;
+      if (!Array.isArray(typed.options) || typed.options.length === 0) {
+        return false;
+      }
+      const optionsValid = typed.options.every(
+        (option) =>
+          typeof option.value === "string" &&
+          option.value.length > 0 &&
+          typeof option.label === "string" &&
+          option.label.length > 0 &&
+          (option.description === undefined || typeof option.description === "string")
+      );
+      if (!optionsValid) {
+        return false;
+      }
+      if (
+        typed.minSelections !== undefined &&
+        (!Number.isInteger(typed.minSelections) || typed.minSelections < 0)
+      ) {
+        return false;
+      }
+      if (
+        typed.maxSelections !== undefined &&
+        (!Number.isInteger(typed.maxSelections) || typed.maxSelections < 1)
+      ) {
+        return false;
+      }
+      if (
+        typed.minSelections !== undefined &&
+        typed.maxSelections !== undefined &&
+        (typed.maxSelections as number) < (typed.minSelections as number)
+      ) {
+        return false;
+      }
+      if (
+        typed.minSelections !== undefined &&
+        typed.minSelections > typed.options.length
+      ) {
+        return false;
+      }
+      if (
+        typed.maxSelections !== undefined &&
+        typed.maxSelections > typed.options.length
+      ) {
+        return false;
+      }
+      return true;
+    }
     default:
       return false;
   }
@@ -384,6 +519,16 @@ export function isFormAnswerEmpty(
       case "reference_line": {
         const text = typeof value === "string" ? value : "";
         return text.trim().length === 0;
+      }
+      case "single_choice": {
+        const selected = typeof value === "string" ? value : "";
+        return selected.trim().length === 0;
+      }
+      case "multiple_choice": {
+        const selections = Array.isArray(value)
+          ? (value as string[]).filter((item) => typeof item === "string" && item.trim().length > 0)
+          : [];
+        return selections.length === 0;
       }
       default:
         return true;
@@ -475,6 +620,44 @@ export function defaultValidateFormValues(
         }
         break;
       }
+      case "single_choice": {
+        const spec = field as SingleChoiceFieldSpec;
+        const selected = typeof value === "string" ? value : "";
+        if (!spec.options.some((option) => option.value === selected)) {
+          errors[field.id] = "Sélectionne une réponse.";
+        }
+        break;
+      }
+      case "multiple_choice": {
+        const spec = field as MultipleChoiceFieldSpec;
+        const selections = Array.isArray(value)
+          ? (value as string[]).filter((item) => typeof item === "string" && item.length > 0)
+          : [];
+        const unique = Array.from(new Set(selections));
+        const valid = unique.filter((item) => spec.options.some((option) => option.value === item));
+        if (valid.length !== unique.length) {
+          errors[field.id] = "Sélectionne uniquement les options proposées.";
+          break;
+        }
+        if (valid.length === 0) {
+          errors[field.id] = "Sélectionne au moins une réponse.";
+          break;
+        }
+        if (typeof spec.minSelections === "number" && valid.length < spec.minSelections) {
+          errors[field.id] =
+            spec.minSelections > 1
+              ? `Sélectionne au moins ${spec.minSelections} réponses.`
+              : "Sélectionne au moins une réponse.";
+          break;
+        }
+        if (typeof spec.maxSelections === "number" && valid.length > spec.maxSelections) {
+          errors[field.id] =
+            spec.maxSelections > 1
+              ? `Sélectionne au plus ${spec.maxSelections} réponses.`
+              : "Sélectionne au plus une réponse.";
+        }
+        break;
+      }
       default:
         break;
     }
@@ -511,28 +694,141 @@ function normalizeConfig(config: unknown): FormStepConfig {
 interface DesignerFieldProps {
   field: FieldSpec;
   index: number;
+  isSelected: boolean;
+  onSelect: (index: number) => void;
   onRemove: (index: number) => void;
 }
 
-function DesignerField({ field, index, onRemove }: DesignerFieldProps): JSX.Element {
+function DesignerField({
+  field,
+  index,
+  isSelected,
+  onSelect,
+  onRemove,
+}: DesignerFieldProps): JSX.Element {
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onSelect(index);
+      }
+    },
+    [index, onSelect]
+  );
+
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
-      <div className="flex flex-col text-left">
-        <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-          {FIELD_TYPE_LABELS[field.type] ?? field.type}
-        </span>
-        <span className="text-sm font-semibold text-[color:var(--brand-black)]">
-          {field.label}
-        </span>
+    <li>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onSelect(index)}
+        onKeyDown={handleKeyDown}
+        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--brand-red)] focus-visible:ring-offset-2 ${
+          isSelected
+            ? "border-[color:var(--brand-red)] bg-[color:var(--brand-red)]/5"
+            : "border-slate-200 hover:border-[color:var(--brand-red)]/60"
+        }`}
+      >
+        <div className="flex flex-col">
+          <span className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+            {FIELD_TYPE_LABELS[field.type] ?? field.type}
+          </span>
+          <span className="text-sm font-semibold text-[color:var(--brand-black)]">
+            {field.label}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="text-xs font-semibold text-red-600 hover:underline"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove(index);
+          }}
+        >
+          Retirer
+        </button>
       </div>
+    </li>
+  );
+}
+
+interface ChoiceFieldEditorProps {
+  field: ChoiceFieldSpec;
+  onOptionLabelChange: (optionIndex: number, value: string) => void;
+  onOptionDescriptionChange: (optionIndex: number, value: string | undefined) => void;
+  onAddOption: () => void;
+  onRemoveOption: (optionIndex: number) => void;
+}
+
+function ChoiceFieldEditor({
+  field,
+  onOptionLabelChange,
+  onOptionDescriptionChange,
+  onAddOption,
+  onRemoveOption,
+}: ChoiceFieldEditorProps): JSX.Element {
+  const canRemoveOption = field.options.length > 1;
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-sm font-semibold text-[color:var(--brand-black)]">
+        Options de réponse
+      </h4>
+      <ul className="space-y-3">
+        {field.options.map((option, index) => (
+          <li key={option.value} className="space-y-3 rounded-xl border border-slate-200 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Option {index + 1}
+              </span>
+              <button
+                type="button"
+                className={`text-xs font-semibold ${
+                  canRemoveOption
+                    ? "text-red-600 hover:underline"
+                    : "cursor-not-allowed text-slate-300"
+                }`}
+                onClick={() => canRemoveOption && onRemoveOption(index)}
+                disabled={!canRemoveOption}
+              >
+                Supprimer
+              </button>
+            </div>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+              Intitulé
+              <input
+                type="text"
+                value={option.label}
+                onChange={(event) => onOptionLabelChange(index, event.target.value)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                placeholder="Texte affiché pour ce choix"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+              Description (optionnel)
+              <textarea
+                value={option.description ?? ""}
+                onChange={(event) =>
+                  onOptionDescriptionChange(
+                    index,
+                    event.target.value.length > 0 ? event.target.value : undefined
+                  )
+                }
+                className="min-h-[64px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                placeholder="Détail complémentaire affiché sous le choix"
+              />
+            </label>
+          </li>
+        ))}
+      </ul>
       <button
         type="button"
-        className="text-xs font-semibold text-red-600 hover:underline"
-        onClick={() => onRemove(index)}
+        className="cta-button cta-button--light w-full"
+        onClick={onAddOption}
       >
-        Retirer
+        Ajouter une option
       </button>
-    </li>
+    </div>
   );
 }
 
@@ -563,6 +859,18 @@ export function FormStep({
     createInitialFormValues(typedConfig.fields, payloadAnswer ?? typedConfig.initialValues)
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (selectedFieldIndex === null) {
+      return;
+    }
+    if (selectedFieldIndex >= activeConfig.fields.length) {
+      setSelectedFieldIndex(
+        activeConfig.fields.length > 0 ? activeConfig.fields.length - 1 : null
+      );
+    }
+  }, [activeConfig.fields, selectedFieldIndex]);
 
   useEffect(() => {
     setValues((prev) => {
@@ -640,6 +948,119 @@ export function FormStep({
     [effectiveOnUpdateConfig, typedConfig]
   );
 
+  const handleSelectField = useCallback((index: number) => {
+    setSelectedFieldIndex(index);
+  }, []);
+
+  const updateFieldAtIndex = useCallback(
+    (index: number, updater: (field: FieldSpec) => FieldSpec) => {
+      pushConfigChange((prev) => {
+        const nextFields = prev.fields.map((field, idx) => {
+          if (idx !== index) {
+            return field;
+          }
+          const draft = cloneFieldSpec(field);
+          const updated = updater(draft);
+          return cloneFieldSpec(updated);
+        });
+        return {
+          ...prev,
+          fields: nextFields,
+        };
+      });
+    },
+    [pushConfigChange]
+  );
+
+  const updateChoiceField = useCallback(
+    (index: number, updater: (field: ChoiceFieldSpec) => ChoiceFieldSpec) => {
+      updateFieldAtIndex(index, (field) => {
+        if (!isChoiceField(field)) {
+          return field;
+        }
+        return updater(field);
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleChoiceOptionLabelChange = useCallback(
+    (fieldIndex: number, optionIndex: number, value: string) => {
+      updateChoiceField(fieldIndex, (field) => ({
+        ...field,
+        options: field.options.map((option, idx) =>
+          idx === optionIndex ? { ...option, label: value } : option
+        ),
+      }));
+    },
+    [updateChoiceField]
+  );
+
+  const handleChoiceOptionDescriptionChange = useCallback(
+    (fieldIndex: number, optionIndex: number, value: string | undefined) => {
+      updateChoiceField(fieldIndex, (field) => ({
+        ...field,
+        options: field.options.map((option, idx) =>
+          idx === optionIndex
+            ? { ...option, description: value ?? undefined }
+            : option
+        ),
+      }));
+    },
+    [updateChoiceField]
+  );
+
+  const handleAddChoiceOption = useCallback(
+    (fieldIndex: number) => {
+      updateChoiceField(fieldIndex, (field) => {
+        const existingValues = new Set(field.options.map((option) => option.value));
+        let value = `${field.id}-option-${generateId()}`;
+        while (existingValues.has(value)) {
+          value = `${field.id}-option-${generateId()}`;
+        }
+        const label = `Option ${field.options.length + 1}`;
+        return {
+          ...field,
+          options: [...field.options, { value, label }],
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
+  const handleRemoveChoiceOption = useCallback(
+    (fieldIndex: number, optionIndex: number) => {
+      updateChoiceField(fieldIndex, (field) => {
+        if (field.options.length <= 1) {
+          return field;
+        }
+        const options = field.options.filter((_, idx) => idx !== optionIndex);
+        if (field.type === "single_choice") {
+          return {
+            ...field,
+            options,
+          };
+        }
+        const nextLength = options.length;
+        let minSelections = field.minSelections;
+        if (typeof minSelections === "number" && minSelections > nextLength) {
+          minSelections = nextLength > 0 ? nextLength : undefined;
+        }
+        let maxSelections = field.maxSelections;
+        if (typeof maxSelections === "number" && maxSelections > nextLength) {
+          maxSelections = nextLength > 0 ? nextLength : undefined;
+        }
+        return {
+          ...field,
+          options,
+          minSelections,
+          maxSelections,
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
   const [selectedType, setSelectedType] = useState<FieldType>("textarea_with_counter");
 
   const handleAddField = useCallback(() => {
@@ -652,6 +1073,7 @@ export function FormStep({
       ...prev,
       fields: [...prev.fields, field],
     }));
+    setSelectedFieldIndex(activeConfig.fields.length);
   }, [activeConfig.fields, pushConfigChange, selectedType]);
 
   const handleRemoveField = useCallback(
@@ -679,6 +1101,11 @@ export function FormStep({
     activeConfig.submitLabel && activeConfig.submitLabel.length > 0
       ? activeConfig.submitLabel
       : DEFAULT_SUBMIT_LABEL;
+
+  const selectedField =
+    selectedFieldIndex !== null ? activeConfig.fields[selectedFieldIndex] : null;
+  const selectedChoiceField =
+    selectedField && isChoiceField(selectedField) ? selectedField : null;
 
   return (
     <div className="flex flex-col gap-8 lg:flex-row">
@@ -752,6 +1179,8 @@ export function FormStep({
                   key={field.id}
                   field={field}
                   index={index}
+                  isSelected={selectedFieldIndex === index}
+                  onSelect={handleSelectField}
                   onRemove={handleRemoveField}
                 />
               ))}
@@ -761,6 +1190,33 @@ export function FormStep({
                 </li>
               )}
             </ul>
+            {activeConfig.fields.length > 0 && (
+              selectedFieldIndex !== null ? (
+                selectedChoiceField ? (
+                  <ChoiceFieldEditor
+                    field={selectedChoiceField}
+                    onOptionLabelChange={(optionIndex, value) =>
+                      handleChoiceOptionLabelChange(selectedFieldIndex, optionIndex, value)
+                    }
+                    onOptionDescriptionChange={(optionIndex, value) =>
+                      handleChoiceOptionDescriptionChange(selectedFieldIndex, optionIndex, value)
+                    }
+                    onAddOption={() => handleAddChoiceOption(selectedFieldIndex)}
+                    onRemoveOption={(optionIndex) =>
+                      handleRemoveChoiceOption(selectedFieldIndex, optionIndex)
+                    }
+                  />
+                ) : (
+                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-[color:var(--brand-charcoal)]/80">
+                    Ce type de champ n'a pas d'options configurables.
+                  </p>
+                )
+              ) : (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-[color:var(--brand-charcoal)]/80">
+                  Sélectionne un champ pour modifier ses options.
+                </p>
+              )
+            )}
           </div>
         </aside>
       )}

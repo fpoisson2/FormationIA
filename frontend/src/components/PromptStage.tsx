@@ -3,7 +3,9 @@ import type {
   BulletedListFieldSpec,
   FieldSpec,
   FieldValue,
+  MultipleChoiceFieldSpec,
   Mission,
+  SingleChoiceFieldSpec,
   StageAnswer,
   StageRecord,
   TableMenuDayValue,
@@ -55,6 +57,14 @@ function createInitialValues(stageFields: FieldSpec[]): StageAnswer {
       }
       case "two_bullets": {
         values[field.id] = Array.from({ length: 2 }, () => "");
+        break;
+      }
+      case "single_choice": {
+        values[field.id] = "";
+        break;
+      }
+      case "multiple_choice": {
+        values[field.id] = [];
         break;
       }
       case "textarea_with_counter":
@@ -170,6 +180,28 @@ function PromptStage({
             sanitized[field.id] = trimWords(text);
             break;
           }
+          case "single_choice": {
+            const spec = field as SingleChoiceFieldSpec;
+            const selected = typeof value === "string" ? value : "";
+            sanitized[field.id] = spec.options.some((option) => option.value === selected)
+              ? selected
+              : "";
+            break;
+          }
+          case "multiple_choice": {
+            const spec = field as MultipleChoiceFieldSpec;
+            const selections = Array.isArray(value)
+              ? (value as string[]).filter((item) => typeof item === "string")
+              : [];
+            const unique = Array.from(new Set(selections));
+            const validSet = new Set(
+              unique.filter((item) => spec.options.some((option) => option.value === item))
+            );
+            sanitized[field.id] = spec.options
+              .map((option) => option.value)
+              .filter((optionValue) => validSet.has(optionValue));
+            break;
+          }
           default:
             sanitized[field.id] = value;
         }
@@ -280,6 +312,44 @@ function PromptStage({
             const text = typeof value === "string" ? (value as string) : "";
             if (!REFERENCE_PATTERN.test(text)) {
               fieldErrors[field.id] = "Format attendu : Auteur, 20xx.";
+            }
+            break;
+          }
+          case "single_choice": {
+            const spec = field as SingleChoiceFieldSpec;
+            const selected = typeof value === "string" ? value : "";
+            if (!spec.options.some((option) => option.value === selected)) {
+              fieldErrors[field.id] = "Sélectionne une réponse.";
+            }
+            break;
+          }
+          case "multiple_choice": {
+            const spec = field as MultipleChoiceFieldSpec;
+            const selections = Array.isArray(value)
+              ? (value as string[]).filter((item) => typeof item === "string" && item.length > 0)
+              : [];
+            const unique = Array.from(new Set(selections));
+            const valid = unique.filter((item) => spec.options.some((option) => option.value === item));
+            if (valid.length !== unique.length) {
+              fieldErrors[field.id] = "Sélectionne uniquement les options proposées.";
+              break;
+            }
+            if (valid.length === 0) {
+              fieldErrors[field.id] = "Sélectionne au moins une réponse.";
+              break;
+            }
+            if (typeof spec.minSelections === "number" && valid.length < spec.minSelections) {
+              fieldErrors[field.id] =
+                spec.minSelections > 1
+                  ? `Sélectionne au moins ${spec.minSelections} réponses.`
+                  : "Sélectionne au moins une réponse.";
+              break;
+            }
+            if (typeof spec.maxSelections === "number" && valid.length > spec.maxSelections) {
+              fieldErrors[field.id] =
+                spec.maxSelections > 1
+                  ? `Sélectionne au plus ${spec.maxSelections} réponses.`
+                  : "Sélectionne au plus une réponse.";
             }
             break;
           }
@@ -399,6 +469,33 @@ function PromptStage({
             <ul className="mt-2 list-disc space-y-1 pl-5">
               {bullets.map((bullet, index) => (
                 <li key={`${field.id}-${index}`}>{bullet}</li>
+              ))}
+            </ul>
+          );
+        }
+        case "single_choice": {
+          const spec = field as SingleChoiceFieldSpec;
+          const selected = typeof value === "string" ? value : "";
+          const option = spec.options.find((item) => item.value === selected);
+          return (
+            <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm leading-relaxed">
+              {option ? option.label : "—"}
+            </p>
+          );
+        }
+        case "multiple_choice": {
+          const spec = field as MultipleChoiceFieldSpec;
+          const selections = Array.isArray(value) ? (value as string[]) : [];
+          const labels = selections
+            .map((item) => spec.options.find((option) => option.value === item)?.label)
+            .filter((label): label is string => Boolean(label));
+          if (labels.length === 0) {
+            return <p className="mt-2 rounded-2xl bg-white/10 p-3 text-sm leading-relaxed">—</p>;
+          }
+          return (
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {labels.map((label, index) => (
+                <li key={`${field.id}-${index}`}>{label}</li>
               ))}
             </ul>
           );
