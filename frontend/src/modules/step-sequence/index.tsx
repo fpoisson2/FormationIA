@@ -17,6 +17,7 @@ import {
   type StepComponentWithMetadata,
   type StepDefinition,
   type StepRegistry,
+  type StepSequenceActivityContextBridge,
   type StepSequenceContextValue,
   type StepSequenceWrapperPreference,
 } from "./types";
@@ -64,4 +65,5 @@ export type {
   StepSequenceRenderWrapperProps,
   StepComponentWithMetadata,
   StepSequenceWrapperPreference,
+  StepSequenceActivityContextBridge,
 };

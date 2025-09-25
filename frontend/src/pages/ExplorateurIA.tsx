@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type Ref,
   type CSSProperties,
+  type ChangeEvent,
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
@@ -20,7 +21,9 @@ import {
   type StepComponentProps,
   type StepDefinition,
   type StepSequenceRenderWrapperProps,
+  type StepSequenceActivityContextBridge,
 } from "../modules/step-sequence";
+import { isCompositeStepDefinition } from "../modules/step-sequence/types";
 import { createExplorateurExport } from "./explorateurIA/export";
 import {
   createInitialProgress,
@@ -28,6 +31,7 @@ import {
   updateCreationProgress,
   updateDecisionProgress,
   updateEthicsProgress,
+  updateGenericQuarterProgress,
   updateMairieProgress,
   type ExplorateurProgress,
   type QuarterPayloadMap,
@@ -40,7 +44,23 @@ import {
   getQuarterFromStepId,
   type QuarterSteps,
 } from "./explorateurIA/worlds/world1/steps";
-import { QUARTER_ORDER, type QuarterId } from "./explorateurIA/types";
+import {
+  DEFAULT_QUARTER_IDS,
+  normalizeQuarterId,
+  type QuarterId,
+} from "./explorateurIA/types";
+import {
+  DEFAULT_DERIVED_QUARTERS,
+  DEFAULT_EXPLORATEUR_QUARTERS,
+  cloneDerivedQuarterData,
+  deriveQuarterData,
+  sanitizeQuarterConfigs,
+  type DerivedQuarterData,
+  type ExplorateurIAInventoryConfig,
+  type ExplorateurIAInventoryDefinition,
+  type ExplorateurIAQuarterConfig,
+  type RewardStage,
+} from "./explorateurIA/config";
 import {
   createChiptuneTheme,
   type ChiptuneTheme,
@@ -58,52 +78,66 @@ import {
 // Export JSON + impression PDF via window.print().
 // ---
 
-type RewardStage = Exclude<QuarterId, "mairie">;
-
-type InventoryDefinition = {
-  stage: RewardStage;
-  title: string;
-  description: string;
-  hint: string;
-  icon: string;
-};
+type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
 
-const INVENTORY_ITEMS: InventoryDefinition[] = [
-  {
-    stage: "clarte",
-    title: "Boussole de clarté",
-    description:
-      "Une boussole calibrée pour pointer vers les consignes les plus limpides.",
-    hint: "Réussissez le défi Clarté pour l'ajouter à votre sac.",
-    icon: "🧭",
-  },
-  {
-    stage: "creation",
-    title: "Palette synthétique",
-    description:
-      "Un set modulable pour combiner styles, médias et tonalités à la demande.",
-    hint: "Terminez le défi Création pour débloquer cet outil.",
-    icon: "🎨",
-  },
-  {
-    stage: "decision",
-    title: "Balance d'arbitrage",
-    description:
-      "Une balance portative qui révèle instantanément impacts et compromis.",
-    hint: "Gagnez le défi Décision pour la remporter.",
-    icon: "⚖️",
-  },
-  {
-    stage: "ethique",
-    title: "Lanterne déontique",
-    description:
-      "Une lanterne qui éclaire les zones d'ombre pour garder le cap éthique.",
-    hint: "Relevez le défi Éthique pour la récupérer.",
-    icon: "🕯️",
-  },
-];
+const DEFAULT_QUARTER_MAP = new Map(
+  DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => [quarter.id, quarter])
+);
+
+const KNOWN_QUARTER_IDS = new Set<QuarterId>(
+  Array.from(DEFAULT_QUARTER_IDS) as QuarterId[]
+);
+
+let currentDerivedData: DerivedQuarterData = cloneDerivedQuarterData(
+  DEFAULT_DERIVED_QUARTERS
+);
+
+let PROGRESSION_SEQUENCE: RewardStage[] = [];
+let PROGRESSION_WITH_GOAL: QuarterId[] = [];
+let BUILDING_DISPLAY_ORDER: QuarterId[] = [];
+let BUILDING_META: Record<
+  QuarterId,
+  { label: string; color: string; number?: number }
+> = {} as Record<QuarterId, { label: string; color: string; number?: number }>;
+let INVENTORY_ITEMS: InventoryDefinition[] = [];
+
+function updateDerivedQuarterCaches(data: DerivedQuarterData) {
+  currentDerivedData = cloneDerivedQuarterData(data);
+  PROGRESSION_SEQUENCE = [...currentDerivedData.progressionSequence];
+  const goal = currentDerivedData.goalIds[0];
+  PROGRESSION_WITH_GOAL =
+    goal === undefined
+      ? [...PROGRESSION_SEQUENCE]
+      : [...PROGRESSION_SEQUENCE, goal];
+  BUILDING_DISPLAY_ORDER = [...currentDerivedData.buildingDisplayOrder];
+  BUILDING_META = Object.entries(currentDerivedData.buildingMeta).reduce(
+    (acc, [id, meta]) => {
+      acc[id as QuarterId] = {
+        label: meta.label,
+        color: meta.color,
+        ...(meta.number === undefined ? {} : { number: meta.number }),
+      };
+      return acc;
+    },
+    {} as Record<QuarterId, { label: string; color: string; number?: number }>
+  );
+  INVENTORY_ITEMS = currentDerivedData.inventoryItems.map((item) => ({
+    ...item,
+  }));
+}
+
+updateDerivedQuarterCaches(DEFAULT_DERIVED_QUARTERS);
+
+function applyDerivedQuarterData(next: DerivedQuarterData) {
+  updateDerivedQuarterCaches(next);
+  rebuildLandmarkAssignments();
+  rebuildBuildings();
+  rebuildBuildingLookup();
+  rebuildPathGates();
+  rebuildGateLookup();
+}
 
 const MANUAL_ADVANCE_COMPONENTS = new Set<string>(["rich-content", "video"]);
 
@@ -2371,11 +2405,27 @@ function distributeIndices(total: number, count: number): number[] {
   if (count <= 0) {
     return [];
   }
-  if (count === 1 || total <= 1) {
-    return [0];
+  if (total <= 0) {
+    return Array(count).fill(0);
+  }
+  if (count === 1 || total === 1) {
+    return Array(count).fill(0);
   }
   const step = (total - 1) / (count - 1);
-  return Array.from({ length: count }, (_, index) => Math.round(index * step));
+  return Array.from({ length: count }, (_, index) => {
+    const candidate = Math.round(index * step);
+    if (!Number.isFinite(candidate)) {
+      return 0;
+    }
+    if (candidate <= 0) {
+      return 0;
+    }
+    const max = total - 1;
+    if (candidate >= max) {
+      return max;
+    }
+    return candidate;
+  });
 }
 
 const WORLD_WIDTH = 25;
@@ -2393,6 +2443,8 @@ export interface ExplorateurIATerrainConfig {
 export interface ExplorateurIAConfig {
   terrain: ExplorateurIATerrainConfig;
   steps: StepDefinition[];
+  quarterDesignerSteps: QuarterSteps;
+  quarters: ExplorateurIAQuarterConfig[];
 }
 
 function cloneStepConfig<T>(value: T): T {
@@ -2414,12 +2466,47 @@ function cloneStepConfig<T>(value: T): T {
 }
 
 function cloneStepDefinition(step: StepDefinition): StepDefinition {
+  if (isCompositeStepDefinition(step)) {
+    return {
+      id: step.id,
+      component: step.component,
+      config:
+        step.config === undefined ? undefined : cloneStepConfig(step.config),
+      composite: cloneStepConfig(step.composite),
+    } satisfies StepDefinition;
+  }
   return {
     id: step.id,
     component: step.component,
     config:
       step.config === undefined ? undefined : cloneStepConfig(step.config),
   } satisfies StepDefinition;
+}
+
+function cloneQuarterStepMap(map: QuarterSteps): QuarterSteps {
+  const result: Partial<QuarterSteps> = {};
+  for (const [quarterId, steps] of Object.entries(map) as Array<[
+    QuarterId,
+    StepDefinition[]
+  ]>) {
+    result[quarterId] = steps.map(cloneStepDefinition);
+  }
+  return result as QuarterSteps;
+}
+
+function ensureStepHasQuarterPrefix(
+  stepId: string,
+  quarterId: QuarterId
+): string {
+  if (!stepId) {
+    return `${quarterId}:step-1`;
+  }
+  const trimmed = stepId.trim();
+  if (trimmed.startsWith(`${quarterId}:`)) {
+    return trimmed;
+  }
+  const sanitized = trimmed.replace(/\s+/g, "-");
+  return `${quarterId}:${sanitized}`;
 }
 
 function sanitizeTerrainConfig(
@@ -2444,12 +2531,17 @@ function sanitizeTerrainConfig(
   return { themeId, seed } satisfies ExplorateurIATerrainConfig;
 }
 
-function sanitizeSteps(value: unknown): StepDefinition[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
+function sanitizeSteps(
+  value: unknown,
+  fallback?: StepDefinition[]
+): StepDefinition[] {
+  const source = Array.isArray(value)
+    ? value
+    : Array.isArray(fallback)
+    ? fallback
+    : [];
   const steps: StepDefinition[] = [];
-  for (const item of value) {
+  for (const item of source) {
     if (!item || typeof item !== "object") {
       continue;
     }
@@ -2458,7 +2550,13 @@ function sanitizeSteps(value: unknown): StepDefinition[] {
       component?: unknown;
       config?: unknown;
     };
-    if (typeof candidate.id !== "string" || typeof candidate.component !== "string") {
+    if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) {
+      continue;
+    }
+    if (
+      typeof candidate.component !== "string" ||
+      candidate.component.trim().length === 0
+    ) {
       continue;
     }
     steps.push({
@@ -2474,13 +2572,247 @@ function sanitizeSteps(value: unknown): StepDefinition[] {
 }
 
 function getDefaultExplorateurSteps(): StepDefinition[] {
-  return flattenQuarterSteps(WORLD1_QUARTER_STEPS).map(cloneStepDefinition);
+  return flattenQuarterSteps(
+    WORLD1_QUARTER_STEPS,
+    DEFAULT_DERIVED_QUARTERS.quarterOrder
+  ).map(cloneStepDefinition);
+}
+
+type QuarterDesignerStepMap = Record<QuarterId, StepDefinition[]>;
+
+function ensureDesignerStepId(
+  quarterId: QuarterId,
+  step: StepDefinition,
+  index: number
+): StepDefinition {
+  const id =
+    typeof step.id === "string" && step.id.trim().length > 0
+      ? ensureStepHasQuarterPrefix(step.id, quarterId)
+      : `${quarterId}:designer:${index + 1}`;
+  const component =
+    typeof step.component === "string" && step.component.trim().length > 0
+      ? step.component
+      : "custom";
+  if (isCompositeStepDefinition(step)) {
+    return {
+      id,
+      component,
+      config:
+        step.config === undefined ? undefined : cloneStepConfig(step.config),
+      composite: cloneStepConfig(step.composite),
+    } satisfies StepDefinition;
+  }
+  const config =
+    step.config === undefined ? undefined : cloneStepConfig(step.config);
+  return { id, component, config } satisfies StepDefinition;
+}
+
+function createPlaceholderQuarterSteps(
+  quarter: ExplorateurIAQuarterConfig
+): StepDefinition[] {
+  const baseId = quarter.id;
+  const intro: StepDefinition = {
+    id: `${baseId}:introduction`,
+    component: "rich-content",
+    config: {
+      title: `${quarter.label || "Quartier"} — Introduction`,
+      body:
+        "Décrivez le contexte ou les objectifs de ce quartier dans cet encart.",
+    },
+  };
+  const synthesis: StepDefinition = {
+    id: `${baseId}:synthese`,
+    component: "form",
+    config: {
+      submitLabel: "Enregistrer",
+      allowEmpty: false,
+      fields: [
+        {
+          id: `${baseId}-objectif`,
+          type: "textarea_with_counter",
+          label: "Quels apprentissages retenir ?",
+          minWords: 10,
+          maxWords: 80,
+        },
+      ],
+    },
+  };
+  return [intro, synthesis];
+}
+
+function createBasicsDesignerStep(
+  quarter: ExplorateurIAQuarterConfig
+): StepDefinition {
+  const baseId = quarter.id;
+  return {
+    id: `${baseId}:designer:basics`,
+    component: "custom",
+    config: {
+      type: "explorateur-quarter-basics",
+      quarterId: baseId,
+      label: quarter.label,
+      color: quarter.color,
+      buildingNumber: quarter.buildingNumber ?? null,
+      isGoal: Boolean(quarter.isGoal),
+    },
+  } satisfies StepDefinition;
+}
+
+function createInventoryDesignerStep(
+  quarter: ExplorateurIAQuarterConfig
+): StepDefinition {
+  const baseId = quarter.id;
+  return {
+    id: `${baseId}:designer:inventory`,
+    component: "custom",
+    config: {
+      type: "explorateur-quarter-inventory",
+      quarterId: baseId,
+      enabled: Boolean(quarter.inventory) && !quarter.isGoal,
+      title: quarter.inventory?.title ?? "",
+      description: quarter.inventory?.description ?? "",
+      hint: quarter.inventory?.hint ?? "",
+      icon: quarter.inventory?.icon ?? "🎁",
+    },
+  } satisfies StepDefinition;
+}
+
+function createDefaultQuarterDesignerSteps(
+  quarter: ExplorateurIAQuarterConfig,
+  quarterSteps: StepDefinition[] = []
+): StepDefinition[] {
+  const designerSteps: StepDefinition[] = [createBasicsDesignerStep(quarter)];
+
+  const effectiveQuarterSteps = (
+    quarterSteps.length > 0
+      ? quarterSteps
+      : createPlaceholderQuarterSteps(quarter)
+  ).map((step) => ({
+    ...cloneStepDefinition(step),
+    id: ensureStepHasQuarterPrefix(step.id, quarter.id),
+  }));
+
+  for (const step of effectiveQuarterSteps) {
+    designerSteps.push(step);
+  }
+
+  if (!quarter.isGoal) {
+    designerSteps.push(createInventoryDesignerStep(quarter));
+  }
+
+  return designerSteps;
+}
+
+function createDefaultQuarterDesignerStepMap(
+  quarters: ExplorateurIAQuarterConfig[],
+  quarterSteps: QuarterSteps
+): QuarterDesignerStepMap {
+  const map: Partial<QuarterSteps> = {};
+  for (const quarter of quarters) {
+    const sequence = quarterSteps[quarter.id] ?? [];
+    map[quarter.id] = createDefaultQuarterDesignerSteps(
+      quarter,
+      sequence
+    ).map((step, index) => ensureDesignerStepId(quarter.id, step, index));
+  }
+  return map as QuarterDesignerStepMap;
+}
+
+function extractQuarterStepsFromDesignerMap(
+  designerMap: QuarterSteps,
+  quarters: ExplorateurIAQuarterConfig[]
+): QuarterSteps {
+  const result: Partial<QuarterSteps> = {};
+  for (const quarter of quarters) {
+    const steps = designerMap[quarter.id] ?? [];
+    const actual = steps
+      .filter(
+        (step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step))
+      )
+      .map((step) => ensureQuarterSequenceStep(step, quarter.id));
+    result[quarter.id] = actual.map(cloneStepDefinition);
+  }
+  return result as QuarterSteps;
+}
+
+function sanitizeQuarterDesignerSteps(
+  value: unknown,
+  quarters: ExplorateurIAQuarterConfig[],
+  fallbackQuarterSteps: QuarterSteps
+): {
+  designerSteps: QuarterDesignerStepMap;
+  quarterSteps: QuarterSteps;
+} {
+  const rawMap =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const result: Partial<QuarterSteps> = {};
+  const quarterResult: Partial<QuarterSteps> = {};
+
+  for (const quarter of quarters) {
+    const rawSteps = rawMap[quarter.id];
+    const fallbackDesignerSteps = createDefaultQuarterDesignerSteps(
+      quarter,
+      fallbackQuarterSteps[quarter.id] ?? []
+    );
+    const sanitized = sanitizeSteps(rawSteps, fallbackDesignerSteps);
+    const normalized = (sanitized.length ? sanitized : fallbackDesignerSteps).map(
+      (step, index) => ensureDesignerStepId(quarter.id, step, index)
+    );
+
+    const fallbackActualSteps = fallbackDesignerSteps
+      .filter(
+        (step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step))
+      )
+      .map(cloneStepDefinition);
+
+    const synced = normalized.map((step) =>
+      syncDesignerStepWithQuarter(step, quarter)
+    );
+
+    const actualSteps = synced
+      .filter(
+        (step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step))
+      )
+      .map((step) => ensureQuarterSequenceStep(step, quarter.id));
+
+    quarterResult[quarter.id] = (actualSteps.length
+      ? actualSteps
+      : fallbackActualSteps.length
+      ? fallbackActualSteps
+      : createPlaceholderQuarterSteps(quarter)
+    ).map(cloneStepDefinition);
+
+    result[quarter.id] = synced.map(cloneStepDefinition);
+  }
+
+  return {
+    designerSteps: result as QuarterDesignerStepMap,
+    quarterSteps: quarterResult as QuarterSteps,
+  };
 }
 
 export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
+  const quarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
+    ...quarter,
+    inventory: quarter.inventory ? { ...quarter.inventory } : null,
+  }));
+  const derived = deriveQuarterData(quarters);
+  const quarterSteps = expandQuarterSteps(
+    getDefaultExplorateurSteps(),
+    WORLD1_QUARTER_STEPS,
+    derived.quarterOrder
+  );
+  const designerSteps = createDefaultQuarterDesignerStepMap(
+    quarters,
+    quarterSteps
+  );
   return {
     terrain: { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED },
-    steps: getDefaultExplorateurSteps(),
+    steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
+    quarterDesignerSteps: designerSteps,
+    quarters,
   };
 }
 
@@ -2493,12 +2825,31 @@ export function sanitizeExplorateurIAConfig(
   const base = config as Partial<ExplorateurIAConfig> & {
     terrain?: unknown;
     steps?: unknown;
+    quarters?: unknown;
+    quarterDesignerSteps?: unknown;
   };
   const terrain = sanitizeTerrainConfig(base.terrain);
   const steps = sanitizeSteps(base.steps);
+  const quarters = sanitizeQuarterConfigs(
+    base.quarters,
+    DEFAULT_EXPLORATEUR_QUARTERS
+  );
+  const derived = deriveQuarterData(quarters);
+  const expandedQuarterSteps = expandQuarterSteps(
+    steps.length > 0 ? steps : getDefaultExplorateurSteps(),
+    WORLD1_QUARTER_STEPS,
+    derived.quarterOrder
+  );
+  const { designerSteps, quarterSteps } = sanitizeQuarterDesignerSteps(
+    base.quarterDesignerSteps,
+    quarters,
+    expandedQuarterSteps
+  );
   return {
     terrain,
-    steps: steps.length > 0 ? steps : getDefaultExplorateurSteps(),
+    steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
+    quarterDesignerSteps: designerSteps,
+    quarters,
   };
 }
 
@@ -2510,22 +2861,9 @@ const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
   ethique: { x: 18, y: 18 },
 };
 
-const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
-  "clarte",
-  "mairie",
-  "creation",
-  "decision",
-  "ethique",
+const DEFAULT_LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
+  ...DEFAULT_DERIVED_QUARTERS.buildingDisplayOrder,
 ];
-
-const PROGRESSION_SEQUENCE: QuarterId[] = [
-  "clarte",
-  "creation",
-  "decision",
-  "ethique",
-];
-
-const PROGRESSION_WITH_GOAL: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
 
 type PathMarkerPlacement = { x: number; y: number; coord: TileCoord };
 
@@ -2545,29 +2883,30 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     ethique: { ...FALLBACK_LANDMARKS.ethique },
   };
 
-  if (path.length < LANDMARK_ASSIGNMENT_ORDER.length) {
-    return assignments;
-  }
+  const assignmentOrder =
+    currentDerivedData.buildingDisplayOrder.length > 0
+      ? currentDerivedData.buildingDisplayOrder
+      : DEFAULT_LANDMARK_ASSIGNMENT_ORDER;
 
   const interiorIndices = path
     .map((_, index) => index)
     .filter((index) => index > 0 && index < path.length - 1);
 
   const pickFrom = (indices: number[]) => {
-    const distributed = distributeIndices(indices.length, LANDMARK_ASSIGNMENT_ORDER.length);
-    LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
+    const distributed = distributeIndices(indices.length, assignmentOrder.length);
+    assignmentOrder.forEach((id, index) => {
       const [x, y] = path[indices[distributed[index]]];
       assignments[id] = { x, y };
     });
   };
 
-  if (interiorIndices.length >= LANDMARK_ASSIGNMENT_ORDER.length) {
+  if (interiorIndices.length >= assignmentOrder.length) {
     pickFrom(interiorIndices);
   } else {
     pickFrom(path.map((_, index) => index));
   }
 
-  const stageOrder: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+  const stageOrder: QuarterId[] = [...PROGRESSION_WITH_GOAL];
   const indexByStage = new Map<QuarterId, number>();
   const takenIndices = new Set<number>();
 
@@ -2578,6 +2917,9 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
         continue;
       }
       const assignment = assignments[stage];
+      if (!assignment) {
+        continue;
+      }
       if (assignment.x === x && assignment.y === y) {
         indexByStage.set(stage, index);
         takenIndices.add(index);
@@ -2586,9 +2928,15 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
   }
 
   if (path.length > 0) {
-    indexByStage.set("mairie", path.length - 1);
+    const goalIds =
+      currentDerivedData.goalIds.length > 0
+        ? currentDerivedData.goalIds
+        : (["mairie"] as QuarterId[]);
     const [goalX, goalY] = path[path.length - 1];
-    assignments.mairie = { x: goalX, y: goalY };
+    for (const goalId of goalIds) {
+      indexByStage.set(goalId, path.length - 1);
+      assignments[goalId] = { x: goalX, y: goalY };
+    }
   }
 
   const moveStage = (stage: QuarterId, targetIndex: number) => {
@@ -2688,8 +3036,13 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
     };
   }
 
+  const assignmentOrder =
+    currentDerivedData.buildingDisplayOrder.length > 0
+      ? currentDerivedData.buildingDisplayOrder
+      : DEFAULT_LANDMARK_ASSIGNMENT_ORDER;
+
   const desiredPathLength = Math.max(
-    LANDMARK_ASSIGNMENT_ORDER.length,
+    assignmentOrder.length,
     Math.floor(island.size * 0.45)
   );
 
@@ -2746,6 +3099,30 @@ const world = generatedWorld.tiles;
 const GRID_H = world.length;
 const GRID_W = world[0]?.length ?? 0;
 
+function rebuildLandmarkAssignments() {
+  const assignments = assignLandmarksFromPath(generatedWorld.path);
+  const assignedIds = new Set(
+    Object.keys(assignments) as QuarterId[]
+  );
+
+  const existingIds = Object.keys(
+    generatedWorld.landmarks
+  ) as QuarterId[];
+  for (const id of existingIds) {
+    if (!assignedIds.has(id)) {
+      delete generatedWorld.landmarks[id];
+    }
+  }
+
+  for (const id of assignedIds) {
+    const coord = assignments[id];
+    if (!coord) {
+      continue;
+    }
+    generatedWorld.landmarks[id] = { x: coord.x, y: coord.y };
+  }
+}
+
 const MARKER_COORD_BY_KEY = new Map<string, TileCoord>();
 function updateMarkerCoordCache(markers: PathMarkerPlacement[]) {
   MARKER_COORD_BY_KEY.clear();
@@ -2764,25 +3141,6 @@ function updatePathIndexCache(path: Coord[]) {
 }
 updatePathIndexCache(generatedWorld.path);
 
-const BUILDING_META: Record<
-  QuarterId,
-  { label: string; color: string; number?: number }
-> = {
-  mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
-  clarte: { label: "Quartier Clarté", color: "#06d6a0", number: 1 },
-  creation: { label: "Quartier Création", color: "#118ab2", number: 2 },
-  decision: { label: "Quartier Décision", color: "#ef476f", number: 3 },
-  ethique: { label: "Quartier Éthique", color: "#8338ec", number: 4 },
-};
-
-const BUILDING_DISPLAY_ORDER: QuarterId[] = [
-  "mairie",
-  "clarte",
-  "creation",
-  "decision",
-  "ethique",
-];
-
 const buildings: Array<{
   id: QuarterId;
   x: number;
@@ -2793,15 +3151,18 @@ const buildings: Array<{
 }> = [];
 function rebuildBuildings() {
   buildings.splice(0, buildings.length, ...BUILDING_DISPLAY_ORDER.map((id) => {
-    const landmark = generatedWorld.landmarks[id] ?? FALLBACK_LANDMARKS[id];
+    const landmark =
+      generatedWorld.landmarks[id] ??
+      FALLBACK_LANDMARKS[id] ??
+      FALLBACK_LANDMARKS.mairie;
     const meta = BUILDING_META[id];
     return {
       id,
-      x: landmark.x,
-      y: landmark.y,
-      label: meta.label,
-      color: meta.color,
-      number: meta.number,
+      x: landmark?.x ?? 0,
+      y: landmark?.y ?? 0,
+      label: meta?.label ?? id,
+      color: meta?.color ?? "#ffffff",
+      number: meta?.number,
     };
   }));
 }
@@ -4295,7 +4656,9 @@ export default function ExplorateurIA({
   const isEditMode = context?.isEditMode ?? isEditModeProp ?? false;
   const effectiveOnUpdateConfig =
     context?.onUpdateConfig ?? onUpdateConfig ?? (() => {});
-  const activityContext = context?.activityContext ?? null;
+  const activityContext =
+    (context?.activityContext as StepSequenceActivityContextBridge | null | undefined) ??
+    null;
   const rawCompletionId =
     typeof activityContext?.completionId === "string"
       ? activityContext.completionId
@@ -4316,6 +4679,15 @@ export default function ExplorateurIA({
     [config]
   );
 
+  const derivedQuarterData = useMemo(
+    () => deriveQuarterData(sanitizedConfig.quarters),
+    [sanitizedConfig.quarters]
+  );
+
+  useEffect(() => {
+    applyDerivedQuarterData(derivedQuarterData);
+  }, [derivedQuarterData]);
+
   const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
   const tileSize = useResponsiveTileSize("cover", {
@@ -4330,13 +4702,21 @@ export default function ExplorateurIA({
     () => createInitialProgress()
   );
   const [quarterSteps, setQuarterSteps] = useState<QuarterSteps>(() =>
-    expandQuarterSteps(sanitizedConfig.steps, WORLD1_QUARTER_STEPS)
+    expandQuarterSteps(
+      sanitizedConfig.steps,
+      WORLD1_QUARTER_STEPS,
+      derivedQuarterData.quarterOrder
+    )
   );
   useEffect(() => {
     setQuarterSteps(
-      expandQuarterSteps(sanitizedConfig.steps, WORLD1_QUARTER_STEPS)
+      expandQuarterSteps(
+        sanitizedConfig.steps,
+        WORLD1_QUARTER_STEPS,
+        derivedQuarterData.quarterOrder
+      )
     );
-  }, [sanitizedConfig.steps]);
+  }, [derivedQuarterData, sanitizedConfig.steps]);
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
   const [tileset] = useTileset();
@@ -4374,18 +4754,103 @@ export default function ExplorateurIA({
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
+      const nextQuarters = sanitizeQuarterConfigs(
+        patch.quarters ?? sanitizedConfig.quarters,
+        DEFAULT_EXPLORATEUR_QUARTERS
+      );
+      const derived = deriveQuarterData(nextQuarters);
+      const expandedQuarterSteps = expandQuarterSteps(
+        patch.steps ?? sanitizedConfig.steps,
+        WORLD1_QUARTER_STEPS,
+        derived.quarterOrder
+      );
+      const { designerSteps, quarterSteps } = sanitizeQuarterDesignerSteps(
+        patch.quarterDesignerSteps ?? sanitizedConfig.quarterDesignerSteps,
+        nextQuarters,
+        expandedQuarterSteps
+      );
       const next: ExplorateurIAConfig = {
         terrain: {
           themeId:
             patch.terrain?.themeId ?? sanitizedConfig.terrain.themeId,
           seed: patch.terrain?.seed ?? sanitizedConfig.terrain.seed,
         },
-        steps: (patch.steps ?? sanitizedConfig.steps).map(cloneStepDefinition),
+        steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
+        quarterDesignerSteps: cloneQuarterStepMap(designerSteps),
+        quarters: nextQuarters,
       };
       effectiveOnUpdateConfig(next);
     },
     [effectiveOnUpdateConfig, sanitizedConfig]
   );
+
+  const emitQuarterConfig = useCallback(
+    (quarters: ExplorateurIAQuarterConfig[]) => {
+      emitConfig({ quarters });
+    },
+    [emitConfig]
+  );
+
+  const emitQuarterDesignerSteps = useCallback(
+    (designerSteps: QuarterSteps) => {
+      emitConfig({ quarterDesignerSteps: designerSteps });
+    },
+    [emitConfig]
+  );
+
+  const emitTerrainConfig = useCallback(
+    (terrainPatch: Partial<ExplorateurIATerrainConfig>) => {
+      emitConfig({
+        terrain: {
+          themeId:
+            terrainPatch.themeId ?? sanitizedConfig.terrain.themeId,
+          seed: terrainPatch.seed ?? sanitizedConfig.terrain.seed,
+        },
+      });
+    },
+    [emitConfig, sanitizedConfig.terrain.seed, sanitizedConfig.terrain.themeId]
+  );
+
+  const isConfigDesignerView = isEditMode && activityContext == null;
+
+  if (isConfigDesignerView) {
+    return (
+      <ExplorateurIAConfigDesigner
+        config={sanitizedConfig}
+        onUpdateQuarters={emitQuarterConfig}
+        onUpdateQuarterDesignerSteps={emitQuarterDesignerSteps}
+        onUpdateTerrain={emitTerrainConfig}
+        onReset={() => {
+          const defaultQuarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
+            ...quarter,
+            inventory: quarter.inventory ? { ...quarter.inventory } : null,
+          }));
+          const derivedDefaults = deriveQuarterData(defaultQuarters);
+          const defaultQuarterSteps = expandQuarterSteps(
+            getDefaultExplorateurSteps(),
+            WORLD1_QUARTER_STEPS,
+            derivedDefaults.quarterOrder
+          );
+          emitConfig({
+            quarters: defaultQuarters,
+            quarterDesignerSteps:
+              createDefaultQuarterDesignerStepMap(
+                defaultQuarters,
+                defaultQuarterSteps
+              ),
+            steps: flattenQuarterSteps(
+              defaultQuarterSteps,
+              derivedDefaults.quarterOrder
+            ),
+            terrain: {
+              themeId: DEFAULT_TERRAIN_THEME_ID,
+              seed: WORLD_SEED,
+            },
+          });
+        }}
+      />
+    );
+  }
 
   useEffect(() => {
     if (sanitizedConfig.terrain.seed === currentWorldSeed) {
@@ -4486,7 +4951,7 @@ export default function ExplorateurIA({
         case "mairie":
           return progress.mairie.done;
         default:
-          return false;
+          return Boolean(progress.extras[id]?.done);
       }
     },
     [progress]
@@ -4500,7 +4965,7 @@ export default function ExplorateurIA({
       }
     }
     return active;
-  }, [isQuarterCompleted, worldVersion]);
+  }, [derivedQuarterData, isQuarterCompleted, worldVersion]);
 
   const inventoryEntries = useMemo<InventoryEntry[]>(
     () =>
@@ -4508,7 +4973,7 @@ export default function ExplorateurIA({
         ...item,
         obtained: isQuarterCompleted(item.stage),
       })),
-    [isQuarterCompleted]
+    [derivedQuarterData, isQuarterCompleted]
   );
   const inventoryCollected = inventoryEntries.reduce(
     (total, item) => total + (item.obtained ? 1 : 0),
@@ -4529,11 +4994,13 @@ export default function ExplorateurIA({
           step.id === stepId ? { ...step, config } : step
         );
         const next: QuarterSteps = { ...previous, [quarter]: nextSteps };
-        emitConfig({ steps: flattenQuarterSteps(next) });
+        emitConfig({
+          steps: flattenQuarterSteps(next, derivedQuarterData.quarterOrder),
+        });
         return next;
       });
     },
-    [emitConfig]
+    [derivedQuarterData, emitConfig]
   );
 
   const handleThemeChange = useCallback(
@@ -4786,14 +5253,14 @@ export default function ExplorateurIA({
     if (completionTriggered.current) {
       return;
     }
-    const allQuartersCompleted = QUARTER_ORDER.every(
-      (quarter) => progress[quarter].done
+    const allQuartersCompleted = derivedQuarterData.quarterOrder.every(
+      (quarter) => isQuarterCompleted(quarter)
     );
     if (allQuartersCompleted) {
       completionTriggered.current = true;
       void markCompleted({ triggerCompletionCallback: true });
     }
-  }, [progress, markCompleted]);
+  }, [derivedQuarterData, isQuarterCompleted, markCompleted]);
 
   useEffect(() => {
     if (blockedStage && isQuarterCompleted(blockedStage)) {
@@ -5030,7 +5497,7 @@ export default function ExplorateurIA({
         const visited = previous.visited.includes(id)
           ? previous.visited
           : [...previous.visited, id];
-        return {
+        const next: ExplorateurProgress = {
           ...previous,
           visited,
           clarte:
@@ -5053,7 +5520,17 @@ export default function ExplorateurIA({
             id === "mairie"
               ? updateMairieProgress(previous.mairie, payloads)
               : previous.mairie,
+          extras: previous.extras,
         } satisfies ExplorateurProgress;
+
+        if (!KNOWN_QUARTER_IDS.has(id)) {
+          next.extras = {
+            ...previous.extras,
+            [id]: updateGenericQuarterProgress(previous.extras[id], payloads),
+          };
+        }
+
+        return next;
       });
       setOpen(null);
       setBlockedStage(null);
@@ -5064,7 +5541,9 @@ export default function ExplorateurIA({
   );
 
   const downloadJSON = () => {
-    const data = createExplorateurExport(progress);
+    const data = createExplorateurExport(progress, {
+      quarterOrder: derivedQuarterData.quarterOrder,
+    });
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });
@@ -5655,6 +6134,1123 @@ export default function ExplorateurIA({
           renderStepWrapper={renderQuarterStep}
         />
       ) : null}
+    </div>
+  );
+}
+
+interface ConfigDesignerProps {
+  config: ExplorateurIAConfig;
+  onUpdateQuarters: (quarters: ExplorateurIAQuarterConfig[]) => void;
+  onUpdateQuarterDesignerSteps: (steps: QuarterSteps) => void;
+  onUpdateTerrain: (patch: Partial<ExplorateurIATerrainConfig>) => void;
+  onReset: () => void;
+}
+
+function cloneQuarter(
+  quarter: ExplorateurIAQuarterConfig
+): ExplorateurIAQuarterConfig {
+  return {
+    id: quarter.id,
+    label: quarter.label,
+    color: quarter.color,
+    buildingNumber:
+      quarter.buildingNumber === undefined
+        ? undefined
+        : quarter.buildingNumber === null
+        ? null
+        : Number(quarter.buildingNumber),
+    isGoal: Boolean(quarter.isGoal),
+    inventory: quarter.inventory
+      ? {
+          title: quarter.inventory.title,
+          description: quarter.inventory.description,
+          hint: quarter.inventory.hint,
+          icon: quarter.inventory.icon,
+        }
+      : null,
+  } satisfies ExplorateurIAQuarterConfig;
+}
+
+function getDefaultInventory(
+  quarterId: QuarterId
+): ExplorateurIAInventoryConfig | null {
+  const defaults = DEFAULT_QUARTER_MAP.get(quarterId);
+  if (!defaults || !defaults.inventory) {
+    return null;
+  }
+  return {
+    title: defaults.inventory.title,
+    description: defaults.inventory.description,
+    hint: defaults.inventory.hint,
+    icon: defaults.inventory.icon,
+  } satisfies ExplorateurIAInventoryConfig;
+}
+
+const FALLBACK_CUSTOM_COLOR_PALETTE = [
+  "#f97316",
+  "#0ea5e9",
+  "#22c55e",
+  "#a855f7",
+  "#ec4899",
+];
+
+function createNewQuarterTemplate(
+  existing: readonly ExplorateurIAQuarterConfig[]
+): ExplorateurIAQuarterConfig {
+  const usedIds = new Set(existing.map((quarter) => quarter.id));
+  const nonGoalCount = existing.filter((quarter) => !quarter.isGoal).length;
+  const baseLabel = `Nouveau quartier ${nonGoalCount + 1}`;
+  const normalized =
+    normalizeQuarterId(baseLabel) ??
+    (`quartier-${nonGoalCount + 1}` as QuarterId);
+  let id = normalized as QuarterId;
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${normalized}-${suffix}` as QuarterId;
+    suffix += 1;
+  }
+
+  const palette = DEFAULT_EXPLORATEUR_QUARTERS.filter(
+    (quarter) => !quarter.isGoal && typeof quarter.color === "string"
+  ).map((quarter) => quarter.color);
+  const colorPalette = palette.length ? palette : FALLBACK_CUSTOM_COLOR_PALETTE;
+  const color =
+    colorPalette[nonGoalCount % colorPalette.length] ??
+    FALLBACK_CUSTOM_COLOR_PALETTE[0];
+
+  return {
+    id,
+    label: baseLabel,
+    color,
+    buildingNumber: nonGoalCount + 1,
+    isGoal: false,
+    inventory: null,
+  } satisfies ExplorateurIAQuarterConfig;
+}
+
+
+function resolveDesignerStepType(step: StepDefinition): string {
+  if (step.config && typeof step.config === "object") {
+    const candidate = (step.config as { type?: unknown }).type;
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return step.component;
+}
+
+function getDesignerStepMeta(type: string) {
+  return QUARTER_DESIGNER_STEP_LIBRARY.find((entry) => entry.type === type);
+}
+
+function isQuarterDesignerMetaType(type: string): boolean {
+  return (
+    type === "explorateur-quarter-basics" ||
+    type === "explorateur-quarter-inventory"
+  );
+}
+
+function ensureQuarterSequenceStep(
+  step: StepDefinition,
+  quarterId: QuarterId
+): StepDefinition {
+  const id = ensureStepHasQuarterPrefix(step.id, quarterId);
+  const component =
+    typeof step.component === "string" && step.component.trim().length > 0
+      ? step.component
+      : "custom";
+
+  if (isCompositeStepDefinition(step)) {
+    return {
+      id,
+      component,
+      config:
+        step.config === undefined ? undefined : cloneStepConfig(step.config),
+      composite: cloneStepConfig(step.composite),
+    } satisfies StepDefinition;
+  }
+
+  return {
+    id,
+    component,
+    config:
+      step.config === undefined ? undefined : cloneStepConfig(step.config),
+  } satisfies StepDefinition;
+}
+
+function syncDesignerStepWithQuarter(
+  step: StepDefinition,
+  quarter: ExplorateurIAQuarterConfig
+): StepDefinition {
+  const type = resolveDesignerStepType(step);
+  if (type === "explorateur-quarter-basics") {
+    const config =
+      step.config && typeof step.config === "object"
+        ? (step.config as Record<string, unknown>)
+        : {};
+    return {
+      id: ensureStepHasQuarterPrefix(step.id, quarter.id),
+      component: step.component,
+      config: {
+        ...config,
+        type,
+        quarterId: quarter.id,
+        label: quarter.label,
+        color: quarter.color,
+        buildingNumber: quarter.isGoal
+          ? null
+          : quarter.buildingNumber ?? null,
+        isGoal: Boolean(quarter.isGoal),
+      },
+    } satisfies StepDefinition;
+  }
+  if (type === "explorateur-quarter-inventory") {
+    const config =
+      step.config && typeof step.config === "object"
+        ? (step.config as Record<string, unknown>)
+        : {};
+    const enabled = Boolean(quarter.inventory) && !quarter.isGoal;
+    return {
+      id: ensureStepHasQuarterPrefix(step.id, quarter.id),
+      component: step.component,
+      config: {
+        ...config,
+        type,
+        quarterId: quarter.id,
+        enabled,
+        title: enabled ? quarter.inventory?.title ?? "" : "",
+        description: enabled ? quarter.inventory?.description ?? "" : "",
+        hint: enabled ? quarter.inventory?.hint ?? "" : "",
+        icon: enabled ? quarter.inventory?.icon ?? "🎁" : "🎁",
+      },
+    } satisfies StepDefinition;
+  }
+
+  return ensureQuarterSequenceStep(step, quarter.id);
+}
+
+function buildSequenceTemplateLibrary(
+  map: QuarterSteps
+): Map<string, StepDefinition> {
+  const templates = new Map<string, StepDefinition>();
+  for (const steps of Object.values(map)) {
+    for (const step of steps) {
+      const type = resolveDesignerStepType(step);
+      if (!templates.has(type)) {
+        templates.set(type, cloneStepDefinition(step));
+      }
+    }
+  }
+  return templates;
+}
+
+const SEQUENCE_TEMPLATE_BY_TYPE = buildSequenceTemplateLibrary(
+  WORLD1_QUARTER_STEPS
+);
+
+function createSequenceStepFromTemplate(
+  quarter: ExplorateurIAQuarterConfig,
+  type: string,
+  existingSteps: StepDefinition[]
+): StepDefinition {
+  const template = SEQUENCE_TEMPLATE_BY_TYPE.get(type);
+  const baseFragment = template?.id
+    ? template.id.split(":").slice(1).join(":")
+    : `${type}-${existingSteps.length + 1}`;
+  const sanitizedBase =
+    baseFragment && baseFragment.trim().length > 0
+      ? baseFragment.trim().replace(/\s+/g, "-")
+      : `${type}-step`;
+  const existingIds = new Set(existingSteps.map((step) => step.id));
+  let candidateId = `${quarter.id}:${sanitizedBase}`;
+  let suffix = 2;
+  while (existingIds.has(candidateId)) {
+    candidateId = `${quarter.id}:${sanitizedBase}-${suffix}`;
+    suffix += 1;
+  }
+
+  if (template) {
+    const cloned = cloneStepDefinition(template);
+    cloned.id = candidateId;
+    return ensureQuarterSequenceStep(cloned, quarter.id);
+  }
+
+  return ensureQuarterSequenceStep(
+    {
+      id: candidateId,
+      component: type,
+      config: {},
+    },
+    quarter.id
+  );
+}
+
+function DesignerStepStateTracker({
+  context,
+  pendingStepId,
+  onConsumed,
+}: {
+  context: StepSequenceRenderWrapperProps["context"];
+  pendingStepId: string | null;
+  onConsumed: () => void;
+}) {
+  useEffect(() => {
+    if (!pendingStepId) {
+      return;
+    }
+    const targetIndex = context.steps.findIndex(
+      (definition) => definition.id === pendingStepId
+    );
+    if (targetIndex !== -1 && targetIndex !== context.stepIndex) {
+      context.goToStep(targetIndex);
+    }
+    onConsumed();
+  }, [context, onConsumed, pendingStepId]);
+  return null;
+}
+interface QuarterDesignerStepLibraryEntry {
+  type: string;
+  label: string;
+  description?: string;
+  icon: string;
+  isMeta?: boolean;
+  allowGoal?: boolean;
+  create: (
+    quarter: ExplorateurIAQuarterConfig,
+    existingSteps: StepDefinition[]
+  ) => StepDefinition | null;
+}
+
+const QUARTER_DESIGNER_STEP_LIBRARY: QuarterDesignerStepLibraryEntry[] = [
+  {
+    type: "explorateur-quarter-basics",
+    label: "Informations générales",
+    description:
+      "Nom, couleur principale, numéro de défi et statut d'objectif final.",
+    icon: "🏙️",
+    isMeta: true,
+    create: (quarter) => createBasicsDesignerStep(quarter),
+  },
+  {
+    type: "explorateur-quarter-inventory",
+    label: "Objet d'inventaire",
+    description: "Configurer la récompense associée à ce quartier.",
+    icon: "🎒",
+    isMeta: true,
+    allowGoal: false,
+    create: (quarter) => createInventoryDesignerStep(quarter),
+  },
+  {
+    type: "rich-content",
+    label: "Contenu enrichi",
+    description: "Texte, médias et encadrés pédagogiques.",
+    icon: "📰",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "rich-content", steps),
+  },
+  {
+    type: "video",
+    label: "Vidéo",
+    description: "Lecture vidéo avec suivi de progression.",
+    icon: "🎬",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "video", steps),
+  },
+  {
+    type: "form",
+    label: "Formulaire",
+    description: "Collecte de réponses structurées ou réflexion guidée.",
+    icon: "📝",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "form", steps),
+  },
+  {
+    type: "clarte-quiz",
+    label: "Quiz Clarté",
+    description: "Question à choix multiple avec score.",
+    icon: "❓",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "clarte-quiz", steps),
+  },
+  {
+    type: "creation-builder",
+    label: "Atelier Création",
+    description: "Assembler une consigne créative étape par étape.",
+    icon: "🎨",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "creation-builder", steps),
+  },
+  {
+    type: "decision-path",
+    label: "Parcours Décision",
+    description: "Comparer différentes stratégies décisionnelles.",
+    icon: "🧭",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "decision-path", steps),
+  },
+  {
+    type: "ethics-dilemmas",
+    label: "Dilemmes Éthique",
+    description: "Scénarios à choix pour explorer les enjeux éthiques.",
+    icon: "⚖️",
+    create: (quarter, steps) =>
+      createSequenceStepFromTemplate(quarter, "ethics-dilemmas", steps),
+  },
+];
+
+type QuarterDesignerStepType = QuarterDesignerStepLibraryEntry["type"];
+
+function ExplorateurIAConfigDesigner({
+  config,
+  onUpdateQuarters,
+  onUpdateQuarterDesignerSteps,
+  onUpdateTerrain,
+  onReset,
+}: ConfigDesignerProps) {
+  const nonGoalQuarterCount = useMemo(
+    () => config.quarters.filter((quarter) => !quarter.isGoal).length,
+    [config.quarters]
+  );
+
+  const [activeQuarterId, setActiveQuarterId] = useState<QuarterId | null>(
+    null
+  );
+  const [pendingStepId, setPendingStepId] = useState<string | null>(null);
+
+  const handleAddQuarter = useCallback(() => {
+    const nextQuarter = createNewQuarterTemplate(config.quarters);
+    const nextQuarters = config.quarters.map(cloneQuarter);
+    const goalIndex = nextQuarters.findIndex((quarter) => quarter.isGoal);
+    if (goalIndex === -1) {
+      nextQuarters.push(nextQuarter);
+    } else {
+      nextQuarters.splice(goalIndex, 0, nextQuarter);
+    }
+    onUpdateQuarters(nextQuarters);
+
+    const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+    designerMap[nextQuarter.id] = createDefaultQuarterDesignerSteps(
+      nextQuarter
+    );
+    const fallbackSteps = extractQuarterStepsFromDesignerMap(
+      designerMap,
+      nextQuarters
+    );
+    const { designerSteps } = sanitizeQuarterDesignerSteps(
+      designerMap,
+      nextQuarters,
+      fallbackSteps
+    );
+    onUpdateQuarterDesignerSteps(designerSteps);
+    setActiveQuarterId(nextQuarter.id);
+    const firstStep = designerSteps[nextQuarter.id]?.[0]?.id ?? null;
+    setPendingStepId(firstStep);
+  }, [
+    config.quarterDesignerSteps,
+    config.quarters,
+    onUpdateQuarterDesignerSteps,
+    onUpdateQuarters,
+  ]);
+
+  const handleMoveQuarter = useCallback(
+    (index: number, direction: -1 | 1) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= config.quarters.length) {
+        return;
+      }
+      const nextQuarters = config.quarters.map(cloneQuarter);
+      const [moved] = nextQuarters.splice(index, 1);
+      nextQuarters.splice(targetIndex, 0, moved);
+      onUpdateQuarters(nextQuarters);
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        config.quarterDesignerSteps,
+        nextQuarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        config.quarterDesignerSteps,
+        nextQuarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+    },
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      onUpdateQuarters,
+    ]
+  );
+
+  const handleThemeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      onUpdateTerrain({ themeId: event.target.value as TerrainThemeId });
+    },
+    [onUpdateTerrain]
+  );
+
+  const handleSeedChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const numeric = Number.parseInt(event.target.value, 10);
+      if (Number.isFinite(numeric)) {
+        onUpdateTerrain({ seed: numeric });
+      }
+    },
+    [onUpdateTerrain]
+  );
+
+  const handleCloseDesigner = useCallback(() => {
+    setActiveQuarterId(null);
+    setPendingStepId(null);
+  }, []);
+
+  const openQuarter = useMemo(
+    () =>
+      activeQuarterId
+        ? config.quarters.find((quarter) => quarter.id === activeQuarterId) ??
+          null
+        : null,
+    [activeQuarterId, config.quarters]
+  );
+
+  const activeDesignerSteps = useMemo(() => {
+    if (!activeQuarterId) {
+      return [] as StepDefinition[];
+    }
+    return config.quarterDesignerSteps[activeQuarterId] ?? [];
+  }, [activeQuarterId, config.quarterDesignerSteps]);
+
+  const handleDesignerStepConfigChange = useCallback(
+    (quarterId: QuarterId, stepId: string, nextConfig: unknown) => {
+      const currentSteps = config.quarterDesignerSteps[quarterId] ?? [];
+      const updatedSteps = currentSteps.map((step) =>
+        step.id === stepId
+          ? {
+              ...step,
+              config:
+                nextConfig === undefined
+                  ? undefined
+                  : cloneStepConfig(nextConfig),
+            }
+          : step
+      );
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarterId] = updatedSteps;
+
+      let nextQuarters = config.quarters.map(cloneQuarter);
+
+      if (nextConfig && typeof nextConfig === "object") {
+        const typed = nextConfig as Record<string, unknown> & { type?: string };
+        if (typed.type === "explorateur-quarter-basics") {
+          const nextIsGoal = Boolean(typed.isGoal);
+          const nextLabel =
+            typeof typed.label === "string" ? typed.label : undefined;
+          const nextColor =
+            typeof typed.color === "string" ? typed.color : undefined;
+          const rawNumber = typed.buildingNumber;
+          const nextNumber =
+            rawNumber === null
+              ? null
+              : typeof rawNumber === "number" && Number.isFinite(rawNumber)
+              ? Math.trunc(rawNumber)
+              : undefined;
+
+          nextQuarters = nextQuarters.map((quarter) => {
+            if (quarter.id !== quarterId) {
+              if (nextIsGoal) {
+                return { ...quarter, isGoal: false };
+              }
+              return quarter;
+            }
+            const updated = { ...quarter };
+            if (nextLabel !== undefined) {
+              updated.label = nextLabel;
+            }
+            if (nextColor !== undefined) {
+              updated.color = nextColor;
+            }
+            if (nextIsGoal) {
+              updated.isGoal = true;
+              updated.buildingNumber = null;
+              updated.inventory = null;
+            } else {
+              updated.isGoal = false;
+              if (nextNumber !== undefined) {
+                updated.buildingNumber = nextNumber;
+              }
+            }
+            return updated;
+          });
+        } else if (typed.type === "explorateur-quarter-inventory") {
+          const enabled = Boolean(typed.enabled);
+          nextQuarters = nextQuarters.map((quarter) => {
+            if (quarter.id !== quarterId) {
+              return quarter;
+            }
+            if (!enabled || quarter.isGoal) {
+              return { ...quarter, inventory: null };
+            }
+            return {
+              ...quarter,
+              inventory: {
+                title:
+                  typeof typed.title === "string"
+                    ? typed.title
+                    : quarter.inventory?.title ?? "",
+                description:
+                  typeof typed.description === "string"
+                    ? typed.description
+                    : quarter.inventory?.description ?? "",
+                hint:
+                  typeof typed.hint === "string"
+                    ? typed.hint
+                    : quarter.inventory?.hint ?? "",
+                icon:
+                  typeof typed.icon === "string"
+                    ? typed.icon
+                    : quarter.inventory?.icon ?? "🎁",
+              },
+            } satisfies ExplorateurIAQuarterConfig;
+          });
+        }
+      }
+
+      onUpdateQuarters(nextQuarters);
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        designerMap,
+        nextQuarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        designerMap,
+        nextQuarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+    },
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      onUpdateQuarters,
+    ]
+  );
+
+  const handleRemoveDesignerStep = useCallback(
+    (quarterId: QuarterId, stepId: string) => {
+      const steps = config.quarterDesignerSteps[quarterId] ?? [];
+      if (steps.length <= 1) {
+        return;
+      }
+      const target = steps.find((step) => step.id === stepId);
+      if (!target) {
+        return;
+      }
+      const type = resolveDesignerStepType(target);
+      if (type === "explorateur-quarter-basics") {
+        return;
+      }
+      const updatedSteps = steps.filter((step) => step.id !== stepId);
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarterId] = updatedSteps;
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        designerMap,
+        config.quarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        designerMap,
+        config.quarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+    },
+    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+  );
+
+  const handleMoveDesignerStep = useCallback(
+    (quarterId: QuarterId, index: number, direction: -1 | 1) => {
+      const steps = config.quarterDesignerSteps[quarterId] ?? [];
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= steps.length) {
+        return;
+      }
+      const updatedSteps = steps.map(cloneStepDefinition);
+      const [moved] = updatedSteps.splice(index, 1);
+      updatedSteps.splice(targetIndex, 0, moved);
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarterId] = updatedSteps;
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        designerMap,
+        config.quarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        designerMap,
+        config.quarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+    },
+    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+  );
+
+  const handleAddDesignerStep = useCallback(
+    (quarter: ExplorateurIAQuarterConfig, type: QuarterDesignerStepType) => {
+      const steps = config.quarterDesignerSteps[quarter.id] ?? [];
+      const entry = QUARTER_DESIGNER_STEP_LIBRARY.find(
+        (candidate) => candidate.type === type
+      );
+      if (!entry) {
+        return;
+      }
+      if (entry.isMeta) {
+        if (
+          steps.some((step) => resolveDesignerStepType(step) === type) ||
+          (entry.allowGoal === false && quarter.isGoal)
+        ) {
+          return;
+        }
+      }
+      if (entry.allowGoal === false && quarter.isGoal) {
+        return;
+      }
+      const created = entry.create(quarter, steps);
+      if (!created) {
+        return;
+      }
+      const existingIds = new Set(steps.map((step) => step.id));
+      let candidateId = created.id;
+      let suffix = 2;
+      while (existingIds.has(candidateId)) {
+        candidateId = `${ensureStepHasQuarterPrefix(
+          created.id,
+          quarter.id
+        )}-${suffix}`;
+        suffix += 1;
+      }
+
+      const normalizedStep = ensureDesignerStepId(
+        quarter.id,
+        { ...created, id: candidateId },
+        steps.length
+      );
+
+      const updatedSteps = [...steps.map(cloneStepDefinition), normalizedStep];
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarter.id] = updatedSteps;
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        designerMap,
+        config.quarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        designerMap,
+        config.quarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+      setPendingStepId(normalizedStep.id);
+    },
+    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+  );
+
+  const designerStepOptions = useMemo(() => {
+    if (!openQuarter) {
+      return [] as Array<
+        (typeof QUARTER_DESIGNER_STEP_LIBRARY)[number] & { disabled: boolean }
+      >;
+    }
+    const typeCounts = new Map<string, number>();
+    for (const step of config.quarterDesignerSteps[openQuarter.id] ?? []) {
+      const type = resolveDesignerStepType(step);
+      typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+    }
+    return QUARTER_DESIGNER_STEP_LIBRARY.map((option) => ({
+      ...option,
+      disabled:
+        (option.allowGoal === false && openQuarter.isGoal) ||
+        (option.isMeta && (typeCounts.get(option.type) ?? 0) > 0),
+    }));
+  }, [config.quarterDesignerSteps, openQuarter]);
+
+  const renderDesignerStep = useCallback(
+    ({
+      step,
+      stepIndex,
+      stepCount,
+      StepComponent,
+      componentProps,
+      context,
+      advance,
+    }: StepSequenceRenderWrapperProps) => {
+      const stepType = resolveDesignerStepType(step);
+      const meta = getDesignerStepMeta(stepType);
+      const isFirst = stepIndex === 0;
+      const isLast = stepIndex === stepCount - 1;
+      const indicatorLabel = `Étape ${stepIndex + 1} sur ${stepCount}`;
+      const progressPercent =
+        stepCount > 0 ? Math.round(((stepIndex + 1) / stepCount) * 100) : 0;
+
+      return (
+        <div className="space-y-6">
+          <DesignerStepStateTracker
+            context={context}
+            pendingStepId={pendingStepId}
+            onConsumed={() => setPendingStepId(null)}
+          />
+          <div className="flex flex-col gap-6 lg:flex-row">
+            <aside className="w-full max-w-full lg:w-72 lg:flex-shrink-0">
+              <div className="space-y-3 rounded-2xl border border-orange-200 bg-white/70 p-3 shadow-sm">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+                  Étapes
+                </h3>
+                <ul className="space-y-2">
+                  {context.steps.map((definition, index) => {
+                    const itemType = resolveDesignerStepType(definition);
+                    const itemMeta = getDesignerStepMeta(itemType);
+                    const isActive = index === stepIndex;
+                    const canRemove =
+                      context.steps.length > 1 &&
+                      itemType !== "explorateur-quarter-basics";
+                    return (
+                      <li
+                        key={definition.id}
+                        className={classNames(
+                          "rounded-xl border px-3 py-2 text-left text-sm transition",
+                          isActive
+                            ? "border-orange-300 bg-orange-50 text-orange-900"
+                            : "border-orange-200 bg-white text-orange-800 hover:border-orange-300 hover:bg-orange-50"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => context.goToStep(index)}
+                            className="flex flex-1 items-center gap-2 text-left font-semibold text-current focus:outline-none"
+                          >
+                            <span aria-hidden="true">
+                              {itemMeta?.icon ?? "🧩"}
+                            </span>
+                            <span>{itemMeta?.label ?? definition.id}</span>
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activeQuarterId &&
+                                handleMoveDesignerStep(
+                                  activeQuarterId,
+                                  index,
+                                  -1
+                                )
+                              }
+                              disabled={index === 0}
+                              className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Monter"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activeQuarterId &&
+                                handleMoveDesignerStep(
+                                  activeQuarterId,
+                                  index,
+                                  1
+                                )
+                              }
+                              disabled={index === context.steps.length - 1}
+                              className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Descendre"
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activeQuarterId &&
+                                handleRemoveDesignerStep(
+                                  activeQuarterId,
+                                  definition.id
+                                )
+                              }
+                              disabled={!canRemove}
+                              className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Supprimer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </aside>
+            <div className="flex-1 space-y-4">
+              <header className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-orange-600">
+                  <span>{meta?.label ?? "Étape"}</span>
+                  <span>{indicatorLabel}</span>
+                </div>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-orange-100">
+                  <div
+                    className="h-full rounded-full bg-orange-400"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                {meta?.description ? (
+                  <p className="text-sm text-orange-700">{meta.description}</p>
+                ) : null}
+              </header>
+              <div className="rounded-2xl border border-orange-200 bg-white/90 p-4 shadow-sm">
+                <StepComponent {...componentProps} />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => context.goToStep(stepIndex - 1)}
+                  disabled={isFirst}
+                  className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Étape précédente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => advance()}
+                  disabled={isLast}
+                  className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Étape suivante
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    },
+    [
+      activeQuarterId,
+      handleMoveDesignerStep,
+      handleRemoveDesignerStep,
+      pendingStepId,
+    ]
+  );
+
+  return (
+    <div className="flex flex-col gap-6">
+      <header className="space-y-3 rounded-3xl border border-orange-200 bg-orange-50/60 p-6 text-orange-900">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">Configurer Explorateur IA</h1>
+            <p className="text-sm text-orange-800/80">
+              Ajustez les quartiers, l'ordre de progression et la numérotation des
+              défis avant d'insérer l'activité dans une séquence.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onReset}
+            className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100"
+          >
+            Réinitialiser
+          </button>
+        </div>
+        <dl className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Thème du terrain
+            </dt>
+            <dd className="mt-2">
+              <select
+                value={config.terrain.themeId}
+                onChange={handleThemeChange}
+                className="w-full rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+              >
+                {Object.entries(TERRAIN_THEMES).map(([themeId, theme]) => (
+                  <option key={themeId} value={themeId}>
+                    {theme.label}
+                  </option>
+                ))}
+              </select>
+            </dd>
+          </div>
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Graine du monde
+            </dt>
+            <dd className="mt-2">
+              <input
+                type="number"
+                className="w-full rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                value={config.terrain.seed}
+                onChange={handleSeedChange}
+              />
+            </dd>
+          </div>
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Nombre de défis actifs
+            </dt>
+            <dd className="mt-2 text-lg font-semibold text-orange-900">
+              {nonGoalQuarterCount}
+            </dd>
+          </div>
+        </dl>
+      </header>
+      <section className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+            Quartiers et défis
+          </h2>
+          <button
+            type="button"
+            onClick={handleAddQuarter}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-orange-200 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-orange-700 shadow-sm transition hover:border-orange-300 hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-300"
+          >
+            <span aria-hidden="true" className="text-base leading-none">
+              +
+            </span>
+            Ajouter un quartier
+          </button>
+        </div>
+        <p className="text-sm text-orange-900/80">
+          Ajustez l'ordre des quartiers puis ouvrez l'éditeur pour modifier leurs paramètres détaillés.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {config.quarters.map((quarter, index) => {
+            const isGoal = Boolean(quarter.isGoal);
+            const quarterInventory = quarter.inventory;
+            return (
+              <article
+                key={quarter.id}
+                className="space-y-4 rounded-3xl border border-orange-200/70 bg-white/90 p-5 shadow-sm transition hover:border-orange-300"
+              >
+                <header className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 rounded-full border border-orange-200"
+                        style={{ backgroundColor: quarter.color }}
+                        aria-hidden="true"
+                      />
+                      <h3 className="text-base font-semibold text-orange-900">
+                        {quarter.label || quarter.id}
+                      </h3>
+                    </div>
+                    <p className="text-xs text-orange-700">
+                      {isGoal
+                        ? "Objectif final"
+                        : `Défi n°${
+                            quarter.buildingNumber === null
+                              ? "—"
+                              : quarter.buildingNumber
+                          }`}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleMoveQuarter(index, -1)}
+                      disabled={index === 0}
+                      className="rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ↑ Monter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveQuarter(index, 1)}
+                      disabled={index === config.quarters.length - 1}
+                      className="rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ↓ Descendre
+                    </button>
+                  </div>
+                </header>
+                <dl className="space-y-2 text-sm text-orange-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="font-medium">Identifiant</dt>
+                    <dd className="font-mono text-xs text-orange-600">
+                      {quarter.id}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="font-medium">Inventaire</dt>
+                    <dd>{quarterInventory ? quarterInventory.title : "Aucun"}</dd>
+                  </div>
+                </dl>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveQuarterId(quarter.id)}
+                    className="flex-1 rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100"
+                  >
+                    Configurer
+                  </button>
+                  {isGoal ? (
+                    <span className="rounded-full border border-orange-200 px-3 py-1 text-xs font-semibold text-orange-600">
+                      Objectif final
+                    </span>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+      <Modal
+        open={Boolean(openQuarter)}
+        onClose={handleCloseDesigner}
+        title={
+          openQuarter
+            ? `Configurer ${openQuarter.label || openQuarter.id}`
+            : "Configurer le quartier"
+        }
+      >
+        {openQuarter ? (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-orange-600">
+              <span>ID : {openQuarter.id}</span>
+              {openQuarter.isGoal ? (
+                <span className="rounded-full border border-orange-200 px-3 py-1 text-orange-700">
+                  Objectif final
+                </span>
+              ) : null}
+            </div>
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-orange-800">
+                Ajouter une étape
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {designerStepOptions.map((option) => (
+                  <button
+                    key={option.type}
+                    type="button"
+                    onClick={() => handleAddDesignerStep(openQuarter, option.type)}
+                    disabled={option.disabled}
+                    className={classNames(
+                      "inline-flex items-center gap-2 rounded-full border border-orange-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                      option.disabled
+                        ? "cursor-not-allowed bg-orange-100 text-orange-400"
+                        : "bg-white text-orange-700 hover:border-orange-300 hover:bg-orange-50"
+                    )}
+                  >
+                    <span aria-hidden="true">{option.icon}</span>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <StepSequenceRenderer
+              key={openQuarter.id}
+              steps={activeDesignerSteps}
+              isEditMode
+              onStepConfigChange={(stepId, nextConfig) =>
+                handleDesignerStepConfigChange(openQuarter.id, stepId, nextConfig)
+              }
+              renderStepWrapper={renderDesignerStep}
+            />
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
