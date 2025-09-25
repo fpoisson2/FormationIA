@@ -75,12 +75,12 @@ describe("ClarityPromptStep", () => {
     const textarea = screen.getByPlaceholderText(/décris l'action/i);
     fireEvent.change(textarea, { target: { value: "Avance vers la droite" } });
 
-    const button = screen.getByRole("button", { name: /soumettre/i });
+    const button = screen.getByRole("button", { name: /continuer/i });
     fireEvent.click(button);
 
     expect(onAdvance).toHaveBeenCalledTimes(1);
     const payload = onAdvance.mock.calls[0][0] as ClarityPromptStepPayload;
-    expect(payload).toEqual({ instruction: "Avance vers la droite" });
+    expect(payload).toEqual({ instruction: "Avance vers la droite", triggerId: undefined });
   });
 
   it("publishes updates automatically when rendered inside a composite module", async () => {
@@ -122,6 +122,57 @@ describe("ClarityPromptStep", () => {
     await waitFor(() => {
       const lastCall = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityPromptStepPayload;
       expect(lastCall.instruction).toBe("Nouvelle consigne");
+    });
+  });
+
+  it("déclenche un identifiant de simulation lorsqu'on lance la consigne en composite", async () => {
+    const onAdvance = vi.fn();
+    const props: StepComponentProps = {
+      definition: { id: "prompt-module", component: "clarity-prompt" },
+      config: undefined,
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance,
+      onUpdateConfig: vi.fn(),
+    };
+
+    const compositeContext = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [{ id: "composite-step", component: "composite", composite: { modules: [] } }],
+      payloads: {},
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+    };
+
+    render(
+      <StepSequenceContext.Provider value={compositeContext}>
+        <ClarityPromptStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    const textarea = await screen.findByPlaceholderText(/décris l'action/i);
+    fireEvent.change(textarea, { target: { value: "Avance de trois cases vers le haut" } });
+
+    await waitFor(() => {
+      expect(onAdvance).toHaveBeenCalled();
+    });
+    onAdvance.mockClear();
+
+    const launchButton = screen.getByRole("button", { name: /lancer la consigne/i });
+    expect(launchButton).toBeEnabled();
+
+    fireEvent.click(launchButton);
+
+    await waitFor(() => {
+      expect(onAdvance).toHaveBeenCalledTimes(1);
+      const payload = onAdvance.mock.calls[0][0] as ClarityPromptStepPayload;
+      expect(payload.instruction).toBe("Avance de trois cases vers le haut");
+      expect(typeof payload.triggerId).toBe("string");
+      expect(payload.triggerId).toMatch(/trigger|[0-9a-f-]{8}/i);
     });
   });
 });

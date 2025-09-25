@@ -68,8 +68,6 @@ describe("ClarityMapStep", () => {
 
     render(<ClarityMapStep {...props} />);
 
-    expect(screen.getByRole("button", { name: /lancer la consigne/i })).toBeTruthy();
-
     const textarea = screen.getByPlaceholderText(/consigne reçue/i);
     fireEvent.change(textarea, { target: { value: "Avance de 2 cases." } });
 
@@ -120,7 +118,7 @@ describe("ClarityMapStep", () => {
     const onAdvance = vi.fn();
     const props: StepComponentProps = {
       definition: { id: "map-module", component: "clarity-map" },
-      config: { obstacleCount: 0 },
+      config: { obstacleCount: 0, allowInstructionInput: true },
       payload: undefined,
       isActive: true,
       isEditMode: false,
@@ -166,13 +164,14 @@ describe("ClarityMapStep", () => {
       instruction: "",
     };
 
+    const onAdvance = vi.fn();
     const props: StepComponentProps = {
       definition: { id: "map-step", component: "clarity-map", config: { promptStepId: "prompt-step" } },
       config: { promptStepId: "prompt-step" },
       payload: mapPayload,
       isActive: true,
       isEditMode: false,
-      onAdvance: vi.fn(),
+      onAdvance,
       onUpdateConfig: vi.fn(),
     };
 
@@ -195,18 +194,24 @@ describe("ClarityMapStep", () => {
       </StepSequenceContext.Provider>
     );
 
-    expect(screen.getByDisplayValue("Tourne à droite")).toBeTruthy();
-    expect(screen.getByText(/commande synchronisée/i)).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/consigne reçue/i)).toBeNull();
+
+    return waitFor(() => {
+      expect(onAdvance).toHaveBeenCalled();
+      const payload = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityMapStepPayload;
+      expect(payload.instruction).toBe("Tourne à droite");
+    });
   });
 
   it("détecte automatiquement le module prompt lorsqu'il est présent dans le composite", () => {
+    const onAdvance = vi.fn();
     const props: StepComponentProps = {
       definition: { id: "map-module", component: "clarity-map" },
       config: undefined,
       payload: undefined,
       isActive: true,
       isEditMode: false,
-      onAdvance: vi.fn(),
+      onAdvance,
       onUpdateConfig: vi.fn(),
     };
 
@@ -235,7 +240,12 @@ describe("ClarityMapStep", () => {
       </StepSequenceContext.Provider>
     );
 
-    expect(screen.getByDisplayValue("Dirige-toi vers le nord")).toBeTruthy();
-    expect(screen.getByText(/prompt-module \(auto\)/i)).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/consigne reçue/i)).toBeNull();
+
+    return waitFor(() => {
+      expect(onAdvance).toHaveBeenCalled();
+      const payload = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityMapStepPayload;
+      expect(payload.instruction).toBe("Dirige-toi vers le nord");
+    });
   });
 });

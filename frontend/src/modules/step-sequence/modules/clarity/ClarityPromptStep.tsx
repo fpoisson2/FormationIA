@@ -13,6 +13,7 @@ import { StepSequenceContext } from "../../types";
 
 export interface ClarityPromptStepPayload {
   instruction: string;
+  triggerId?: string;
 }
 
 export interface ClarityPromptStepConfig {
@@ -58,11 +59,21 @@ function sanitizePayload(payload: unknown): ClarityPromptStepPayload {
   }
 
   const raw = payload as Partial<ClarityPromptStepPayload>;
-  if (typeof raw.instruction !== "string") {
-    return { instruction: "" };
-  }
+  const instruction = typeof raw.instruction === "string" ? raw.instruction : "";
+  const triggerId = typeof raw.triggerId === "string" && raw.triggerId.trim() ? raw.triggerId.trim() : undefined;
 
-  return { instruction: raw.instruction };
+  return { instruction, triggerId };
+}
+
+function generateTriggerId(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // Ignore environments without crypto support.
+  }
+  return `trigger-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 export function ClarityPromptStep({
@@ -81,11 +92,30 @@ export function ClarityPromptStep({
   const sanitizedPayload = useMemo(() => sanitizePayload(payload), [payload]);
 
   const [instruction, setInstruction] = useState<string>(sanitizedPayload.instruction);
+  const [triggerId, setTriggerId] = useState<string | undefined>(sanitizedPayload.triggerId);
   const lastPublishedRef = useRef<string | null>(null);
 
   useEffect(() => {
     setInstruction(sanitizedPayload.instruction);
-  }, [sanitizedPayload.instruction]);
+    setTriggerId(sanitizedPayload.triggerId);
+  }, [sanitizedPayload.instruction, sanitizedPayload.triggerId]);
+
+  const publishPayload = useCallback(
+    (payload: ClarityPromptStepPayload) => {
+      const normalized = {
+        instruction: payload.instruction,
+        triggerId: payload.triggerId ?? null,
+      };
+      const serialized = JSON.stringify(normalized);
+      if (lastPublishedRef.current === serialized) {
+        return;
+      }
+
+      lastPublishedRef.current = serialized;
+      onAdvance(payload);
+    },
+    [onAdvance]
+  );
 
   useEffect(() => {
     if (!shouldAutoPublish) {
@@ -94,15 +124,8 @@ export function ClarityPromptStep({
     }
 
     const trimmed = instruction.trim();
-    const payloadToSend: ClarityPromptStepPayload = { instruction: trimmed };
-    const serialized = JSON.stringify(payloadToSend);
-    if (lastPublishedRef.current === serialized) {
-      return;
-    }
-
-    lastPublishedRef.current = serialized;
-    onAdvance(payloadToSend);
-  }, [instruction, onAdvance, shouldAutoPublish]);
+    publishPayload({ instruction: trimmed, triggerId });
+  }, [instruction, publishPayload, shouldAutoPublish, triggerId]);
 
   const handleConfigChange = useCallback(
     (patch: Partial<ClarityPromptStepConfig>) => {
@@ -124,10 +147,34 @@ export function ClarityPromptStep({
         return;
       }
 
-      onAdvance({ instruction: instruction.trim() });
+      const trimmed = instruction.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      publishPayload({ instruction: trimmed, triggerId });
     },
-    [instruction, onAdvance, shouldAutoPublish]
+    [instruction, publishPayload, shouldAutoPublish, triggerId]
   );
+
+  const handleExecute = useCallback(() => {
+    if (!shouldAutoPublish) {
+      return;
+    }
+    const trimmed = instruction.trim();
+    if (!trimmed) {
+      return;
+    }
+    const nextTriggerId = generateTriggerId();
+    setTriggerId(nextTriggerId);
+    publishPayload({ instruction: trimmed, triggerId: nextTriggerId });
+  }, [instruction, publishPayload, shouldAutoPublish]);
+
+  const trimmedInstruction = instruction.trim();
+  const buttonDisabled = !trimmedInstruction;
+  const helperText = shouldAutoPublish
+    ? "Clique sur \"Lancer la consigne\" pour envoyer le prompt au module carte."
+    : "Clique sur \"Continuer\" pour transmettre la consigne au module suivant.";
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
@@ -163,33 +210,41 @@ export function ClarityPromptStep({
         </fieldset>
       )}
 
-      <label className="flex flex-col gap-2">
-        <span className="text-sm font-semibold text-white/90">{normalizedConfig.promptLabel}</span>
-        <textarea
-          required
-          rows={4}
-          value={instruction}
-          onChange={(event) => setInstruction(event.target.value)}
-          placeholder={normalizedConfig.promptPlaceholder}
-          className="min-h-[120px] rounded-2xl border border-white/30 bg-white/20 px-4 py-3 text-base text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none"
-        />
-      </label>
-
-      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-white/70">
-          {shouldAutoPublish
-            ? "Les modifications sont partagées automatiquement dans le module composite."
-            : "La consigne sera transmise au module suivant lorsque tu continues."}
-        </p>
-        {!shouldAutoPublish && (
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)]"
-          >
-            Soumettre
-          </button>
-        )}
+      <div className="space-y-3">
+        <label className="flex flex-col gap-2">
+          <span className="text-sm font-semibold text-[color:var(--brand-black)]">{normalizedConfig.promptLabel}</span>
+          <textarea
+            required
+            rows={4}
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder={normalizedConfig.promptPlaceholder}
+            className="min-h-[120px] rounded-2xl border border-white/60 bg-white px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-[color:var(--brand-charcoal)]/50 focus:border-[color:var(--brand-red)] focus:outline-none"
+          />
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          {shouldAutoPublish && (
+            <button
+              type="button"
+              onClick={handleExecute}
+              disabled={buttonDisabled}
+              className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Lancer la consigne
+            </button>
+          )}
+          {!shouldAutoPublish && (
+            <button
+              type="submit"
+              className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-black)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-black/90"
+            >
+              Continuer
+            </button>
+          )}
+        </div>
       </div>
+
+      <p className="text-sm text-[color:var(--brand-charcoal)]">{helperText}</p>
     </form>
   );
 }

@@ -304,17 +304,23 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
   };
 }
 
-function sanitizePromptPayload(value: unknown): string | null {
+interface PromptModulePayload {
+  instruction: string | null;
+  triggerId: string | null;
+}
+
+function sanitizePromptPayload(value: unknown): PromptModulePayload {
   if (!value || typeof value !== "object") {
-    return null;
+    return { instruction: null, triggerId: null };
   }
 
   const source = value as Partial<ClarityPromptStepPayload>;
-  if (typeof source.instruction !== "string") {
-    return null;
-  }
+  const instruction = typeof source.instruction === "string" ? source.instruction : null;
+  const triggerId = typeof source.triggerId === "string" && source.triggerId.trim()
+    ? source.triggerId.trim()
+    : null;
 
-  return source.instruction;
+  return { instruction, triggerId };
 }
 
 export function ClarityMapStep({
@@ -365,9 +371,9 @@ export function ClarityMapStep({
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
   const effectivePromptStepId = normalizedConfig.promptStepId || detectedPromptStepId;
-  const promptInstruction = useMemo(() => {
+  const { instruction: promptInstruction, triggerId: promptTriggerId } = useMemo(() => {
     if (!effectivePromptStepId || !sequencePayloads) {
-      return null;
+      return { instruction: null, triggerId: null };
     }
     return sanitizePromptPayload(sequencePayloads[effectivePromptStepId]);
   }, [effectivePromptStepId, sequencePayloads]);
@@ -382,6 +388,7 @@ export function ClarityMapStep({
   const [instruction, setInstruction] = useState<string>(mapPayload?.instruction ?? "");
   const [runId, setRunId] = useState<string>(mapPayload?.runId ?? createRunId());
   const lastPublishedRef = useRef<string | null>(null);
+  const lastPromptTriggerRef = useRef<string | null>(null);
 
   const {
     status: executionStatus,
@@ -479,6 +486,9 @@ export function ClarityMapStep({
     }
   }, [effectiveStatus]);
 
+  const shouldShowInstructionPanel =
+    normalizedConfig.allowInstructionInput || promptInstruction === null;
+
   const blockedSignature = useMemo(
     () => blocked.map((cell) => gridKey(cell)).sort().join("|"),
     [blocked]
@@ -572,9 +582,19 @@ export function ClarityMapStep({
     }
   }, [blocked, execute, runId, target, trimmedInstruction]);
 
-  const handleAbort = useCallback(() => {
-    abort();
-  }, [abort]);
+  useEffect(() => {
+    if (!promptTriggerId) {
+      return;
+    }
+    if (lastPromptTriggerRef.current === promptTriggerId) {
+      return;
+    }
+    lastPromptTriggerRef.current = promptTriggerId;
+    if (!trimmedInstruction) {
+      return;
+    }
+    handleExecute();
+  }, [handleExecute, promptTriggerId, trimmedInstruction]);
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -758,44 +778,27 @@ export function ClarityMapStep({
           </div>
         </div>
         <div className="space-y-3">
-          <div className="flex flex-col gap-3">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-semibold text-[color:var(--brand-black)]">
-                {normalizedConfig.instructionLabel}
-              </span>
-              <textarea
-                rows={6}
-                value={instruction}
-                onChange={(event) => setInstruction(event.target.value)}
-                placeholder={normalizedConfig.instructionPlaceholder}
-                readOnly={!normalizedConfig.allowInstructionInput && promptInstruction !== null}
-                className={`min-h-[160px] rounded-2xl border border-white/60 px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-[color:var(--brand-charcoal)]/50 focus:border-[color:var(--brand-red)] focus:outline-none ${
-                  !normalizedConfig.allowInstructionInput && promptInstruction !== null
-                    ? "bg-white/70 text-[color:var(--brand-charcoal)]/80"
-                    : "bg-white"
-                }`}
-              />
-            </label>
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleExecute}
-                disabled={isExecuting || !trimmedInstruction}
-                className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isExecuting ? "Exécution en cours…" : "Lancer la consigne"}
-              </button>
-              {isExecuting && (
-                <button
-                  type="button"
-                  onClick={handleAbort}
-                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-semibold text-[color:var(--brand-charcoal)] transition hover:bg-white/60"
-                >
-                  Interrompre
-                </button>
-              )}
+          {shouldShowInstructionPanel && (
+            <div className="flex flex-col gap-3">
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-[color:var(--brand-black)]">
+                  {normalizedConfig.instructionLabel}
+                </span>
+                <textarea
+                  rows={6}
+                  value={instruction}
+                  onChange={(event) => setInstruction(event.target.value)}
+                  placeholder={normalizedConfig.instructionPlaceholder}
+                  readOnly={!normalizedConfig.allowInstructionInput && promptInstruction !== null}
+                  className={`min-h-[160px] rounded-2xl border border-white/60 px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-[color:var(--brand-charcoal)]/50 focus:border-[color:var(--brand-red)] focus:outline-none ${
+                    !normalizedConfig.allowInstructionInput && promptInstruction !== null
+                      ? "bg-white/70 text-[color:var(--brand-charcoal)]/80"
+                      : "bg-white"
+                  }`}
+                />
+              </label>
             </div>
-          </div>
+          )}
           {(isExecuting || effectiveMessage) && (
             <p className={`text-sm ${messageToneClass}`}>
               {effectiveMessage || "L’IA calcule le trajet…"}
