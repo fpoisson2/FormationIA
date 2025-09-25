@@ -12,13 +12,20 @@ import {
 import {
   ClarityGrid,
   GRID_SIZE,
+  PlanPreview,
   START_POSITION,
   createRandomObstacles,
   createRandomTarget,
   createRunId,
   gridKey,
+  useClarityPlanExecution,
 } from "../../../clarity";
-import type { GridCoord } from "../../../clarity";
+import type {
+  ClientStats,
+  GridCoord,
+  PlanAction,
+  RunStatus,
+} from "../../../clarity";
 import type {
   CompositeStepModuleDefinition,
   StepComponentProps,
@@ -32,6 +39,12 @@ export interface ClarityMapStepPayload {
   target: GridCoord;
   blocked: GridCoord[];
   instruction?: string;
+  plan?: PlanAction[];
+  notes?: string;
+  stats?: ClientStats | null;
+  trail?: GridCoord[];
+  status?: RunStatus;
+  message?: string;
 }
 
 export interface ClarityMapStepConfig {
@@ -108,6 +121,111 @@ function sanitizeBlocked(value: unknown, target: GridCoord): GridCoord[] {
   return obstacles;
 }
 
+function sanitizePlanActions(value: unknown): PlanAction[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const actions: PlanAction[] = [];
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") {
+      return;
+    }
+    const source = item as { dir?: unknown; steps?: unknown };
+    const dir = source.dir;
+    const stepsValue = source.steps;
+    if (
+      (dir === "left" || dir === "right" || dir === "up" || dir === "down") &&
+      typeof stepsValue === "number" &&
+      Number.isFinite(stepsValue)
+    ) {
+      actions.push({ dir, steps: Math.max(1, Math.round(stepsValue)) });
+    }
+  });
+
+  return actions;
+}
+
+function sanitizeTrail(value: unknown): GridCoord[] {
+  if (!Array.isArray(value)) {
+    return [START_POSITION];
+  }
+
+  const trail: GridCoord[] = [];
+  value.forEach((item) => {
+    const coord = sanitizeGridCoord(item);
+    if (coord) {
+      trail.push(coord);
+    }
+  });
+
+  if (trail.length === 0) {
+    trail.push(START_POSITION);
+  }
+
+  return trail;
+}
+
+function sanitizeStatsPayload(value: unknown): ClientStats | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const source = value as Partial<ClientStats>;
+  if (
+    typeof source.runId !== "string" ||
+    typeof source.attempts !== "number" ||
+    typeof source.stepsExecuted !== "number" ||
+    typeof source.durationMs !== "number"
+  ) {
+    return null;
+  }
+
+  const optimalPathLength =
+    typeof source.optimalPathLength === "number" || source.optimalPathLength === null
+      ? source.optimalPathLength ?? null
+      : null;
+  const surcout =
+    typeof source.surcout === "number" || source.surcout === null ? source.surcout ?? null : null;
+
+  return {
+    runId: source.runId,
+    attempts: source.attempts,
+    stepsExecuted: source.stepsExecuted,
+    optimalPathLength,
+    surcout,
+    success: Boolean(source.success),
+    finalPosition:
+      sanitizeGridCoord(source.finalPosition) ?? {
+        x: START_POSITION.x,
+        y: START_POSITION.y,
+      },
+    ambiguity: typeof source.ambiguity === "string" ? source.ambiguity : undefined,
+    durationMs: source.durationMs,
+  };
+}
+
+function sanitizeStatus(value: unknown): RunStatus {
+  if (
+    value === "idle" ||
+    value === "running" ||
+    value === "success" ||
+    value === "blocked" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return "idle";
+}
+
+function sanitizeMessage(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
   if (!config || typeof config !== "object") {
     return {
@@ -164,8 +282,26 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
   const blocked = sanitizeBlocked(source.blocked, target);
   const instruction =
     typeof source.instruction === "string" && source.instruction.trim() ? source.instruction.trim() : undefined;
+  const plan = sanitizePlanActions(source.plan);
+  const notes =
+    typeof source.notes === "string" && source.notes.trim() ? source.notes.trim() : undefined;
+  const stats = sanitizeStatsPayload(source.stats);
+  const trail = sanitizeTrail(source.trail);
+  const status = sanitizeStatus(source.status);
+  const message = sanitizeMessage(source.message);
 
-  return { runId, target, blocked, instruction };
+  return {
+    runId,
+    target,
+    blocked,
+    instruction,
+    plan: plan.length > 0 ? plan : undefined,
+    notes,
+    stats,
+    trail,
+    status,
+    message,
+  };
 }
 
 function sanitizePromptPayload(value: unknown): string | null {
@@ -257,6 +393,18 @@ export function ClarityMapStep({
   const [runId, setRunId] = useState<string>(mapPayload?.runId ?? createRunId());
   const lastPublishedRef = useRef<string | null>(null);
 
+  const {
+    status: executionStatus,
+    isLoading: isExecuting,
+    message: executionMessage,
+    plan: executionPlan,
+    notes: executionNotes,
+    stats: executionStats,
+    trail: executionTrail,
+    execute,
+    abort,
+  } = useClarityPlanExecution();
+
   useEffect(() => {
     if (!mapPayload) {
       return;
@@ -301,6 +449,54 @@ export function ClarityMapStep({
       return createRandomObstacles(target, obstacleCount);
     });
   }, [mapPayload, obstacleCount, target]);
+
+  const fallbackPlan = mapPayload?.plan ?? [];
+  const fallbackNotes = mapPayload?.notes ?? "";
+  const fallbackStats = mapPayload?.stats ?? null;
+  const fallbackTrail = mapPayload?.trail ?? [START_POSITION];
+  const fallbackStatus = mapPayload?.status ?? "idle";
+  const fallbackMessage = mapPayload?.message ?? "";
+
+  const hasLiveOutcome =
+    executionStatus !== "idle" ||
+    Boolean(executionMessage) ||
+    executionPlan.length > 0 ||
+    executionTrail.length > 0;
+
+  const effectivePlan = executionPlan.length > 0 ? executionPlan : fallbackPlan;
+  const effectiveNotes = executionNotes || fallbackNotes;
+  const effectiveStats = executionStats ?? fallbackStats;
+  const effectiveTrail = executionTrail.length > 0 ? executionTrail : fallbackTrail;
+  const effectiveStatus = hasLiveOutcome ? executionStatus : fallbackStatus;
+  const effectiveMessage = hasLiveOutcome && executionMessage ? executionMessage : fallbackMessage;
+  const trimmedInstruction = instruction.trim();
+  const playerPosition =
+    effectiveTrail.length > 0 ? effectiveTrail[effectiveTrail.length - 1] : START_POSITION;
+  const visited = useMemo(() => {
+    const cells = new Set<string>();
+    effectiveTrail.forEach((cell) => cells.add(gridKey(cell)));
+    return cells;
+  }, [effectiveTrail]);
+  const messageToneClass = useMemo(() => {
+    switch (effectiveStatus) {
+      case "success":
+        return "text-emerald-200";
+      case "blocked":
+      case "error":
+        return "text-[color:var(--brand-yellow)]";
+      default:
+        return "text-white/80";
+    }
+  }, [effectiveStatus]);
+
+  const blockedSignature = useMemo(
+    () => blocked.map((cell) => gridKey(cell)).sort().join("|"),
+    [blocked]
+  );
+
+  useEffect(() => {
+    abort();
+  }, [abort, blockedSignature, target.x, target.y]);
 
   const applyConfigPatch = useCallback(
     (patch: Partial<ClarityMapStepConfig>) => {
@@ -372,6 +568,24 @@ export function ClarityMapStep({
     setRunId(createRunId());
   }, [obstacleCount, target]);
 
+  const handleExecute = useCallback(async () => {
+    try {
+      await execute({
+        instruction: trimmedInstruction,
+        goal: target,
+        blocked,
+        runId,
+        start: START_POSITION,
+      });
+    } catch {
+      // The hook exposes validation feedback via its own message state.
+    }
+  }, [blocked, execute, runId, target, trimmedInstruction]);
+
+  const handleAbort = useCallback(() => {
+    abort();
+  }, [abort]);
+
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -383,12 +597,31 @@ export function ClarityMapStep({
         runId,
         target,
         blocked,
-        instruction: instruction.trim() ? instruction.trim() : undefined,
+        instruction: trimmedInstruction ? trimmedInstruction : undefined,
+        plan: effectivePlan.length > 0 ? effectivePlan : undefined,
+        notes: effectiveNotes ? effectiveNotes : undefined,
+        stats: effectiveStats ?? undefined,
+        trail: effectiveTrail,
+        status: effectiveStatus,
+        message: effectiveMessage ? effectiveMessage : undefined,
       };
 
       onAdvance(payloadToSend);
     },
-    [blocked, instruction, onAdvance, runId, shouldAutoPublish, target]
+    [
+      blocked,
+      effectiveMessage,
+      effectiveNotes,
+      effectivePlan,
+      effectiveStatus,
+      effectiveStats,
+      effectiveTrail,
+      onAdvance,
+      runId,
+      shouldAutoPublish,
+      target,
+      trimmedInstruction,
+    ]
   );
 
   useEffect(() => {
@@ -401,7 +634,13 @@ export function ClarityMapStep({
       runId,
       target,
       blocked,
-      instruction: instruction.trim() ? instruction.trim() : undefined,
+      instruction: trimmedInstruction ? trimmedInstruction : undefined,
+      plan: effectivePlan.length > 0 ? effectivePlan : undefined,
+      notes: effectiveNotes ? effectiveNotes : undefined,
+      stats: effectiveStats ?? undefined,
+      trail: effectiveTrail,
+      status: effectiveStatus,
+      message: effectiveMessage ? effectiveMessage : undefined,
     };
     const serialized = JSON.stringify(payloadToSend);
     if (lastPublishedRef.current === serialized) {
@@ -410,9 +649,20 @@ export function ClarityMapStep({
 
     lastPublishedRef.current = serialized;
     onAdvance(payloadToSend);
-  }, [blocked, instruction, onAdvance, runId, shouldAutoPublish, target]);
-
-  const visited = useMemo(() => new Set<string>(), []);
+  }, [
+    blocked,
+    effectiveMessage,
+    effectiveNotes,
+    effectivePlan,
+    effectiveStatus,
+    effectiveStats,
+    effectiveTrail,
+    onAdvance,
+    runId,
+    shouldAutoPublish,
+    target,
+    trimmedInstruction,
+  ]);
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
@@ -498,7 +748,7 @@ export function ClarityMapStep({
       <div className="grid gap-6 lg:grid-cols-[3fr,2fr]">
         <div className="space-y-4">
           <div className="rounded-3xl border border-white/40 bg-white/30 p-4 shadow-inner backdrop-blur">
-            <ClarityGrid player={START_POSITION} target={target} blocked={blocked} visited={visited} />
+            <ClarityGrid player={playerPosition} target={target} blocked={blocked} visited={visited} />
           </div>
           <div className="flex flex-wrap gap-3">
             <button
@@ -538,6 +788,31 @@ export function ClarityMapStep({
               Commande synchronisée depuis le module « {promptSourceLabel || "?"} ».
             </p>
           )}
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleExecute}
+              disabled={isExecuting || !trimmedInstruction}
+              className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isExecuting ? "Exécution en cours…" : "Lancer la consigne"}
+            </button>
+            {isExecuting && (
+              <button
+                type="button"
+                onClick={handleAbort}
+                className="inline-flex items-center justify-center rounded-full border border-white/50 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10"
+              >
+                Interrompre
+              </button>
+            )}
+          </div>
+          {(isExecuting || effectiveMessage) && (
+            <p className={`text-sm ${messageToneClass}`}>
+              {effectiveMessage || "L’IA calcule le trajet…"}
+            </p>
+          )}
+          <PlanPreview plan={effectivePlan} notes={effectiveNotes} />
         </div>
       </div>
 

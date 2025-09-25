@@ -68,6 +68,8 @@ describe("ClarityMapStep", () => {
 
     render(<ClarityMapStep {...props} />);
 
+    expect(screen.getByRole("button", { name: /lancer la consigne/i })).toBeTruthy();
+
     const textarea = screen.getByPlaceholderText(/consigne reçue/i);
     fireEvent.change(textarea, { target: { value: "Avance de 2 cases." } });
 
@@ -81,6 +83,12 @@ describe("ClarityMapStep", () => {
     expect(payload.target).toEqual({ x: 2, y: 3 });
     expect(payload.blocked).toEqual([]);
     expect(payload.instruction).toBe("Avance de 2 cases.");
+    expect(payload.plan).toBeUndefined();
+    expect(payload.notes).toBeUndefined();
+    expect(payload.stats).toBeUndefined();
+    expect(payload.trail).toEqual([START_POSITION]);
+    expect(payload.status).toBe("idle");
+    expect(payload.message).toBeUndefined();
   });
 
   it("falls back to a random target when none is configured", () => {
@@ -100,15 +108,12 @@ describe("ClarityMapStep", () => {
     const submitButton = screen.getByRole("button", { name: /continuer/i });
     fireEvent.click(submitButton);
 
-    const payload = onAdvance.mock.calls[0][0] as {
-      target: GridCoord;
-      blocked: GridCoord[];
-      instruction?: string;
-      runId: string;
-    };
+    const payload = onAdvance.mock.calls[0][0] as ClarityMapStepPayload;
 
     expect(payload.target).not.toEqual(START_POSITION);
     expect(payload.blocked.every((coord) => coord.x !== payload.target.x || coord.y !== payload.target.y)).toBe(true);
+    expect(payload.trail).toEqual([START_POSITION]);
+    expect(payload.status).toBe("idle");
   });
 
   it("publishes updates automatically when rendered inside a composite module", async () => {
