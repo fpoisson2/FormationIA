@@ -50,9 +50,9 @@ SUPPORTED_MODELS = (
 GRID_SIZE = 10
 MAX_PLAN_ACTIONS = 30
 MAX_STEPS_PER_ACTION = 20
-DEFAULT_PLAN_MODEL = "gpt-5-nano"
-DEFAULT_PLAN_VERBOSITY = "low"
-DEFAULT_PLAN_THINKING = "minimal"
+DEFAULT_PLAN_MODEL = "gpt-5-mini"
+DEFAULT_PLAN_VERBOSITY = "medium"
+DEFAULT_PLAN_THINKING = "medium"
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 

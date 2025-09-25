@@ -154,6 +154,9 @@ export function ClarityPromptStep({
   const [developerPrompt, setDeveloperPrompt] = useState<string>(
     sanitizedPayload.developerPrompt ?? normalizedConfig.developerPrompt
   );
+  const [settingsMode, setSettingsMode] = useState<"hidden" | "read-only" | "editable">(
+    normalizedConfig.settingsMode
+  );
   const lastPublishedRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -163,11 +166,13 @@ export function ClarityPromptStep({
     setVerbosity(sanitizedPayload.verbosity ?? normalizedConfig.verbosity);
     setThinking(sanitizedPayload.thinking ?? normalizedConfig.thinking);
     setDeveloperPrompt(sanitizedPayload.developerPrompt ?? normalizedConfig.developerPrompt);
+    setSettingsMode(normalizedConfig.settingsMode);
   }, [
     normalizedConfig.developerPrompt,
     normalizedConfig.model,
     normalizedConfig.thinking,
     normalizedConfig.verbosity,
+    normalizedConfig.settingsMode,
     sanitizedPayload.developerPrompt,
     sanitizedPayload.instruction,
     sanitizedPayload.model,
@@ -228,11 +233,11 @@ export function ClarityPromptStep({
       const nextConfig: ClarityPromptStepConfig = {
         promptLabel: patch.promptLabel ?? normalizedConfig.promptLabel,
         promptPlaceholder: patch.promptPlaceholder ?? normalizedConfig.promptPlaceholder,
-        model: patch.model ?? normalizedConfig.model,
-        verbosity: patch.verbosity ?? normalizedConfig.verbosity,
-        thinking: patch.thinking ?? normalizedConfig.thinking,
-        developerPrompt: patch.developerPrompt ?? normalizedConfig.developerPrompt,
-        settingsMode: patch.settingsMode ?? normalizedConfig.settingsMode,
+        model: patch.model ?? model,
+        verbosity: patch.verbosity ?? verbosity,
+        thinking: patch.thinking ?? thinking,
+        developerPrompt: patch.developerPrompt ?? developerPrompt,
+        settingsMode: patch.settingsMode ?? settingsMode,
       };
 
       normalizedConfig.onChange?.(nextConfig);
@@ -250,8 +255,11 @@ export function ClarityPromptStep({
       if (typeof patch.developerPrompt === "string") {
         setDeveloperPrompt(patch.developerPrompt);
       }
+      if (patch.settingsMode) {
+        setSettingsMode(patch.settingsMode as "hidden" | "read-only" | "editable");
+      }
     },
-    [normalizedConfig, onUpdateConfig]
+    [developerPrompt, model, normalizedConfig, onUpdateConfig, settingsMode, thinking, verbosity]
   );
 
   const handleSubmit = useCallback(
@@ -356,7 +364,7 @@ export function ClarityPromptStep({
                 Modèle par défaut
               </span>
               <select
-                value={normalizedConfig.model}
+                value={model}
                 onChange={(event) => handleConfigChange({ model: event.target.value })}
                 className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
               >
@@ -370,7 +378,7 @@ export function ClarityPromptStep({
                 Verbosité par défaut
               </span>
               <select
-                value={normalizedConfig.verbosity}
+                value={verbosity}
                 onChange={(event) =>
                   handleConfigChange({ verbosity: event.target.value as "low" | "medium" | "high" })
                 }
@@ -386,7 +394,7 @@ export function ClarityPromptStep({
                 Raisonnement par défaut
               </span>
               <select
-                value={normalizedConfig.thinking}
+                value={thinking}
                 onChange={(event) =>
                   handleConfigChange({ thinking: event.target.value as "minimal" | "medium" | "high" })
                 }
@@ -402,7 +410,7 @@ export function ClarityPromptStep({
                 Prompt développeur (optionnel)
               </span>
               <textarea
-                value={normalizedConfig.developerPrompt}
+                value={developerPrompt}
                 onChange={(event) => handleConfigChange({ developerPrompt: event.target.value })}
                 rows={3}
                 className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
@@ -413,7 +421,7 @@ export function ClarityPromptStep({
                 Affichage des paramètres pour l’utilisateur
               </span>
               <select
-                value={normalizedConfig.settingsMode}
+                value={settingsMode}
                 onChange={(event) =>
                   handleConfigChange({ settingsMode: event.target.value as "hidden" | "read-only" | "editable" })
                 }
@@ -464,10 +472,10 @@ export function ClarityPromptStep({
 
       <p className="text-sm text-[color:var(--brand-charcoal)]">{helperText}</p>
 
-      {normalizedConfig.settingsMode !== "hidden" && (
+      {settingsMode !== "hidden" && (
         <div className="rounded-2xl border border-white/40 bg-white/70 p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-[color:var(--brand-black)]">Paramètres IA</h3>
-          {normalizedConfig.settingsMode === "editable" ? (
+          {settingsMode === "editable" ? (
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm text-[color:var(--brand-charcoal)]">
                 Modèle
