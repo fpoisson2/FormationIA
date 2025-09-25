@@ -74,6 +74,7 @@ export interface StepSequenceContextValue {
   onUpdateConfig: (config: unknown) => void;
   goToStep: (target: number | string) => void;
   activityContext?: Record<string, unknown> | null;
+  compositeModules?: Record<string, CompositeStepModuleDefinition[]>;
 }
 
 export const StepSequenceContext = createContext<StepSequenceContextValue | undefined>(

@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 
-import { getStepComponent } from "../registry";
+import { STEP_COMPONENT_REGISTRY, getStepComponent } from "../registry";
 import { StepSequenceContext, isCompositeStepDefinition } from "../types";
 import type {
   CompositeStepConfig,
@@ -53,6 +53,17 @@ function pickInitialPayloads(
   return result;
 }
 
+function generateModuleId(prefix: string): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `${prefix}-${crypto.randomUUID()}`;
+    }
+  } catch (error) {
+    // Ignore environments where crypto is not available (e.g. SSR)
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function CompositeStep({
   definition,
   config,
@@ -88,6 +99,21 @@ export function CompositeStep({
   const [modulePayloads, setModulePayloads] = useState<Record<string, unknown>>(
     () => pickInitialPayloads(modules, payload)
   );
+
+  const aggregatedPayloads = useMemo(() => {
+    const basePayloads = parentContext ? parentContext.payloads : {};
+    return {
+      ...basePayloads,
+      ...modulePayloads,
+    };
+  }, [modulePayloads, parentContext]);
+
+  const parentCompositeModules = parentContext?.compositeModules;
+  const compositeModulesMap = useMemo(() => {
+    const base = parentCompositeModules ? { ...parentCompositeModules } : {};
+    base[definition.id] = modules;
+    return base;
+  }, [definition.id, modules, parentCompositeModules]);
 
   useEffect(() => {
     setModulePayloads(pickInitialPayloads(modules, payload));
@@ -131,6 +157,127 @@ export function CompositeStep({
 
   const autoAdvance = compositeConfig.autoAdvance ?? false;
 
+  const moduleTypeOptions = useMemo(() => {
+    const available = Object.keys(STEP_COMPONENT_REGISTRY).filter(
+      (key) => key !== "composite"
+    );
+    modules.forEach((module) => {
+      if (module.component && !available.includes(module.component)) {
+        available.push(module.component);
+      }
+    });
+    return Array.from(new Set(available)).sort((a, b) => a.localeCompare(b));
+  }, [modules]);
+
+  const [nextModuleType, setNextModuleType] = useState<string>("");
+
+  useEffect(() => {
+    if (moduleTypeOptions.length === 0) {
+      setNextModuleType("");
+      return;
+    }
+    setNextModuleType((prev) =>
+      prev && moduleTypeOptions.includes(prev) ? prev : moduleTypeOptions[0]
+    );
+  }, [moduleTypeOptions]);
+
+  const handleAddModule = useCallback(() => {
+    if (!compositeConfig || !nextModuleType) {
+      return;
+    }
+    const nextModule: CompositeStepModuleDefinition = {
+      id: generateModuleId("module"),
+      component: nextModuleType,
+    };
+    onUpdateConfig({
+      ...compositeConfig,
+      modules: [...modules, nextModule],
+    });
+  }, [compositeConfig, modules, nextModuleType, onUpdateConfig]);
+
+  const handleRemoveModule = useCallback(
+    (moduleId: string) => {
+      if (!compositeConfig) {
+        return;
+      }
+      const nextModules = modules.filter((module) => module.id !== moduleId);
+      onUpdateConfig({
+        ...compositeConfig,
+        modules: nextModules,
+      });
+      setModulePayloads((previous) => {
+        if (!Object.prototype.hasOwnProperty.call(previous, moduleId)) {
+          return previous;
+        }
+        const nextPayloads = { ...previous };
+        delete nextPayloads[moduleId];
+        return nextPayloads;
+      });
+    },
+    [compositeConfig, modules, onUpdateConfig]
+  );
+
+  const handleMoveModule = useCallback(
+    (moduleId: string, direction: -1 | 1) => {
+      if (!compositeConfig) {
+        return;
+      }
+      const currentIndex = modules.findIndex((module) => module.id === moduleId);
+      if (currentIndex === -1) {
+        return;
+      }
+      const targetIndex = currentIndex + direction;
+      if (targetIndex < 0 || targetIndex >= modules.length) {
+        return;
+      }
+      const nextModules = [...modules];
+      const [moved] = nextModules.splice(currentIndex, 1);
+      nextModules.splice(targetIndex, 0, moved);
+      onUpdateConfig({
+        ...compositeConfig,
+        modules: nextModules,
+      });
+    },
+    [compositeConfig, modules, onUpdateConfig]
+  );
+
+  const handleChangeModuleType = useCallback(
+    (moduleId: string, nextType: string) => {
+      if (!compositeConfig) {
+        return;
+      }
+      const nextModules = modules.map((module) => {
+        if (module.id !== moduleId) {
+          return module;
+        }
+        if (module.component === nextType) {
+          return module;
+        }
+        const nextModule: CompositeStepModuleDefinition = {
+          id: module.id,
+          component: nextType,
+        };
+        if (module.slot) {
+          nextModule.slot = module.slot;
+        }
+        return nextModule;
+      });
+      onUpdateConfig({
+        ...compositeConfig,
+        modules: nextModules,
+      });
+      setModulePayloads((previous) => {
+        if (!Object.prototype.hasOwnProperty.call(previous, moduleId)) {
+          return previous;
+        }
+        const nextPayloads = { ...previous };
+        delete nextPayloads[moduleId];
+        return nextPayloads;
+      });
+    },
+    [compositeConfig, modules, onUpdateConfig]
+  );
+
   useEffect(() => {
     if (!autoAdvance || !isActive) {
       return;
@@ -162,14 +309,12 @@ export function CompositeStep({
       const childContext: StepSequenceContextValue = parentContext
         ? {
             ...parentContext,
-            payloads: {
-              ...parentContext.payloads,
-              [module.id]: modulePayloads[module.id],
-            },
+            payloads: aggregatedPayloads,
             onAdvance: (childPayload?: unknown) =>
               handleModuleAdvance(module.id, childPayload),
             onUpdateConfig: (nextConfig: unknown) =>
               updateModuleConfig(module.id, nextConfig),
+            compositeModules: compositeModulesMap,
           }
         : {
             stepIndex: 0,
@@ -179,7 +324,7 @@ export function CompositeStep({
               component: item.component,
               config: item.config,
             })),
-            payloads: { [module.id]: modulePayloads[module.id] },
+            payloads: aggregatedPayloads,
             isEditMode: effectiveIsEditMode,
             onAdvance: (childPayload?: unknown) =>
               handleModuleAdvance(module.id, childPayload),
@@ -187,6 +332,7 @@ export function CompositeStep({
               updateModuleConfig(module.id, nextConfig),
             goToStep: () => {},
             activityContext: null,
+            compositeModules: compositeModulesMap,
           };
 
       const moduleProps: StepComponentProps = {
@@ -219,8 +365,10 @@ export function CompositeStep({
     isActive,
     modules,
     modulePayloads,
+    aggregatedPayloads,
     parentContext,
     updateModuleConfig,
+    compositeModulesMap,
   ]);
 
   const partitioned = useMemo(() => {
@@ -244,6 +392,119 @@ export function CompositeStep({
 
   return (
     <div className="space-y-6">
+      {effectiveIsEditMode ? (
+        <section
+          aria-label="Configuration du composite"
+          className="space-y-4 rounded-2xl border border-dashed border-orange-200 bg-orange-50/40 p-4"
+        >
+          <header className="space-y-1">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+              Blocs du composite
+            </h3>
+            <p className="text-xs text-orange-700/90">
+              Ajoutez ou organisez les blocs qui seront rendus dans cette étape.
+            </p>
+          </header>
+          <div className="space-y-3">
+            {modules.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-orange-200 bg-white/70 p-3 text-xs text-orange-700">
+                Aucun bloc n’est configuré pour le moment. Ajoutez un premier bloc pour démarrer.
+              </p>
+            ) : (
+              modules.map((module, index) => {
+                const canMoveUp = index > 0;
+                const canMoveDown = index < modules.length - 1;
+                return (
+                  <div
+                    key={module.id}
+                    className="space-y-3 rounded-xl border border-orange-200 bg-white/70 p-3 shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">
+                        Bloc {index + 1}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveModule(module.id, -1)}
+                          disabled={!canMoveUp}
+                          className="rounded-full border border-orange-200 px-2 py-1 text-[10px] font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Monter le bloc ${index + 1}`}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveModule(module.id, 1)}
+                          disabled={!canMoveDown}
+                          className="rounded-full border border-orange-200 px-2 py-1 text-[10px] font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Descendre le bloc ${index + 1}`}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveModule(module.id)}
+                          className="rounded-full border border-red-200 px-2 py-1 text-[10px] font-semibold text-red-600 transition hover:border-red-300 hover:bg-red-100"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    </div>
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-orange-700">
+                      Type de bloc
+                      <select
+                        value={module.component}
+                        onChange={(event) => handleChangeModuleType(module.id, event.target.value)}
+                        className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+                      >
+                        {moduleTypeOptions.length === 0 ? (
+                          <option value="">Aucun module disponible</option>
+                        ) : (
+                          moduleTypeOptions.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-xs font-semibold text-orange-700">
+              <span>Ajouter un bloc</span>
+              <select
+                value={nextModuleType}
+                onChange={(event) => setNextModuleType(event.target.value)}
+                className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+                disabled={moduleTypeOptions.length === 0}
+              >
+                {moduleTypeOptions.length === 0 ? (
+                  <option value="">Aucun module disponible</option>
+                ) : (
+                  moduleTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={handleAddModule}
+              disabled={!nextModuleType}
+              className="inline-flex items-center justify-center rounded-full border border-orange-300 bg-white px-4 py-2 text-xs font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Ajouter ce bloc
+            </button>
+          </div>
+        </section>
+      ) : null}
       {partitioned.sidebar.length > 0 ? (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div className="space-y-6">{partitioned.main}</div>

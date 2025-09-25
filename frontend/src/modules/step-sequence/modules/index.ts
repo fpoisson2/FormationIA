@@ -7,6 +7,8 @@ import { SimulationChatStep } from "./SimulationChatStep";
 import { VideoStep } from "./VideoStep";
 import { PromptEvaluationStep } from "./PromptEvaluationStep";
 import { DualModelComparisonStep } from "./DualModelComparisonStep";
+import { ClarityMapStep } from "./clarity/ClarityMapStep";
+import { ClarityPromptStep } from "./clarity/ClarityPromptStep";
 import type {
   DualModelComparisonConfig,
   DualModelComparisonStepState,
@@ -54,6 +56,8 @@ registerStepComponent("simulation-chat", SimulationChatStep);
 registerStepComponent("video", VideoStep);
 registerStepComponent("prompt-evaluation", PromptEvaluationStep);
 registerStepComponent("ai-comparison", DualModelComparisonStep);
+registerStepComponent("clarity-map", ClarityMapStep);
+registerStepComponent("clarity-prompt", ClarityPromptStep);
 
 /**
  * Configuration attendue par le module `rich-content`.
@@ -111,5 +115,15 @@ export type {
   DualModelComparisonVariantConfig,
 } from "./DualModelComparisonStep";
 export { DualModelComparisonStep };
+
+export type {
+  ClarityMapStepConfig,
+  ClarityMapStepPayload,
+} from "./clarity/ClarityMapStep";
+export type {
+  ClarityPromptStepConfig,
+  ClarityPromptStepPayload,
+} from "./clarity/ClarityPromptStep";
+export { ClarityMapStep, ClarityPromptStep };
 
 export * from "./workshop";
