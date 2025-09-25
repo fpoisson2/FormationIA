@@ -71,6 +71,7 @@ export const COMPONENT_REGISTRY = {
   "clarity-path": ClarityPath,
   "clarte-dabord": ClarteDabord,
   "explorateur-ia": ExplorateurIA,
+  stepsequence: ExplorateurIA,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
 
 export type ActivityComponentKey = keyof typeof COMPONENT_REGISTRY;
@@ -222,7 +223,7 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
     },
   },
   "explorateur-ia": {
-    componentKey: "explorateur-ia",
+    componentKey: "stepsequence",
     path: "/explorateur-ia",
     defaults: {
       completionId: "explorateur-ia",
