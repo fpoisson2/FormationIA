@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type Ref,
   type CSSProperties,
+  type ChangeEvent,
 } from "react";
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
@@ -20,6 +21,7 @@ import {
   type StepComponentProps,
   type StepDefinition,
   type StepSequenceRenderWrapperProps,
+  type StepSequenceActivityContextBridge,
 } from "../modules/step-sequence";
 import { createExplorateurExport } from "./explorateurIA/export";
 import {
@@ -48,6 +50,7 @@ import {
   deriveQuarterData,
   sanitizeQuarterConfigs,
   type DerivedQuarterData,
+  type ExplorateurIAInventoryConfig,
   type ExplorateurIAInventoryDefinition,
   type ExplorateurIAQuarterConfig,
   type RewardStage,
@@ -72,6 +75,10 @@ import {
 type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
+
+const DEFAULT_QUARTER_MAP = new Map(
+  DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => [quarter.id, quarter])
+);
 
 let currentDerivedData: DerivedQuarterData = cloneDerivedQuarterData(
   DEFAULT_DERIVED_QUARTERS
@@ -4309,7 +4316,9 @@ export default function ExplorateurIA({
   const isEditMode = context?.isEditMode ?? isEditModeProp ?? false;
   const effectiveOnUpdateConfig =
     context?.onUpdateConfig ?? onUpdateConfig ?? (() => {});
-  const activityContext = context?.activityContext ?? null;
+  const activityContext =
+    (context?.activityContext as StepSequenceActivityContextBridge | null | undefined) ??
+    null;
   const rawCompletionId =
     typeof activityContext?.completionId === "string"
       ? activityContext.completionId
@@ -4422,6 +4431,50 @@ export default function ExplorateurIA({
     },
     [effectiveOnUpdateConfig, sanitizedConfig]
   );
+
+  const emitQuarterConfig = useCallback(
+    (quarters: ExplorateurIAQuarterConfig[]) => {
+      emitConfig({ quarters });
+    },
+    [emitConfig]
+  );
+
+  const emitTerrainConfig = useCallback(
+    (terrainPatch: Partial<ExplorateurIATerrainConfig>) => {
+      emitConfig({
+        terrain: {
+          themeId:
+            terrainPatch.themeId ?? sanitizedConfig.terrain.themeId,
+          seed: terrainPatch.seed ?? sanitizedConfig.terrain.seed,
+        },
+      });
+    },
+    [emitConfig, sanitizedConfig.terrain.seed, sanitizedConfig.terrain.themeId]
+  );
+
+  const isConfigDesignerView = isEditMode && activityContext == null;
+
+  if (isConfigDesignerView) {
+    return (
+      <ExplorateurIAConfigDesigner
+        config={sanitizedConfig}
+        onUpdateQuarters={emitQuarterConfig}
+        onUpdateTerrain={emitTerrainConfig}
+        onReset={() => {
+          emitConfig({
+            quarters: DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
+              ...quarter,
+              inventory: quarter.inventory ? { ...quarter.inventory } : null,
+            })),
+            terrain: {
+              themeId: DEFAULT_TERRAIN_THEME_ID,
+              seed: WORLD_SEED,
+            },
+          });
+        }}
+      />
+    );
+  }
 
   useEffect(() => {
     if (sanitizedConfig.terrain.seed === currentWorldSeed) {
@@ -5695,6 +5748,422 @@ export default function ExplorateurIA({
           renderStepWrapper={renderQuarterStep}
         />
       ) : null}
+    </div>
+  );
+}
+
+interface ConfigDesignerProps {
+  config: ExplorateurIAConfig;
+  onUpdateQuarters: (quarters: ExplorateurIAQuarterConfig[]) => void;
+  onUpdateTerrain: (patch: Partial<ExplorateurIATerrainConfig>) => void;
+  onReset: () => void;
+}
+
+function cloneQuarter(
+  quarter: ExplorateurIAQuarterConfig
+): ExplorateurIAQuarterConfig {
+  return {
+    id: quarter.id,
+    label: quarter.label,
+    color: quarter.color,
+    buildingNumber:
+      quarter.buildingNumber === undefined
+        ? undefined
+        : quarter.buildingNumber === null
+        ? null
+        : Number(quarter.buildingNumber),
+    isGoal: Boolean(quarter.isGoal),
+    inventory: quarter.inventory
+      ? {
+          title: quarter.inventory.title,
+          description: quarter.inventory.description,
+          hint: quarter.inventory.hint,
+          icon: quarter.inventory.icon,
+        }
+      : null,
+  } satisfies ExplorateurIAQuarterConfig;
+}
+
+function getDefaultInventory(
+  quarterId: QuarterId
+): ExplorateurIAInventoryConfig | null {
+  const defaults = DEFAULT_QUARTER_MAP.get(quarterId);
+  if (!defaults || !defaults.inventory) {
+    return null;
+  }
+  return {
+    title: defaults.inventory.title,
+    description: defaults.inventory.description,
+    hint: defaults.inventory.hint,
+    icon: defaults.inventory.icon,
+  } satisfies ExplorateurIAInventoryConfig;
+}
+
+function ExplorateurIAConfigDesigner({
+  config,
+  onUpdateQuarters,
+  onUpdateTerrain,
+  onReset,
+}: ConfigDesignerProps) {
+  const nonGoalQuarterCount = useMemo(
+    () => config.quarters.filter((quarter) => !quarter.isGoal).length,
+    [config.quarters]
+  );
+
+  const handleQuarterChange = useCallback(
+    (
+      index: number,
+      patch: Partial<ExplorateurIAQuarterConfig>
+    ) => {
+      const next = config.quarters.map((quarter, quarterIndex) =>
+        quarterIndex === index
+          ? { ...cloneQuarter(quarter), ...patch }
+          : cloneQuarter(quarter)
+      );
+      onUpdateQuarters(next);
+    },
+    [config.quarters, onUpdateQuarters]
+  );
+
+  const handleInventoryChange = useCallback(
+    (
+      index: number,
+      patch: Partial<ExplorateurIAInventoryConfig> | null
+    ) => {
+      const next = config.quarters.map((quarter, quarterIndex) => {
+        if (quarterIndex !== index) {
+          return cloneQuarter(quarter);
+        }
+        const cloned = cloneQuarter(quarter);
+        if (patch === null) {
+          cloned.inventory = null;
+          return cloned;
+        }
+        const baseInventory =
+          cloned.inventory ?? getDefaultInventory(cloned.id) ?? {
+            title: "",
+            description: "",
+            hint: "",
+            icon: "🎁",
+          };
+        cloned.inventory = {
+          ...baseInventory,
+          ...patch,
+        } satisfies ExplorateurIAInventoryConfig;
+        return cloned;
+      });
+      onUpdateQuarters(next);
+    },
+    [config.quarters, onUpdateQuarters]
+  );
+
+  const handleMoveQuarter = useCallback(
+    (index: number, direction: -1 | 1) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= config.quarters.length) {
+        return;
+      }
+      const next = config.quarters.map(cloneQuarter);
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      onUpdateQuarters(next);
+    },
+    [config.quarters, onUpdateQuarters]
+  );
+
+  const handleSetGoal = useCallback(
+    (quarterId: QuarterId) => {
+      const next = config.quarters.map((quarter) => {
+        const cloned = cloneQuarter(quarter);
+        cloned.isGoal = quarter.id === quarterId;
+        if (cloned.isGoal) {
+          cloned.buildingNumber = null;
+        }
+        return cloned;
+      });
+      onUpdateQuarters(next);
+    },
+    [config.quarters, onUpdateQuarters]
+  );
+
+  const handleThemeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      onUpdateTerrain({ themeId: event.target.value as TerrainThemeId });
+    },
+    [onUpdateTerrain]
+  );
+
+  const handleSeedChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const numeric = Number.parseInt(event.target.value, 10);
+      if (Number.isFinite(numeric)) {
+        onUpdateTerrain({ seed: numeric });
+      }
+    },
+    [onUpdateTerrain]
+  );
+
+  const handleNumberChange = useCallback(
+    (index: number, value: string) => {
+      const trimmed = value.trim();
+      const numeric = Number.parseInt(trimmed, 10);
+      handleQuarterChange(index, {
+        buildingNumber:
+          trimmed.length === 0 || Number.isNaN(numeric) ? null : numeric,
+      });
+    },
+    [handleQuarterChange]
+  );
+
+  const handleColorChange = useCallback(
+    (index: number, value: string) => {
+      handleQuarterChange(index, { color: value });
+    },
+    [handleQuarterChange]
+  );
+
+  const handleLabelChange = useCallback(
+    (index: number, value: string) => {
+      handleQuarterChange(index, { label: value });
+    },
+    [handleQuarterChange]
+  );
+
+  return (
+    <div className="flex flex-col gap-6">
+      <header className="space-y-3 rounded-3xl border border-orange-200 bg-orange-50/60 p-6 text-orange-900">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">Configurer Explorateur IA</h1>
+            <p className="text-sm text-orange-800/80">
+              Ajustez les quartiers, l'ordre de progression et la numérotation des
+              défis avant d'insérer l'activité dans une séquence.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onReset}
+            className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100"
+          >
+            Réinitialiser
+          </button>
+        </div>
+        <dl className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Thème du terrain
+            </dt>
+            <dd className="mt-2">
+              <select
+                value={config.terrain.themeId}
+                onChange={handleThemeChange}
+                className="w-full rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+              >
+                {Object.entries(TERRAIN_THEMES).map(([themeId, theme]) => (
+                  <option key={themeId} value={themeId}>
+                    {theme.label}
+                  </option>
+                ))}
+              </select>
+            </dd>
+          </div>
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Graine du monde
+            </dt>
+            <dd className="mt-2">
+              <input
+                type="number"
+                className="w-full rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                value={config.terrain.seed}
+                onChange={handleSeedChange}
+              />
+            </dd>
+          </div>
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Nombre de défis actifs
+            </dt>
+            <dd className="mt-2 text-lg font-semibold text-orange-900">
+              {nonGoalQuarterCount}
+            </dd>
+          </div>
+        </dl>
+      </header>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+          Quartiers et défis
+        </h2>
+        <p className="text-sm text-orange-900/80">
+          Ajustez l'ordre des quartiers, renommez-les et définissez le numéro du défi pour chaque zone.
+        </p>
+        <div className="space-y-5">
+          {config.quarters.map((quarter, index) => {
+            const quarterNumberValue =
+              quarter.buildingNumber === null || quarter.buildingNumber === undefined
+                ? ""
+                : String(quarter.buildingNumber);
+            const inventory = quarter.inventory ?? null;
+            const isGoal = Boolean(quarter.isGoal);
+            return (
+              <fieldset
+                key={quarter.id}
+                className="space-y-4 rounded-3xl border border-orange-200/70 bg-white/90 p-5 shadow-sm"
+              >
+                <legend className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-orange-800">
+                  <span>
+                    {quarter.label || quarter.id}
+                    {isGoal ? " — Objectif final" : ""}
+                  </span>
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleMoveQuarter(index, -1)}
+                      disabled={index === 0}
+                      className="rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ↑ Monter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveQuarter(index, 1)}
+                      disabled={index === config.quarters.length - 1}
+                      className="rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ↓ Descendre
+                    </button>
+                    <label className="flex items-center gap-2 rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700">
+                      <input
+                        type="radio"
+                        name="explorateur-ia-goal"
+                        checked={isGoal}
+                        onChange={() => handleSetGoal(quarter.id)}
+                      />
+                      Objectif final
+                    </label>
+                  </div>
+                </legend>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-sm text-orange-900">
+                    Nom du quartier
+                    <input
+                      type="text"
+                      value={quarter.label}
+                      onChange={(event) => handleLabelChange(index, event.target.value)}
+                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm text-orange-900">
+                    Couleur principale
+                    <input
+                      type="text"
+                      value={quarter.color}
+                      onChange={(event) => handleColorChange(index, event.target.value)}
+                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                      placeholder="#06d6a0"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm text-orange-900">
+                    Numéro du défi
+                    <input
+                      type="number"
+                      value={quarterNumberValue}
+                      onChange={(event) => handleNumberChange(index, event.target.value)}
+                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                      placeholder={isGoal ? "—" : String(index + 1)}
+                      disabled={isGoal}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm text-orange-900">
+                    Identifiant interne
+                    <input
+                      type="text"
+                      value={quarter.id}
+                      readOnly
+                      className="cursor-not-allowed rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800"
+                    />
+                  </label>
+                </div>
+                <div className="space-y-3 rounded-2xl border border-orange-100 bg-orange-50/60 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-orange-800">
+                      Objet d'inventaire
+                    </h3>
+                    <label className="flex items-center gap-2 text-xs font-semibold text-orange-700">
+                      <input
+                        type="checkbox"
+                        checked={inventory !== null}
+                        onChange={(event) =>
+                          handleInventoryChange(index, event.target.checked ? {} : null)
+                        }
+                      />
+                      Activer
+                    </label>
+                  </div>
+                  {inventory ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-sm text-orange-900">
+                        Titre
+                        <input
+                          type="text"
+                          value={inventory.title}
+                          onChange={(event) =>
+                            handleInventoryChange(index, {
+                              title: event.target.value,
+                            })
+                          }
+                          className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-sm text-orange-900">
+                        Icône (emoji)
+                        <input
+                          type="text"
+                          value={inventory.icon}
+                          onChange={(event) =>
+                            handleInventoryChange(index, {
+                              icon: event.target.value,
+                            })
+                          }
+                          className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-sm text-orange-900 sm:col-span-2">
+                        Description lorsque l'objet est obtenu
+                        <textarea
+                          value={inventory.description}
+                          onChange={(event) =>
+                            handleInventoryChange(index, {
+                              description: event.target.value,
+                            })
+                          }
+                          className="h-24 rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-sm text-orange-900 sm:col-span-2">
+                        Indice avant obtention
+                        <textarea
+                          value={inventory.hint}
+                          onChange={(event) =>
+                            handleInventoryChange(index, {
+                              hint: event.target.value,
+                            })
+                          }
+                          className="h-20 rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-orange-700">
+                      Aucun objet n'est associé à ce quartier.
+                    </p>
+                  )}
+                </div>
+              </fieldset>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
