@@ -49,6 +49,8 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   "workshop-synthesis": "Atelier · Synthèse",
 };
 
+const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
+
 const NOOP = () => {};
 
 function generateUniqueId(prefix: string): string {
@@ -145,6 +147,23 @@ function StepSequenceStepCard({
   onUpdateConfig,
 }: StepSequenceStepCardProps): JSX.Element {
   const componentKey = resolveStepComponentKey(step);
+  const selectOptions = useMemo(() => {
+    const mapped = stepTypeOptions.map((type) => ({
+      value: type,
+      label: getStepTypeLabel(type),
+      disabled: false,
+    }));
+
+    if (componentKey && !stepTypeOptions.includes(componentKey)) {
+      mapped.unshift({
+        value: componentKey,
+        label: getStepTypeLabel(componentKey),
+        disabled: true,
+      });
+    }
+
+    return mapped;
+  }, [componentKey, stepTypeOptions]);
   const StepComponent = useMemo(
     () => (componentKey ? getStepComponent(componentKey) : undefined),
     [componentKey]
@@ -220,10 +239,15 @@ function StepSequenceStepCard({
             value={componentKey ?? ""}
             onChange={handleTypeChange}
             className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+            disabled={selectOptions.length === 0}
           >
-            {stepTypeOptions.map((type) => (
-              <option key={type} value={type}>
-                {getStepTypeLabel(type)}
+            {selectOptions.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                disabled={option.disabled}
+              >
+                {option.label}
               </option>
             ))}
           </select>
@@ -402,7 +426,15 @@ function ActivitySelector(): JSX.Element {
     [defaultActivities]
   );
   const stepComponentKeys = useMemo(
-    () => Object.keys(STEP_COMPONENT_REGISTRY).sort((a, b) => a.localeCompare(b)),
+    () =>
+      Object.keys(STEP_COMPONENT_REGISTRY)
+        .filter(
+          (key) =>
+            !HIDDEN_STEP_COMPONENT_PREFIXES.some((prefix) =>
+              key.startsWith(prefix)
+            )
+        )
+        .sort((a, b) => a.localeCompare(b)),
     []
   );
 
