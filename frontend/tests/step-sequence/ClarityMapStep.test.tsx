@@ -87,6 +87,10 @@ describe("ClarityMapStep", () => {
     expect(payload.trail).toEqual([START_POSITION]);
     expect(payload.status).toBe("idle");
     expect(payload.message).toBeUndefined();
+    expect(payload.model).toBe("gpt-5-mini");
+    expect(payload.verbosity).toBe("medium");
+    expect(payload.thinking).toBe("medium");
+    expect(payload.developerPrompt).toBeUndefined();
   });
 
   it("falls back to a random target when none is configured", () => {
@@ -112,6 +116,9 @@ describe("ClarityMapStep", () => {
     expect(payload.blocked.every((coord) => coord.x !== payload.target.x || coord.y !== payload.target.y)).toBe(true);
     expect(payload.trail).toEqual([START_POSITION]);
     expect(payload.status).toBe("idle");
+    expect(payload.model).toBe("gpt-5-mini");
+    expect(payload.verbosity).toBe("medium");
+    expect(payload.thinking).toBe("medium");
   });
 
   it("publishes updates automatically when rendered inside a composite module", async () => {
@@ -153,6 +160,9 @@ describe("ClarityMapStep", () => {
     await waitFor(() => {
       const lastCall = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityMapStepPayload;
       expect(lastCall.instruction).toBe("Nouvelle consigne");
+      expect(lastCall.model).toBe("gpt-5-mini");
+      expect(lastCall.verbosity).toBe("medium");
+      expect(lastCall.thinking).toBe("medium");
     });
   });
 
@@ -200,6 +210,9 @@ describe("ClarityMapStep", () => {
       expect(onAdvance).toHaveBeenCalled();
       const payload = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityMapStepPayload;
       expect(payload.instruction).toBe("Tourne à droite");
+      expect(payload.model).toBe("gpt-5-mini");
+      expect(payload.verbosity).toBe("medium");
+      expect(payload.thinking).toBe("medium");
     });
   });
 
@@ -246,6 +259,9 @@ describe("ClarityMapStep", () => {
       expect(onAdvance).toHaveBeenCalled();
       const payload = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityMapStepPayload;
       expect(payload.instruction).toBe("Dirige-toi vers le nord");
+      expect(payload.model).toBe("gpt-5-mini");
+      expect(payload.verbosity).toBe("medium");
+      expect(payload.thinking).toBe("medium");
     });
   });
 });

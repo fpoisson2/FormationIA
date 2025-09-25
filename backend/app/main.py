@@ -50,6 +50,9 @@ SUPPORTED_MODELS = (
 GRID_SIZE = 10
 MAX_PLAN_ACTIONS = 30
 MAX_STEPS_PER_ACTION = 20
+DEFAULT_PLAN_MODEL = "gpt-5-mini"
+DEFAULT_PLAN_VERBOSITY = "medium"
+DEFAULT_PLAN_THINKING = "medium"
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 
@@ -151,6 +154,10 @@ class PlanRequest(BaseModel):
     run_id: str = Field(
         ..., alias="runId", min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
     )
+    model: str | None = Field(default=None, min_length=1, max_length=128)
+    verbosity: Literal["low", "medium", "high"] | None = Field(default=None)
+    thinking: Literal["minimal", "medium", "high"] | None = Field(default=None)
+    developer_prompt: str | None = Field(default=None, alias="developerPrompt")
 
     @model_validator(mode="before")
     @classmethod
@@ -183,6 +190,35 @@ class PlanRequest(BaseModel):
         instruction = data.get("instruction")
         if isinstance(instruction, str):
             data["instruction"] = instruction.strip()
+
+        model = data.get("model")
+        if isinstance(model, str):
+            stripped_model = model.strip()
+            if stripped_model and stripped_model in SUPPORTED_MODELS:
+                data["model"] = stripped_model
+            else:
+                data["model"] = None
+
+        developer_prompt = data.get("developerPrompt")
+        if isinstance(developer_prompt, str):
+            stripped_prompt = developer_prompt.strip()
+            data["developerPrompt"] = stripped_prompt or None
+
+        verbosity = data.get("verbosity")
+        if isinstance(verbosity, str):
+            normalized = verbosity.strip().lower()
+            if normalized in {"low", "medium", "high"}:
+                data["verbosity"] = normalized
+            else:
+                data.pop("verbosity", None)
+
+        thinking = data.get("thinking")
+        if isinstance(thinking, str):
+            normalized_thinking = thinking.strip().lower()
+            if normalized_thinking in {"minimal", "medium", "high"}:
+                data["thinking"] = normalized_thinking
+            else:
+                data.pop("thinking", None)
         return data
 
 
@@ -452,19 +488,23 @@ def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, s
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": PLAN_SYSTEM_PROMPT},
-        {"role": "user", "content": user_payload},
     ]
 
+    if payload.developer_prompt:
+        developer_prompt = payload.developer_prompt.strip()
+        if developer_prompt:
+            messages.append({"role": "system", "content": developer_prompt})
+
     if attempt > 0:
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Rappel: ta réponse doit être strictement le JSON demandé, "
-                    "sans texte supplémentaire."
-                ),
-            }
+        reminder = (
+            "Rappel: ta réponse doit être strictement le JSON demandé, "
+            "sans texte supplémentaire."
         )
+        combined_user_payload = f"{user_payload}\n\n{reminder}"
+    else:
+        combined_user_payload = user_payload
+
+    messages.append({"role": "user", "content": combined_user_payload})
 
     return messages
 
@@ -530,14 +570,17 @@ def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> Pla
     last_error: PlanGenerationError | None = None
     for attempt in range(2):
         messages = _build_plan_messages(payload, attempt)
+        selected_model = payload.model or DEFAULT_PLAN_MODEL
+        selected_verbosity = payload.verbosity or DEFAULT_PLAN_VERBOSITY
+        selected_thinking = payload.thinking or DEFAULT_PLAN_THINKING
         try:
             with client.responses.stream(
-                model="gpt-5-nano",
+                model=selected_model,
                 input=messages,
                 text_format=PlanModel,
-                text={"verbosity": "low"},
-                reasoning={"effort": "minimal", "summary": "auto"},
-                timeout=8,
+                text={"verbosity": selected_verbosity},
+                reasoning={"effort": selected_thinking, "summary": "auto"},
+                timeout=20,
             ) as stream:
                 for event in stream:
                     if event.type == "response.error":
@@ -2169,8 +2212,9 @@ def _handle_plan(payload: PlanRequest) -> StreamingResponse:
     try:
         plan_payload = _request_plan_from_llm(client, payload)
     except PlanGenerationError as exc:
+        error_message = str(exc)
         def error_stream() -> Generator[str, None, None]:
-            yield _sse_event("error", {"message": str(exc)})
+            yield _sse_event("error", {"message": error_message})
 
         return StreamingResponse(error_stream(), media_type="text/event-stream", headers=_sse_headers())
 
