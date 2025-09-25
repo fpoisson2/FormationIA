@@ -11,6 +11,12 @@ import {
   type ClarityPromptStepConfig,
   type ClarityPromptStepPayload,
 } from "../../src/modules/step-sequence/modules";
+import {
+  DEFAULT_CLARITY_DEVELOPER_MESSAGE,
+  DEFAULT_CLARITY_MODEL,
+  DEFAULT_CLARITY_THINKING,
+  DEFAULT_CLARITY_VERBOSITY,
+} from "../../src/modules/step-sequence/modules/clarity/ClarityPromptStep";
 
 afterEach(() => {
   cleanup();
@@ -75,12 +81,20 @@ describe("ClarityPromptStep", () => {
     const textarea = screen.getByPlaceholderText(/décris l'action/i);
     fireEvent.change(textarea, { target: { value: "Avance vers la droite" } });
 
-    const button = screen.getByRole("button", { name: /continuer/i });
+    const button = screen.getByRole("button", { name: /envoyer la requête/i });
     fireEvent.click(button);
 
     expect(onAdvance).toHaveBeenCalledTimes(1);
     const payload = onAdvance.mock.calls[0][0] as ClarityPromptStepPayload;
-    expect(payload).toEqual({ instruction: "Avance vers la droite" });
+    expect(payload).toEqual({
+      instruction: "Avance vers la droite",
+      model: DEFAULT_CLARITY_MODEL,
+      verbosity: DEFAULT_CLARITY_VERBOSITY,
+      thinking: DEFAULT_CLARITY_THINKING,
+      developerMessage: DEFAULT_CLARITY_DEVELOPER_MESSAGE,
+      exposeSettings: true,
+      exposeDeveloperMessage: false,
+    });
   });
 
   it("publishes updates automatically when rendered inside a composite module", async () => {
@@ -122,6 +136,9 @@ describe("ClarityPromptStep", () => {
     await waitFor(() => {
       const lastCall = onAdvance.mock.calls[onAdvance.mock.calls.length - 1][0] as ClarityPromptStepPayload;
       expect(lastCall.instruction).toBe("Nouvelle consigne");
+      expect(lastCall.model).toBe(DEFAULT_CLARITY_MODEL);
+      expect(lastCall.verbosity).toBe(DEFAULT_CLARITY_VERBOSITY);
+      expect(lastCall.thinking).toBe(DEFAULT_CLARITY_THINKING);
     });
   });
 });

@@ -90,7 +90,7 @@ describe("ClarityMapStep", () => {
     const textarea = screen.getByPlaceholderText(/consigne reçue/i);
     fireEvent.change(textarea, { target: { value: "Avance de 2 cases." } });
 
-    const submitButton = screen.getByRole("button", { name: /continuer/i });
+    const submitButton = screen.getByRole("button", { name: /envoyer la requête/i });
     fireEvent.click(submitButton);
 
     expect(onAdvance).toHaveBeenCalledTimes(1);
@@ -116,7 +116,7 @@ describe("ClarityMapStep", () => {
 
     render(<ClarityMapStep {...props} />);
 
-    const submitButton = screen.getByRole("button", { name: /continuer/i });
+    const submitButton = screen.getByRole("button", { name: /envoyer la requête/i });
     fireEvent.click(submitButton);
 
     const payload = onAdvance.mock.calls[0][0] as {

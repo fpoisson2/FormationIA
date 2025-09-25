@@ -99,14 +99,38 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
 export interface PlanPreviewProps {
   plan: PlanAction[];
   notes: string;
+  tone?: "light" | "dark";
 }
 
-export function PlanPreview({ plan, notes }: PlanPreviewProps): JSX.Element {
+export function PlanPreview({ plan, notes, tone = "light" }: PlanPreviewProps): JSX.Element {
+  const isDark = tone === "dark";
+  const containerClass = isDark
+    ? "rounded-3xl border border-white/40 bg-[color:var(--brand-charcoal)]/30 p-6 shadow-inner"
+    : "rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm";
+  const emptyContainerClass = isDark
+    ? "rounded-3xl border border-white/40 bg-[color:var(--brand-charcoal)]/25 p-6 shadow-inner"
+    : "rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm";
+  const headingClass = isDark
+    ? "text-lg font-semibold text-white"
+    : "text-lg font-semibold text-[color:var(--brand-black)]";
+  const textClass = isDark
+    ? "text-sm text-white/80"
+    : "text-sm text-[color:var(--brand-charcoal)]";
+  const badgeClass = isDark
+    ? "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/30 bg-white/10 text-xs font-semibold text-white"
+    : "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--brand-red)]/10 text-xs font-semibold text-[color:var(--brand-red)]";
+  const noteClass = isDark
+    ? "mt-4 rounded-2xl border border-white/20 bg-black/30 p-3 text-xs text-white/85"
+    : "mt-4 rounded-2xl bg-[color:var(--brand-yellow)]/30 p-3 text-xs text-[color:var(--brand-charcoal)]";
+  const emptyTextClass = isDark
+    ? "mt-2 text-sm text-white/75"
+    : "mt-2 text-sm text-[color:var(--brand-charcoal)]/80";
+
   if (!plan.length && !notes) {
     return (
-      <div className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Plan</h3>
-        <p className="mt-2 text-sm text-[color:var(--brand-charcoal)]/80">
+      <div className={emptyContainerClass}>
+        <h3 className={headingClass}>Plan</h3>
+        <p className={emptyTextClass}>
           Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.
         </p>
       </div>
@@ -114,25 +138,19 @@ export function PlanPreview({ plan, notes }: PlanPreviewProps): JSX.Element {
   }
 
   return (
-    <div className="rounded-3xl border border-white/60 bg-white/90 p-6 shadow-sm">
-      <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Plan validé</h3>
-      <ol className="mt-4 space-y-2 text-sm text-[color:var(--brand-charcoal)]">
+    <div className={containerClass}>
+      <h3 className={headingClass}>Plan validé</h3>
+      <ol className={`mt-4 space-y-2 ${textClass}`}>
         {plan.map((action, index) => (
           <li key={`${action.dir}-${index}`} className="flex items-center gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--brand-red)]/10 text-xs font-semibold text-[color:var(--brand-red)]">
-              {index + 1}
-            </span>
+            <span className={badgeClass}>{index + 1}</span>
             <span>
               {DIRECTION_LABELS[action.dir]} · {action.steps} pas
             </span>
           </li>
         ))}
       </ol>
-      {notes && (
-        <p className="mt-4 rounded-2xl bg-[color:var(--brand-yellow)]/30 p-3 text-xs text-[color:var(--brand-charcoal)]">
-          Hypothèse du modèle : {notes}
-        </p>
-      )}
+      {notes && <p className={noteClass}>Hypothèse du modèle : {notes}</p>}
     </div>
   );
 }

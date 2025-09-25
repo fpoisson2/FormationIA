@@ -20,6 +20,14 @@ import {
   gridKey,
   useClarityPlanExecution,
 } from "../../../clarity";
+import {
+  MODEL_OPTIONS,
+  THINKING_OPTIONS,
+  VERBOSITY_OPTIONS,
+  type ModelChoice,
+  type ThinkingChoice,
+  type VerbosityChoice,
+} from "../../../../config";
 import type {
   ClientStats,
   GridCoord,
@@ -33,6 +41,12 @@ import type {
 import { StepSequenceContext } from "../../types";
 
 import type { ClarityPromptStepPayload } from "./ClarityPromptStep";
+import {
+  DEFAULT_CLARITY_DEVELOPER_MESSAGE,
+  DEFAULT_CLARITY_MODEL,
+  DEFAULT_CLARITY_THINKING,
+  DEFAULT_CLARITY_VERBOSITY,
+} from "./ClarityPromptStep";
 
 export interface ClarityMapStepPayload {
   runId: string;
@@ -312,17 +326,65 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
   return sanitized;
 }
 
-function sanitizePromptPayload(value: unknown): string | null {
+const PROMPT_MODEL_VALUES = new Set<ModelChoice>(MODEL_OPTIONS.map((option) => option.value));
+const PROMPT_VERBOSITY_VALUES = new Set<VerbosityChoice>(
+  VERBOSITY_OPTIONS.map((option) => option.value)
+);
+const PROMPT_THINKING_VALUES = new Set<ThinkingChoice>(
+  THINKING_OPTIONS.map((option) => option.value)
+);
+
+interface PromptSnapshot {
+  instruction: string;
+  model: ModelChoice;
+  verbosity: VerbosityChoice;
+  thinking: ThinkingChoice;
+  developerMessage: string;
+  exposeSettings: boolean;
+  exposeDeveloperMessage: boolean;
+}
+
+function sanitizePromptPayload(value: unknown): PromptSnapshot | null {
   if (!value || typeof value !== "object") {
     return null;
   }
 
-  const source = value as Partial<ClarityPromptStepPayload>;
+  const source = value as Partial<ClarityPromptStepPayload> & Record<string, unknown>;
   if (typeof source.instruction !== "string") {
     return null;
   }
 
-  return source.instruction;
+  const model =
+    typeof source.model === "string" && PROMPT_MODEL_VALUES.has(source.model as ModelChoice)
+      ? (source.model as ModelChoice)
+      : DEFAULT_CLARITY_MODEL;
+  const verbosity =
+    typeof source.verbosity === "string" &&
+    PROMPT_VERBOSITY_VALUES.has(source.verbosity as VerbosityChoice)
+      ? (source.verbosity as VerbosityChoice)
+      : DEFAULT_CLARITY_VERBOSITY;
+  const thinking =
+    typeof source.thinking === "string" &&
+    PROMPT_THINKING_VALUES.has(source.thinking as ThinkingChoice)
+      ? (source.thinking as ThinkingChoice)
+      : DEFAULT_CLARITY_THINKING;
+  const developerMessage =
+    typeof source.developerMessage === "string" && source.developerMessage.trim().length > 0
+      ? source.developerMessage
+      : DEFAULT_CLARITY_DEVELOPER_MESSAGE;
+
+  return {
+    instruction: source.instruction,
+    model,
+    verbosity,
+    thinking,
+    developerMessage,
+    exposeSettings: typeof source.exposeSettings === "boolean" ? source.exposeSettings : true,
+    exposeDeveloperMessage:
+      typeof source.exposeDeveloperMessage === "boolean"
+        ? source.exposeDeveloperMessage
+        : false,
+  };
 }
 
 export function ClarityMapStep({
@@ -373,7 +435,7 @@ export function ClarityMapStep({
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
   const effectivePromptStepId = normalizedConfig.promptStepId || detectedPromptStepId;
-  const promptInstruction = useMemo(() => {
+  const promptSnapshot = useMemo(() => {
     if (!effectivePromptStepId || !sequencePayloads) {
       return null;
     }
@@ -389,7 +451,32 @@ export function ClarityMapStep({
     return "";
   }, [detectedPromptStepId, normalizedConfig.promptStepId]);
 
-  const defaultTarget = mapPayload?.target ?? normalizedConfig.initialTarget ?? createRandomTarget();
+  const promptInstructionValue = promptSnapshot?.instruction ?? null;
+  const planModel = promptSnapshot?.model ?? DEFAULT_CLARITY_MODEL;
+  const planVerbosity = promptSnapshot?.verbosity ?? DEFAULT_CLARITY_VERBOSITY;
+  const planThinking = promptSnapshot?.thinking ?? DEFAULT_CLARITY_THINKING;
+  const planDeveloperMessage =
+    promptSnapshot?.developerMessage ?? DEFAULT_CLARITY_DEVELOPER_MESSAGE;
+  const shouldExposePromptSettings = promptSnapshot?.exposeSettings ?? true;
+  const shouldExposeDeveloperMessage = promptSnapshot?.exposeDeveloperMessage ?? false;
+  const shouldLockInstruction = !normalizedConfig.allowInstructionInput && promptSnapshot !== null;
+  const planModelOption = useMemo(
+    () => MODEL_OPTIONS.find((option) => option.value === planModel),
+    [planModel]
+  );
+  const planVerbosityOption = useMemo(
+    () => VERBOSITY_OPTIONS.find((option) => option.value === planVerbosity),
+    [planVerbosity]
+  );
+  const planThinkingOption = useMemo(
+    () => THINKING_OPTIONS.find((option) => option.value === planThinking),
+    [planThinking]
+  );
+  const trimmedPlanDeveloperMessage = planDeveloperMessage.trim();
+  const developerMessageForRequest = trimmedPlanDeveloperMessage || planDeveloperMessage;
+
+  const defaultTarget =
+    mapPayload?.target ?? normalizedConfig.initialTarget ?? createRandomTarget();
   const [target, setTarget] = useState<GridCoord>(defaultTarget);
   const [blocked, setBlocked] = useState<GridCoord[]>(() => {
     if (mapPayload) {
@@ -426,12 +513,12 @@ export function ClarityMapStep({
   }, [mapPayload]);
 
   useEffect(() => {
-    if (promptInstruction === null) {
+    if (promptInstructionValue === null) {
       return;
     }
 
-    setInstruction(promptInstruction);
-  }, [promptInstruction]);
+    setInstruction(promptInstructionValue);
+  }, [promptInstructionValue]);
 
   const targetFromConfig = normalizedConfig.initialTarget;
   const obstacleCount = normalizedConfig.obstacleCount;
@@ -530,6 +617,33 @@ export function ClarityMapStep({
   }, [obstacleCount, target]);
 
   const trimmedInstruction = instruction.trim();
+  const structuredRequestPreview = useMemo(() => {
+    const preview: Record<string, unknown> = {
+      start: START_POSITION,
+      goal: target,
+      blocked: blocked.map((cell) => [cell.x, cell.y]),
+      instruction: trimmedInstruction || promptInstructionValue || "",
+      runId,
+      model: planModel,
+      verbosity: planVerbosity,
+      thinking: planThinking,
+    };
+    const previewDeveloperMessage = developerMessageForRequest.trim();
+    if (previewDeveloperMessage) {
+      preview.developerMessage = previewDeveloperMessage;
+    }
+    return JSON.stringify(preview, null, 2);
+  }, [
+    blocked,
+    developerMessageForRequest,
+    planModel,
+    planThinking,
+    planVerbosity,
+    promptInstructionValue,
+    runId,
+    target,
+    trimmedInstruction,
+  ]);
 
   const triggerExecution = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
@@ -544,6 +658,10 @@ export function ClarityMapStep({
         target,
         blocked: blocked.map((cell) => [cell.x, cell.y]),
         runId,
+        model: planModel,
+        verbosity: planVerbosity,
+        thinking: planThinking,
+        developerMessage: developerMessageForRequest,
       });
 
       if (!force && lastExecutionRef.current === signature) {
@@ -557,6 +675,10 @@ export function ClarityMapStep({
           goal: target,
           blocked,
           runId,
+          model: planModel,
+          verbosity: planVerbosity,
+          thinking: planThinking,
+          developerMessage: developerMessageForRequest,
         });
         return outcome;
       } catch (error) {
@@ -566,7 +688,18 @@ export function ClarityMapStep({
         return null;
       }
     },
-    [abort, blocked, execute, runId, target, trimmedInstruction]
+    [
+      abort,
+      blocked,
+      developerMessageForRequest,
+      execute,
+      planModel,
+      planThinking,
+      planVerbosity,
+      runId,
+      target,
+      trimmedInstruction,
+    ]
   );
 
   const handleSubmit = useCallback(
@@ -696,101 +829,112 @@ export function ClarityMapStep({
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
       {isEditMode && (
-        <fieldset className="rounded-2xl border border-dashed border-white/40 bg-white/40 p-4 text-sm text-[color:var(--brand-charcoal)]">
-          <legend className="px-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-            Configuration
-          </legend>
-          <div className="mt-2 grid gap-4 md:grid-cols-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                Obstacles
-              </span>
-              <input
-                type="number"
-                min={MIN_OBSTACLE_COUNT}
-                max={MAX_OBSTACLE_COUNT}
-                value={obstacleCount}
-                onChange={handleObstacleCountChange}
-                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                Étape prompt liée
-              </span>
-              <input
-                type="text"
-                value={normalizedConfig.promptStepId}
-                onChange={handlePromptIdChange}
-                placeholder="ID du module prompt"
-                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
-              />
-              <span className="text-xs text-[color:var(--brand-charcoal)]/70">
-                Laisse vide pour relier automatiquement le module prompt du composite.
-              </span>
-            </label>
-            <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-4">
+          <fieldset className="rounded-2xl border border-dashed border-white/40 bg-[color:var(--brand-charcoal)]/20 p-4 text-sm text-white/80">
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wide text-white/70">
+              Configuration
+            </legend>
+            <div className="mt-2 grid gap-4 md:grid-cols-2">
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                  Cible X
+                <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                  Obstacles
                 </span>
                 <input
                   type="number"
-                  min={0}
-                  max={GRID_SIZE - 1}
-                  value={targetFromConfig ? targetFromConfig.x : ""}
-                  onChange={handleTargetFieldChange("x")}
-                  placeholder="auto"
-                  className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+                  min={MIN_OBSTACLE_COUNT}
+                  max={MAX_OBSTACLE_COUNT}
+                  value={obstacleCount}
+                  onChange={handleObstacleCountChange}
+                  className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                  Cible Y
+                <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                  Étape prompt liée
                 </span>
                 <input
-                  type="number"
-                  min={0}
-                  max={GRID_SIZE - 1}
-                  value={targetFromConfig ? targetFromConfig.y : ""}
-                  onChange={handleTargetFieldChange("y")}
-                  placeholder="auto"
-                  className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+                  type="text"
+                  value={normalizedConfig.promptStepId}
+                  onChange={handlePromptIdChange}
+                  placeholder="ID du module prompt"
+                  className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
                 />
+                <span className="text-xs text-white/60">
+                  Laisse vide pour relier automatiquement le module prompt du composite.
+                </span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                    Cible X
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={GRID_SIZE - 1}
+                    value={targetFromConfig ? targetFromConfig.x : ""}
+                    onChange={handleTargetFieldChange("x")}
+                    placeholder="auto"
+                    className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                    Cible Y
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={GRID_SIZE - 1}
+                    value={targetFromConfig ? targetFromConfig.y : ""}
+                    onChange={handleTargetFieldChange("y")}
+                    placeholder="auto"
+                    className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                  />
+                </label>
+              </div>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={normalizedConfig.allowInstructionInput}
+                  onChange={handleAllowInputToggle}
+                  className="h-4 w-4 rounded border-white/50 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                />
+                <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                  Autoriser la saisie manuelle
+                </span>
               </label>
             </div>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={normalizedConfig.allowInstructionInput}
-                onChange={handleAllowInputToggle}
-                className="h-4 w-4 rounded border-white/60 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
-              />
-              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                Autoriser la saisie manuelle
-              </span>
-            </label>
+          </fieldset>
+          <div className="rounded-2xl border border-white/30 bg-black/30 p-4 text-xs text-white/80">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-semibold uppercase tracking-wide">Aperçu structured output</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">Lecture seule</span>
+            </div>
+            <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/40 p-3 text-[11px] leading-relaxed text-white/80">
+              {structuredRequestPreview}
+            </pre>
           </div>
-        </fieldset>
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[3fr,2fr]">
         <div className="space-y-4">
-          <div className="rounded-3xl border border-white/40 bg-white/30 p-4 shadow-inner backdrop-blur">
+          <div className="rounded-3xl border border-white/40 bg-[color:var(--brand-charcoal)]/25 p-4 shadow-inner backdrop-blur">
             <ClarityGrid player={START_POSITION} target={target} blocked={blocked} visited={visited} />
           </div>
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
               onClick={handleShuffleTarget}
-              className="inline-flex items-center justify-center rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--brand-red)] shadow-sm transition hover:bg-white"
+              className="inline-flex items-center justify-center rounded-full border border-white/40 bg-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-charcoal)]/45"
             >
               Nouvelle cible
             </button>
             <button
               type="button"
               onClick={handleShuffleObstacles}
-              className="inline-flex items-center justify-center rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--brand-red)] shadow-sm transition hover:bg-white"
+              className="inline-flex items-center justify-center rounded-full border border-white/40 bg-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-charcoal)]/45"
             >
               Mélanger les obstacles
             </button>
@@ -804,20 +948,58 @@ export function ClarityMapStep({
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
               placeholder={normalizedConfig.instructionPlaceholder}
-              readOnly={!normalizedConfig.allowInstructionInput && promptInstruction !== null}
-              className={`min-h-[160px] rounded-2xl border border-white/30 px-4 py-3 text-base text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none ${
-                !normalizedConfig.allowInstructionInput && promptInstruction !== null
-                  ? "bg-white/20 text-white/80"
-                  : "bg-white/10"
+              readOnly={shouldLockInstruction}
+              className={`min-h-[160px] rounded-2xl border border-white/30 px-4 py-3 text-base text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40 ${
+                shouldLockInstruction
+                  ? "bg-[color:var(--brand-charcoal)]/35 text-white/80"
+                  : "bg-[color:var(--brand-charcoal)]/25"
               }`}
             />
           </label>
-          {promptInstruction !== null && (
+          {promptSnapshot !== null && (
             <p className="text-sm text-white/70">
               Commande synchronisée depuis le module « {promptSourceLabel || "?"} ».
             </p>
           )}
-          <div className="rounded-2xl border border-white/30 bg-white/10 p-4 text-white/80 shadow-inner">
+          {promptSnapshot && (shouldExposePromptSettings || shouldExposeDeveloperMessage) && (
+            <div className="rounded-2xl border border-white/25 bg-black/30 p-4 text-sm text-white/80 shadow-inner">
+              <div className="flex flex-col gap-3">
+                {shouldExposePromptSettings && (
+                  <dl className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-white/50">Modèle</dt>
+                      <dd className="mt-1 font-medium text-white/90">
+                        {planModelOption?.label ?? planModel}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-white/50">Verbosité</dt>
+                      <dd className="mt-1 font-medium text-white/90">
+                        {planVerbosityOption?.label ?? planVerbosity}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase tracking-wide text-white/50">Raisonnement</dt>
+                      <dd className="mt-1 font-medium text-white/90">
+                        {planThinkingOption?.label ?? planThinking}
+                      </dd>
+                    </div>
+                  </dl>
+                )}
+                {shouldExposeDeveloperMessage && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-white/50">
+                      Brief développeur transmis au modèle
+                    </p>
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/40 p-3 text-xs leading-relaxed text-white/90">
+                      {trimmedPlanDeveloperMessage || planDeveloperMessage}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="rounded-2xl border border-white/30 bg-[color:var(--brand-charcoal)]/35 p-4 text-white/80 shadow-inner">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-sm font-semibold text-white/90">Plan IA</span>
               <button
@@ -826,8 +1008,8 @@ export function ClarityMapStep({
                 disabled={isLoading || !trimmedInstruction}
                 className={`inline-flex items-center justify-center rounded-full px-4 py-1.5 text-xs font-semibold transition ${
                   isLoading || !trimmedInstruction
-                    ? "cursor-not-allowed bg-white/20 text-white/60"
-                    : "bg-white/80 text-[color:var(--brand-red)] hover:bg-white"
+                    ? "cursor-not-allowed border border-white/20 bg-white/10 text-white/60"
+                    : "border border-white/40 bg-[color:var(--brand-red)]/90 text-white hover:bg-[color:var(--brand-red)]"
                 }`}
               >
                 {isLoading ? "Analyse en cours…" : shouldAutoPublish ? "Relancer l’IA" : "Tester la consigne"}
@@ -837,7 +1019,7 @@ export function ClarityMapStep({
               <p className="mt-3 text-sm text-white/80">{resolvedMessage}</p>
             )}
             <div className="mt-3">
-              <PlanPreview plan={resolvedPlan} notes={resolvedNotes} />
+              <PlanPreview plan={resolvedPlan} notes={resolvedNotes} tone="dark" />
             </div>
           </div>
         </div>
@@ -847,14 +1029,14 @@ export function ClarityMapStep({
         <p className="text-sm text-white/70">
           {shouldAutoPublish
             ? "Le module carte met à jour son payload automatiquement dans le composite."
-            : "Valide cette configuration pour continuer et transmettre la commande."}
+            : "Clique sur “Envoyer la requête” pour transmettre la commande à l’IA."}
         </p>
         {!shouldAutoPublish && (
           <button
             type="submit"
             className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)]"
           >
-            Continuer
+            Envoyer la requête
           </button>
         )}
       </div>

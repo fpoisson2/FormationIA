@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_AUTH_KEY, API_BASE_URL } from "../../config";
+import type { ModelChoice, ThinkingChoice, VerbosityChoice } from "../../config";
 import { START_POSITION } from "./constants";
 import { gridKey } from "./utils";
 import type {
@@ -18,6 +19,10 @@ export interface ClarityPlanExecutionRequest {
   blocked: GridCoord[];
   runId: string;
   start?: GridCoord;
+  model?: ModelChoice;
+  verbosity?: VerbosityChoice;
+  thinking?: ThinkingChoice;
+  developerMessage?: string;
 }
 
 export interface ClarityPlanExecutionOutcome {
@@ -122,7 +127,17 @@ export function useClarityPlanExecution() {
   );
 
   const execute = useCallback(
-    async ({ instruction, goal, blocked, runId, start = START_POSITION }: ClarityPlanExecutionRequest) => {
+    async ({
+      instruction,
+      goal,
+      blocked,
+      runId,
+      start = START_POSITION,
+      model,
+      verbosity,
+      thinking,
+      developerMessage,
+    }: ClarityPlanExecutionRequest) => {
       if (!instruction.trim()) {
         setMessage("Entre une consigne claire pour lancer l’IA.");
         setStatus("idle");
@@ -161,16 +176,31 @@ export function useClarityPlanExecution() {
             headers["x-api-key"] = API_AUTH_KEY;
           }
 
+          const payload: Record<string, unknown> = {
+            start,
+            goal,
+            blocked: blocked.map((cell) => [cell.x, cell.y]),
+            instruction: instruction.trim(),
+            runId,
+          };
+          if (model) {
+            payload.model = model;
+          }
+          if (verbosity) {
+            payload.verbosity = verbosity;
+          }
+          if (thinking) {
+            payload.thinking = thinking;
+          }
+          const trimmedDeveloperMessage = developerMessage?.trim();
+          if (trimmedDeveloperMessage) {
+            payload.developerMessage = trimmedDeveloperMessage;
+          }
+
           const response = await fetch(`${API_BASE_URL}/plan`, {
             method: "POST",
             headers,
-            body: JSON.stringify({
-              start,
-              goal,
-              blocked: blocked.map((cell) => [cell.x, cell.y]),
-              instruction: instruction.trim(),
-              runId,
-            }),
+            body: JSON.stringify(payload),
             signal: controller.signal,
           });
 
