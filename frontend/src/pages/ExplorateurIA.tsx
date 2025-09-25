@@ -2442,6 +2442,7 @@ export interface ExplorateurIATerrainConfig {
 export interface ExplorateurIAConfig {
   terrain: ExplorateurIATerrainConfig;
   steps: StepDefinition[];
+  quarterDesignerSteps: QuarterSteps;
   quarters: ExplorateurIAQuarterConfig[];
 }
 
@@ -2472,6 +2473,17 @@ function cloneStepDefinition(step: StepDefinition): StepDefinition {
   } satisfies StepDefinition;
 }
 
+function cloneQuarterStepMap(map: QuarterSteps): QuarterSteps {
+  const result: Partial<QuarterSteps> = {};
+  for (const [quarterId, steps] of Object.entries(map) as Array<[
+    QuarterId,
+    StepDefinition[]
+  ]>) {
+    result[quarterId] = steps.map(cloneStepDefinition);
+  }
+  return result as QuarterSteps;
+}
+
 function sanitizeTerrainConfig(
   value: unknown
 ): ExplorateurIATerrainConfig {
@@ -2494,12 +2506,17 @@ function sanitizeTerrainConfig(
   return { themeId, seed } satisfies ExplorateurIATerrainConfig;
 }
 
-function sanitizeSteps(value: unknown): StepDefinition[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
+function sanitizeSteps(
+  value: unknown,
+  fallback?: StepDefinition[]
+): StepDefinition[] {
+  const source = Array.isArray(value)
+    ? value
+    : Array.isArray(fallback)
+    ? fallback
+    : [];
   const steps: StepDefinition[] = [];
-  for (const item of value) {
+  for (const item of source) {
     if (!item || typeof item !== "object") {
       continue;
     }
@@ -2508,7 +2525,13 @@ function sanitizeSteps(value: unknown): StepDefinition[] {
       component?: unknown;
       config?: unknown;
     };
-    if (typeof candidate.id !== "string" || typeof candidate.component !== "string") {
+    if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) {
+      continue;
+    }
+    if (
+      typeof candidate.component !== "string" ||
+      candidate.component.trim().length === 0
+    ) {
       continue;
     }
     steps.push({
@@ -2530,14 +2553,153 @@ function getDefaultExplorateurSteps(): StepDefinition[] {
   ).map(cloneStepDefinition);
 }
 
+type QuarterDesignerStepMap = Record<QuarterId, StepDefinition[]>;
+
+function ensureDesignerStepId(
+  quarterId: QuarterId,
+  step: StepDefinition,
+  index: number
+): StepDefinition {
+  const id =
+    typeof step.id === "string" && step.id.trim().length > 0
+      ? step.id
+      : `${quarterId}:designer:${index + 1}`;
+  const component =
+    typeof step.component === "string" && step.component.trim().length > 0
+      ? step.component
+      : "custom";
+  const config =
+    step.config === undefined ? undefined : cloneStepConfig(step.config);
+  return { id, component, config } satisfies StepDefinition;
+}
+
+function createDefaultQuarterDesignerSteps(
+  quarter: ExplorateurIAQuarterConfig
+): StepDefinition[] {
+  const baseId = quarter.id;
+  const basicsStep: StepDefinition = {
+    id: `${baseId}:designer:basics`,
+    component: "custom",
+    config: {
+      type: "explorateur-quarter-basics",
+      quarterId: baseId,
+      label: quarter.label,
+      color: quarter.color,
+      buildingNumber: quarter.buildingNumber ?? null,
+      isGoal: Boolean(quarter.isGoal),
+    },
+  };
+
+  const steps: StepDefinition[] = [basicsStep];
+
+  if (!quarter.isGoal) {
+    steps.push({
+      id: `${baseId}:designer:inventory`,
+      component: "custom",
+      config: {
+        type: "explorateur-quarter-inventory",
+        quarterId: baseId,
+        enabled: Boolean(quarter.inventory),
+        title: quarter.inventory?.title ?? "",
+        description: quarter.inventory?.description ?? "",
+        hint: quarter.inventory?.hint ?? "",
+        icon: quarter.inventory?.icon ?? "🎁",
+      },
+    });
+  }
+
+  return steps;
+}
+
+function createDefaultQuarterDesignerStepMap(
+  quarters: ExplorateurIAQuarterConfig[]
+): QuarterDesignerStepMap {
+  const map: Partial<QuarterSteps> = {};
+  for (const quarter of quarters) {
+    map[quarter.id] = createDefaultQuarterDesignerSteps(quarter).map(
+      (step, index) => ensureDesignerStepId(quarter.id, step, index)
+    );
+  }
+  return map as QuarterDesignerStepMap;
+}
+
+function sanitizeQuarterDesignerSteps(
+  value: unknown,
+  quarters: ExplorateurIAQuarterConfig[]
+): QuarterDesignerStepMap {
+  const rawMap =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const result: Partial<QuarterSteps> = {};
+
+  for (const quarter of quarters) {
+    const rawSteps = rawMap[quarter.id];
+    const sanitized = sanitizeSteps(
+      rawSteps,
+      createDefaultQuarterDesignerSteps(quarter)
+    );
+    const normalized = sanitized.length
+      ? sanitized.map((step, index) =>
+          ensureDesignerStepId(quarter.id, step, index)
+        )
+      : createDefaultQuarterDesignerSteps(quarter).map((step, index) =>
+          ensureDesignerStepId(quarter.id, step, index)
+        );
+
+    const synced = normalized.map((step) => {
+      if (!step.config || typeof step.config !== "object") {
+        return step;
+      }
+      const config = step.config as Record<string, unknown> & { type?: string };
+      if (config.type === "explorateur-quarter-basics") {
+        return {
+          ...step,
+          config: {
+            ...config,
+            type: config.type,
+            quarterId: quarter.id,
+            label: quarter.label,
+            color: quarter.color,
+            buildingNumber: quarter.buildingNumber ?? null,
+            isGoal: Boolean(quarter.isGoal),
+          },
+        } satisfies StepDefinition;
+      }
+      if (config.type === "explorateur-quarter-inventory") {
+        return {
+          ...step,
+          config: {
+            ...config,
+            type: config.type,
+            quarterId: quarter.id,
+            enabled: Boolean(quarter.inventory),
+            title: quarter.inventory?.title ?? "",
+            description: quarter.inventory?.description ?? "",
+            hint: quarter.inventory?.hint ?? "",
+            icon: quarter.inventory?.icon ?? "🎁",
+          },
+        } satisfies StepDefinition;
+      }
+      return step;
+    });
+
+    result[quarter.id] = synced.map(cloneStepDefinition);
+  }
+
+  return result as QuarterDesignerStepMap;
+}
+
 export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
+  const quarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
+    ...quarter,
+    inventory: quarter.inventory ? { ...quarter.inventory } : null,
+  }));
   return {
     terrain: { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED },
     steps: getDefaultExplorateurSteps(),
-    quarters: DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
-      ...quarter,
-      inventory: quarter.inventory ? { ...quarter.inventory } : null,
-    })),
+    quarterDesignerSteps: createDefaultQuarterDesignerStepMap(quarters),
+    quarters,
   };
 }
 
@@ -2551,6 +2713,7 @@ export function sanitizeExplorateurIAConfig(
     terrain?: unknown;
     steps?: unknown;
     quarters?: unknown;
+    quarterDesignerSteps?: unknown;
   };
   const terrain = sanitizeTerrainConfig(base.terrain);
   const steps = sanitizeSteps(base.steps);
@@ -2558,9 +2721,14 @@ export function sanitizeExplorateurIAConfig(
     base.quarters,
     DEFAULT_EXPLORATEUR_QUARTERS
   );
+  const quarterDesignerSteps = sanitizeQuarterDesignerSteps(
+    base.quarterDesignerSteps,
+    quarters
+  );
   return {
     terrain,
     steps: steps.length > 0 ? steps : getDefaultExplorateurSteps(),
+    quarterDesignerSteps,
     quarters,
   };
 }
@@ -4470,6 +4638,10 @@ export default function ExplorateurIA({
         patch.quarters ?? sanitizedConfig.quarters,
         DEFAULT_EXPLORATEUR_QUARTERS
       );
+      const nextDesignerSteps = sanitizeQuarterDesignerSteps(
+        patch.quarterDesignerSteps ?? sanitizedConfig.quarterDesignerSteps,
+        nextQuarters
+      );
       const next: ExplorateurIAConfig = {
         terrain: {
           themeId:
@@ -4477,6 +4649,7 @@ export default function ExplorateurIA({
           seed: patch.terrain?.seed ?? sanitizedConfig.terrain.seed,
         },
         steps: (patch.steps ?? sanitizedConfig.steps).map(cloneStepDefinition),
+        quarterDesignerSteps: cloneQuarterStepMap(nextDesignerSteps),
         quarters: nextQuarters,
       };
       effectiveOnUpdateConfig(next);
@@ -4487,6 +4660,13 @@ export default function ExplorateurIA({
   const emitQuarterConfig = useCallback(
     (quarters: ExplorateurIAQuarterConfig[]) => {
       emitConfig({ quarters });
+    },
+    [emitConfig]
+  );
+
+  const emitQuarterDesignerSteps = useCallback(
+    (designerSteps: QuarterSteps) => {
+      emitConfig({ quarterDesignerSteps: designerSteps });
     },
     [emitConfig]
   );
@@ -4511,13 +4691,17 @@ export default function ExplorateurIA({
       <ExplorateurIAConfigDesigner
         config={sanitizedConfig}
         onUpdateQuarters={emitQuarterConfig}
+        onUpdateQuarterDesignerSteps={emitQuarterDesignerSteps}
         onUpdateTerrain={emitTerrainConfig}
         onReset={() => {
+          const defaultQuarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
+            ...quarter,
+            inventory: quarter.inventory ? { ...quarter.inventory } : null,
+          }));
           emitConfig({
-            quarters: DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
-              ...quarter,
-              inventory: quarter.inventory ? { ...quarter.inventory } : null,
-            })),
+            quarters: defaultQuarters,
+            quarterDesignerSteps:
+              createDefaultQuarterDesignerStepMap(defaultQuarters),
             terrain: {
               themeId: DEFAULT_TERRAIN_THEME_ID,
               seed: WORLD_SEED,
@@ -5817,6 +6001,7 @@ export default function ExplorateurIA({
 interface ConfigDesignerProps {
   config: ExplorateurIAConfig;
   onUpdateQuarters: (quarters: ExplorateurIAQuarterConfig[]) => void;
+  onUpdateQuarterDesignerSteps: (steps: QuarterSteps) => void;
   onUpdateTerrain: (patch: Partial<ExplorateurIATerrainConfig>) => void;
   onReset: () => void;
 }
@@ -5903,9 +6088,68 @@ function createNewQuarterTemplate(
   } satisfies ExplorateurIAQuarterConfig;
 }
 
+
+function resolveDesignerStepType(step: StepDefinition): string {
+  if (step.config && typeof step.config === "object") {
+    const candidate = (step.config as { type?: unknown }).type;
+    if (typeof candidate === "string" && candidate.length > 0) {
+      return candidate;
+    }
+  }
+  return step.component;
+}
+
+function getDesignerStepMeta(type: string) {
+  return QUARTER_DESIGNER_STEP_LIBRARY.find((entry) => entry.type === type);
+}
+
+function DesignerStepStateTracker({
+  context,
+  pendingStepId,
+  onConsumed,
+}: {
+  context: StepSequenceRenderWrapperProps["context"];
+  pendingStepId: string | null;
+  onConsumed: () => void;
+}) {
+  useEffect(() => {
+    if (!pendingStepId) {
+      return;
+    }
+    const targetIndex = context.steps.findIndex(
+      (definition) => definition.id === pendingStepId
+    );
+    if (targetIndex !== -1 && targetIndex !== context.stepIndex) {
+      context.goToStep(targetIndex);
+    }
+    onConsumed();
+  }, [context, onConsumed, pendingStepId]);
+  return null;
+}
+
+const QUARTER_DESIGNER_STEP_LIBRARY = [
+  {
+    type: "explorateur-quarter-basics",
+    label: "Informations générales",
+    description:
+      "Nom, couleur principale, numéro de défi et statut d'objectif final.",
+    icon: "🏙️",
+  },
+  {
+    type: "explorateur-quarter-inventory",
+    label: "Objet d'inventaire",
+    description: "Configurer la récompense associée à ce quartier.",
+    icon: "🎒",
+  },
+] as const;
+
+type QuarterDesignerStepType =
+  (typeof QUARTER_DESIGNER_STEP_LIBRARY)[number]["type"];
+
 function ExplorateurIAConfigDesigner({
   config,
   onUpdateQuarters,
+  onUpdateQuarterDesignerSteps,
   onUpdateTerrain,
   onReset,
 }: ConfigDesignerProps) {
@@ -5914,64 +6158,37 @@ function ExplorateurIAConfigDesigner({
     [config.quarters]
   );
 
+  const [activeQuarterId, setActiveQuarterId] = useState<QuarterId | null>(
+    null
+  );
+  const [pendingStepId, setPendingStepId] = useState<string | null>(null);
+
   const handleAddQuarter = useCallback(() => {
     const nextQuarter = createNewQuarterTemplate(config.quarters);
-    const next = config.quarters.map(cloneQuarter);
-    const goalIndex = next.findIndex((quarter) => quarter.isGoal);
+    const nextQuarters = config.quarters.map(cloneQuarter);
+    const goalIndex = nextQuarters.findIndex((quarter) => quarter.isGoal);
     if (goalIndex === -1) {
-      next.push(nextQuarter);
+      nextQuarters.push(nextQuarter);
     } else {
-      next.splice(goalIndex, 0, nextQuarter);
+      nextQuarters.splice(goalIndex, 0, nextQuarter);
     }
-    onUpdateQuarters(next);
-  }, [config.quarters, onUpdateQuarters]);
+    onUpdateQuarters(nextQuarters);
 
-  const handleQuarterChange = useCallback(
-    (
-      index: number,
-      patch: Partial<ExplorateurIAQuarterConfig>
-    ) => {
-      const next = config.quarters.map((quarter, quarterIndex) =>
-        quarterIndex === index
-          ? { ...cloneQuarter(quarter), ...patch }
-          : cloneQuarter(quarter)
-      );
-      onUpdateQuarters(next);
-    },
-    [config.quarters, onUpdateQuarters]
-  );
-
-  const handleInventoryChange = useCallback(
-    (
-      index: number,
-      patch: Partial<ExplorateurIAInventoryConfig> | null
-    ) => {
-      const next = config.quarters.map((quarter, quarterIndex) => {
-        if (quarterIndex !== index) {
-          return cloneQuarter(quarter);
-        }
-        const cloned = cloneQuarter(quarter);
-        if (patch === null) {
-          cloned.inventory = null;
-          return cloned;
-        }
-        const baseInventory =
-          cloned.inventory ?? getDefaultInventory(cloned.id) ?? {
-            title: "",
-            description: "",
-            hint: "",
-            icon: "🎁",
-          };
-        cloned.inventory = {
-          ...baseInventory,
-          ...patch,
-        } satisfies ExplorateurIAInventoryConfig;
-        return cloned;
-      });
-      onUpdateQuarters(next);
-    },
-    [config.quarters, onUpdateQuarters]
-  );
+    const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+    designerMap[nextQuarter.id] = createDefaultQuarterDesignerSteps(
+      nextQuarter
+    );
+    const sanitized = sanitizeQuarterDesignerSteps(designerMap, nextQuarters);
+    onUpdateQuarterDesignerSteps(sanitized);
+    setActiveQuarterId(nextQuarter.id);
+    const firstStep = sanitized[nextQuarter.id]?.[0]?.id ?? null;
+    setPendingStepId(firstStep);
+  }, [
+    config.quarterDesignerSteps,
+    config.quarters,
+    onUpdateQuarterDesignerSteps,
+    onUpdateQuarters,
+  ]);
 
   const handleMoveQuarter = useCallback(
     (index: number, direction: -1 | 1) => {
@@ -5979,27 +6196,22 @@ function ExplorateurIAConfigDesigner({
       if (targetIndex < 0 || targetIndex >= config.quarters.length) {
         return;
       }
-      const next = config.quarters.map(cloneQuarter);
-      const [moved] = next.splice(index, 1);
-      next.splice(targetIndex, 0, moved);
-      onUpdateQuarters(next);
+      const nextQuarters = config.quarters.map(cloneQuarter);
+      const [moved] = nextQuarters.splice(index, 1);
+      nextQuarters.splice(targetIndex, 0, moved);
+      onUpdateQuarters(nextQuarters);
+      const sanitized = sanitizeQuarterDesignerSteps(
+        config.quarterDesignerSteps,
+        nextQuarters
+      );
+      onUpdateQuarterDesignerSteps(sanitized);
     },
-    [config.quarters, onUpdateQuarters]
-  );
-
-  const handleSetGoal = useCallback(
-    (quarterId: QuarterId) => {
-      const next = config.quarters.map((quarter) => {
-        const cloned = cloneQuarter(quarter);
-        cloned.isGoal = quarter.id === quarterId;
-        if (cloned.isGoal) {
-          cloned.buildingNumber = null;
-        }
-        return cloned;
-      });
-      onUpdateQuarters(next);
-    },
-    [config.quarters, onUpdateQuarters]
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      onUpdateQuarters,
+    ]
   );
 
   const handleThemeChange = useCallback(
@@ -6019,30 +6231,425 @@ function ExplorateurIAConfigDesigner({
     [onUpdateTerrain]
   );
 
-  const handleNumberChange = useCallback(
-    (index: number, value: string) => {
-      const trimmed = value.trim();
-      const numeric = Number.parseInt(trimmed, 10);
-      handleQuarterChange(index, {
-        buildingNumber:
-          trimmed.length === 0 || Number.isNaN(numeric) ? null : numeric,
-      });
-    },
-    [handleQuarterChange]
+  const handleCloseDesigner = useCallback(() => {
+    setActiveQuarterId(null);
+    setPendingStepId(null);
+  }, []);
+
+  const openQuarter = useMemo(
+    () =>
+      activeQuarterId
+        ? config.quarters.find((quarter) => quarter.id === activeQuarterId) ??
+          null
+        : null,
+    [activeQuarterId, config.quarters]
   );
 
-  const handleColorChange = useCallback(
-    (index: number, value: string) => {
-      handleQuarterChange(index, { color: value });
+  const activeDesignerSteps = useMemo(() => {
+    if (!activeQuarterId) {
+      return [] as StepDefinition[];
+    }
+    return config.quarterDesignerSteps[activeQuarterId] ?? [];
+  }, [activeQuarterId, config.quarterDesignerSteps]);
+
+  const handleDesignerStepConfigChange = useCallback(
+    (quarterId: QuarterId, stepId: string, nextConfig: unknown) => {
+      const currentSteps = config.quarterDesignerSteps[quarterId] ?? [];
+      const updatedSteps = currentSteps.map((step) =>
+        step.id === stepId
+          ? {
+              ...step,
+              config:
+                nextConfig === undefined
+                  ? undefined
+                  : cloneStepConfig(nextConfig),
+            }
+          : step
+      );
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarterId] = updatedSteps;
+
+      let nextQuarters = config.quarters.map(cloneQuarter);
+
+      if (nextConfig && typeof nextConfig === "object") {
+        const typed = nextConfig as Record<string, unknown> & { type?: string };
+        if (typed.type === "explorateur-quarter-basics") {
+          const nextIsGoal = Boolean(typed.isGoal);
+          const nextLabel =
+            typeof typed.label === "string" ? typed.label : undefined;
+          const nextColor =
+            typeof typed.color === "string" ? typed.color : undefined;
+          const rawNumber = typed.buildingNumber;
+          const nextNumber =
+            rawNumber === null
+              ? null
+              : typeof rawNumber === "number" && Number.isFinite(rawNumber)
+              ? Math.trunc(rawNumber)
+              : undefined;
+
+          nextQuarters = nextQuarters.map((quarter) => {
+            if (quarter.id !== quarterId) {
+              if (nextIsGoal) {
+                return { ...quarter, isGoal: false };
+              }
+              return quarter;
+            }
+            const updated = { ...quarter };
+            if (nextLabel !== undefined) {
+              updated.label = nextLabel;
+            }
+            if (nextColor !== undefined) {
+              updated.color = nextColor;
+            }
+            if (nextIsGoal) {
+              updated.isGoal = true;
+              updated.buildingNumber = null;
+              updated.inventory = null;
+            } else {
+              updated.isGoal = false;
+              if (nextNumber !== undefined) {
+                updated.buildingNumber = nextNumber;
+              }
+            }
+            return updated;
+          });
+        } else if (typed.type === "explorateur-quarter-inventory") {
+          const enabled = Boolean(typed.enabled);
+          nextQuarters = nextQuarters.map((quarter) => {
+            if (quarter.id !== quarterId) {
+              return quarter;
+            }
+            if (!enabled || quarter.isGoal) {
+              return { ...quarter, inventory: null };
+            }
+            return {
+              ...quarter,
+              inventory: {
+                title:
+                  typeof typed.title === "string"
+                    ? typed.title
+                    : quarter.inventory?.title ?? "",
+                description:
+                  typeof typed.description === "string"
+                    ? typed.description
+                    : quarter.inventory?.description ?? "",
+                hint:
+                  typeof typed.hint === "string"
+                    ? typed.hint
+                    : quarter.inventory?.hint ?? "",
+                icon:
+                  typeof typed.icon === "string"
+                    ? typed.icon
+                    : quarter.inventory?.icon ?? "🎁",
+              },
+            } satisfies ExplorateurIAQuarterConfig;
+          });
+        }
+      }
+
+      onUpdateQuarters(nextQuarters);
+      const sanitized = sanitizeQuarterDesignerSteps(
+        designerMap,
+        nextQuarters
+      );
+      onUpdateQuarterDesignerSteps(sanitized);
     },
-    [handleQuarterChange]
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      onUpdateQuarters,
+    ]
   );
 
-  const handleLabelChange = useCallback(
-    (index: number, value: string) => {
-      handleQuarterChange(index, { label: value });
+  const handleRemoveDesignerStep = useCallback(
+    (quarterId: QuarterId, stepId: string) => {
+      const steps = config.quarterDesignerSteps[quarterId] ?? [];
+      if (steps.length <= 1) {
+        return;
+      }
+      const target = steps.find((step) => step.id === stepId);
+      if (!target) {
+        return;
+      }
+      const type = resolveDesignerStepType(target);
+      if (type === "explorateur-quarter-basics") {
+        return;
+      }
+      const updatedSteps = steps.filter((step) => step.id !== stepId);
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarterId] = updatedSteps;
+      const sanitized = sanitizeQuarterDesignerSteps(
+        designerMap,
+        config.quarters
+      );
+      onUpdateQuarterDesignerSteps(sanitized);
     },
-    [handleQuarterChange]
+    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+  );
+
+  const handleMoveDesignerStep = useCallback(
+    (quarterId: QuarterId, index: number, direction: -1 | 1) => {
+      const steps = config.quarterDesignerSteps[quarterId] ?? [];
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= steps.length) {
+        return;
+      }
+      const updatedSteps = steps.map(cloneStepDefinition);
+      const [moved] = updatedSteps.splice(index, 1);
+      updatedSteps.splice(targetIndex, 0, moved);
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarterId] = updatedSteps;
+      const sanitized = sanitizeQuarterDesignerSteps(
+        designerMap,
+        config.quarters
+      );
+      onUpdateQuarterDesignerSteps(sanitized);
+    },
+    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+  );
+
+  const handleAddDesignerStep = useCallback(
+    (quarter: ExplorateurIAQuarterConfig, type: QuarterDesignerStepType) => {
+      const steps = config.quarterDesignerSteps[quarter.id] ?? [];
+      if (
+        (type === "explorateur-quarter-basics" ||
+          type === "explorateur-quarter-inventory") &&
+        steps.some((step) => resolveDesignerStepType(step) === type)
+      ) {
+        return;
+      }
+      const templateSteps = createDefaultQuarterDesignerSteps(quarter);
+      const template =
+        templateSteps.find(
+          (step) => resolveDesignerStepType(step) === type
+        ) ?? null;
+      const existingIds = new Set(steps.map((step) => step.id));
+      let candidateId =
+        template?.id ?? `${quarter.id}:designer:${type}-${steps.length + 1}`;
+      let suffix = 2;
+      while (existingIds.has(candidateId)) {
+        candidateId = `${quarter.id}:designer:${type}-${suffix}`;
+        suffix += 1;
+      }
+
+      const newStep: StepDefinition =
+        template !== null
+          ? {
+              id: candidateId,
+              component: template.component,
+              config:
+                template.config && typeof template.config === "object"
+                  ? {
+                      ...(template.config as Record<string, unknown>),
+                      quarterId: quarter.id,
+                    }
+                  : { type, quarterId: quarter.id },
+            }
+          : {
+              id: candidateId,
+              component: "custom",
+              config: { type, quarterId: quarter.id },
+            };
+
+      const updatedSteps = [...steps.map(cloneStepDefinition), newStep];
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      designerMap[quarter.id] = updatedSteps;
+      const sanitized = sanitizeQuarterDesignerSteps(
+        designerMap,
+        config.quarters
+      );
+      onUpdateQuarterDesignerSteps(sanitized);
+      setPendingStepId(newStep.id);
+    },
+    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+  );
+
+  const designerStepOptions = useMemo(() => {
+    if (!openQuarter) {
+      return [] as Array<
+        (typeof QUARTER_DESIGNER_STEP_LIBRARY)[number] & { disabled: boolean }
+      >;
+    }
+    const existingTypes = new Set(
+      (config.quarterDesignerSteps[openQuarter.id] ?? []).map((step) =>
+        resolveDesignerStepType(step)
+      )
+    );
+    return QUARTER_DESIGNER_STEP_LIBRARY.map((option) => ({
+      ...option,
+      disabled:
+        (option.type === "explorateur-quarter-basics" &&
+          existingTypes.has(option.type)) ||
+        (option.type === "explorateur-quarter-inventory" &&
+          (existingTypes.has(option.type) || Boolean(openQuarter.isGoal))),
+    }));
+  }, [config.quarterDesignerSteps, openQuarter]);
+
+  const renderDesignerStep = useCallback(
+    ({
+      step,
+      stepIndex,
+      stepCount,
+      StepComponent,
+      componentProps,
+      context,
+      advance,
+    }: StepSequenceRenderWrapperProps) => {
+      const stepType = resolveDesignerStepType(step);
+      const meta = getDesignerStepMeta(stepType);
+      const isFirst = stepIndex === 0;
+      const isLast = stepIndex === stepCount - 1;
+      const indicatorLabel = `Étape ${stepIndex + 1} sur ${stepCount}`;
+      const progressPercent =
+        stepCount > 0 ? Math.round(((stepIndex + 1) / stepCount) * 100) : 0;
+
+      return (
+        <div className="space-y-6">
+          <DesignerStepStateTracker
+            context={context}
+            pendingStepId={pendingStepId}
+            onConsumed={() => setPendingStepId(null)}
+          />
+          <div className="flex flex-col gap-6 lg:flex-row">
+            <aside className="w-full max-w-full lg:w-72 lg:flex-shrink-0">
+              <div className="space-y-3 rounded-2xl border border-orange-200 bg-white/70 p-3 shadow-sm">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+                  Étapes
+                </h3>
+                <ul className="space-y-2">
+                  {context.steps.map((definition, index) => {
+                    const itemType = resolveDesignerStepType(definition);
+                    const itemMeta = getDesignerStepMeta(itemType);
+                    const isActive = index === stepIndex;
+                    const canRemove =
+                      context.steps.length > 1 &&
+                      itemType !== "explorateur-quarter-basics";
+                    return (
+                      <li
+                        key={definition.id}
+                        className={classNames(
+                          "rounded-xl border px-3 py-2 text-left text-sm transition",
+                          isActive
+                            ? "border-orange-300 bg-orange-50 text-orange-900"
+                            : "border-orange-200 bg-white text-orange-800 hover:border-orange-300 hover:bg-orange-50"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => context.goToStep(index)}
+                            className="flex flex-1 items-center gap-2 text-left font-semibold text-current focus:outline-none"
+                          >
+                            <span aria-hidden="true">
+                              {itemMeta?.icon ?? "🧩"}
+                            </span>
+                            <span>{itemMeta?.label ?? definition.id}</span>
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activeQuarterId &&
+                                handleMoveDesignerStep(
+                                  activeQuarterId,
+                                  index,
+                                  -1
+                                )
+                              }
+                              disabled={index === 0}
+                              className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Monter"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activeQuarterId &&
+                                handleMoveDesignerStep(
+                                  activeQuarterId,
+                                  index,
+                                  1
+                                )
+                              }
+                              disabled={index === context.steps.length - 1}
+                              className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Descendre"
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                activeQuarterId &&
+                                handleRemoveDesignerStep(
+                                  activeQuarterId,
+                                  definition.id
+                                )
+                              }
+                              disabled={!canRemove}
+                              className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Supprimer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </aside>
+            <div className="flex-1 space-y-4">
+              <header className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-orange-600">
+                  <span>{meta?.label ?? "Étape"}</span>
+                  <span>{indicatorLabel}</span>
+                </div>
+                <div className="h-1 w-full overflow-hidden rounded-full bg-orange-100">
+                  <div
+                    className="h-full rounded-full bg-orange-400"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                {meta?.description ? (
+                  <p className="text-sm text-orange-700">{meta.description}</p>
+                ) : null}
+              </header>
+              <div className="rounded-2xl border border-orange-200 bg-white/90 p-4 shadow-sm">
+                <StepComponent {...componentProps} />
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => context.goToStep(stepIndex - 1)}
+                  disabled={isFirst}
+                  className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Étape précédente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => advance()}
+                  disabled={isLast}
+                  className="rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Étape suivante
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    },
+    [
+      activeQuarterId,
+      handleMoveDesignerStep,
+      handleRemoveDesignerStep,
+      pendingStepId,
+    ]
   );
 
   return (
@@ -6123,27 +6730,40 @@ function ExplorateurIAConfigDesigner({
           </button>
         </div>
         <p className="text-sm text-orange-900/80">
-          Ajustez l'ordre des quartiers, renommez-les et définissez le numéro du défi pour chaque zone.
+          Ajustez l'ordre des quartiers puis ouvrez l'éditeur pour modifier leurs paramètres détaillés.
         </p>
-        <div className="space-y-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {config.quarters.map((quarter, index) => {
-            const quarterNumberValue =
-              quarter.buildingNumber === null || quarter.buildingNumber === undefined
-                ? ""
-                : String(quarter.buildingNumber);
-            const inventory = quarter.inventory ?? null;
             const isGoal = Boolean(quarter.isGoal);
+            const quarterInventory = quarter.inventory;
             return (
-              <fieldset
+              <article
                 key={quarter.id}
-                className="space-y-4 rounded-3xl border border-orange-200/70 bg-white/90 p-5 shadow-sm"
+                className="space-y-4 rounded-3xl border border-orange-200/70 bg-white/90 p-5 shadow-sm transition hover:border-orange-300"
               >
-                <legend className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-orange-800">
-                  <span>
-                    {quarter.label || quarter.id}
-                    {isGoal ? " — Objectif final" : ""}
-                  </span>
-                  <div className="flex items-center gap-2 text-xs">
+                <header className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-3 w-3 rounded-full border border-orange-200"
+                        style={{ backgroundColor: quarter.color }}
+                        aria-hidden="true"
+                      />
+                      <h3 className="text-base font-semibold text-orange-900">
+                        {quarter.label || quarter.id}
+                      </h3>
+                    </div>
+                    <p className="text-xs text-orange-700">
+                      {isGoal
+                        ? "Objectif final"
+                        : `Défi n°${
+                            quarter.buildingNumber === null
+                              ? "—"
+                              : quarter.buildingNumber
+                          }`}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs">
                     <button
                       type="button"
                       onClick={() => handleMoveQuarter(index, -1)}
@@ -6160,138 +6780,94 @@ function ExplorateurIAConfigDesigner({
                     >
                       ↓ Descendre
                     </button>
-                    <label className="flex items-center gap-2 rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700">
-                      <input
-                        type="radio"
-                        name="explorateur-ia-goal"
-                        checked={isGoal}
-                        onChange={() => handleSetGoal(quarter.id)}
-                      />
+                  </div>
+                </header>
+                <dl className="space-y-2 text-sm text-orange-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="font-medium">Identifiant</dt>
+                    <dd className="font-mono text-xs text-orange-600">
+                      {quarter.id}
+                    </dd>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <dt className="font-medium">Inventaire</dt>
+                    <dd>{quarterInventory ? quarterInventory.title : "Aucun"}</dd>
+                  </div>
+                </dl>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveQuarterId(quarter.id)}
+                    className="flex-1 rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100"
+                  >
+                    Configurer
+                  </button>
+                  {isGoal ? (
+                    <span className="rounded-full border border-orange-200 px-3 py-1 text-xs font-semibold text-orange-600">
                       Objectif final
-                    </label>
-                  </div>
-                </legend>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="flex flex-col gap-2 text-sm text-orange-900">
-                    Nom du quartier
-                    <input
-                      type="text"
-                      value={quarter.label}
-                      onChange={(event) => handleLabelChange(index, event.target.value)}
-                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm text-orange-900">
-                    Couleur principale
-                    <input
-                      type="text"
-                      value={quarter.color}
-                      onChange={(event) => handleColorChange(index, event.target.value)}
-                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                      placeholder="#06d6a0"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm text-orange-900">
-                    Numéro du défi
-                    <input
-                      type="number"
-                      value={quarterNumberValue}
-                      onChange={(event) => handleNumberChange(index, event.target.value)}
-                      className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                      placeholder={isGoal ? "—" : String(index + 1)}
-                      disabled={isGoal}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-sm text-orange-900">
-                    Identifiant interne
-                    <input
-                      type="text"
-                      value={quarter.id}
-                      readOnly
-                      className="cursor-not-allowed rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800"
-                    />
-                  </label>
+                    </span>
+                  ) : null}
                 </div>
-                <div className="space-y-3 rounded-2xl border border-orange-100 bg-orange-50/60 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-sm font-semibold text-orange-800">
-                      Objet d'inventaire
-                    </h3>
-                    <label className="flex items-center gap-2 text-xs font-semibold text-orange-700">
-                      <input
-                        type="checkbox"
-                        checked={inventory !== null}
-                        onChange={(event) =>
-                          handleInventoryChange(index, event.target.checked ? {} : null)
-                        }
-                      />
-                      Activer
-                    </label>
-                  </div>
-                  {inventory ? (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="flex flex-col gap-2 text-sm text-orange-900">
-                        Titre
-                        <input
-                          type="text"
-                          value={inventory.title}
-                          onChange={(event) =>
-                            handleInventoryChange(index, {
-                              title: event.target.value,
-                            })
-                          }
-                          className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-2 text-sm text-orange-900">
-                        Icône (emoji)
-                        <input
-                          type="text"
-                          value={inventory.icon}
-                          onChange={(event) =>
-                            handleInventoryChange(index, {
-                              icon: event.target.value,
-                            })
-                          }
-                          className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-2 text-sm text-orange-900 sm:col-span-2">
-                        Description lorsque l'objet est obtenu
-                        <textarea
-                          value={inventory.description}
-                          onChange={(event) =>
-                            handleInventoryChange(index, {
-                              description: event.target.value,
-                            })
-                          }
-                          className="h-24 rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-2 text-sm text-orange-900 sm:col-span-2">
-                        Indice avant obtention
-                        <textarea
-                          value={inventory.hint}
-                          onChange={(event) =>
-                            handleInventoryChange(index, {
-                              hint: event.target.value,
-                            })
-                          }
-                          className="h-20 rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
-                        />
-                      </label>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-orange-700">
-                      Aucun objet n'est associé à ce quartier.
-                    </p>
-                  )}
-                </div>
-              </fieldset>
+              </article>
             );
           })}
         </div>
       </section>
+      <Modal
+        open={Boolean(openQuarter)}
+        onClose={handleCloseDesigner}
+        title={
+          openQuarter
+            ? `Configurer ${openQuarter.label || openQuarter.id}`
+            : "Configurer le quartier"
+        }
+      >
+        {openQuarter ? (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-orange-600">
+              <span>ID : {openQuarter.id}</span>
+              {openQuarter.isGoal ? (
+                <span className="rounded-full border border-orange-200 px-3 py-1 text-orange-700">
+                  Objectif final
+                </span>
+              ) : null}
+            </div>
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-orange-800">
+                Ajouter une étape
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {designerStepOptions.map((option) => (
+                  <button
+                    key={option.type}
+                    type="button"
+                    onClick={() => handleAddDesignerStep(openQuarter, option.type)}
+                    disabled={option.disabled}
+                    className={classNames(
+                      "inline-flex items-center gap-2 rounded-full border border-orange-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                      option.disabled
+                        ? "cursor-not-allowed bg-orange-100 text-orange-400"
+                        : "bg-white text-orange-700 hover:border-orange-300 hover:bg-orange-50"
+                    )}
+                  >
+                    <span aria-hidden="true">{option.icon}</span>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <StepSequenceRenderer
+              key={openQuarter.id}
+              steps={activeDesignerSteps}
+              isEditMode
+              onStepConfigChange={(stepId, nextConfig) =>
+                handleDesignerStepConfigChange(openQuarter.id, stepId, nextConfig)
+              }
+              renderStepWrapper={renderDesignerStep}
+            />
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
