@@ -2169,8 +2169,9 @@ def _handle_plan(payload: PlanRequest) -> StreamingResponse:
     try:
         plan_payload = _request_plan_from_llm(client, payload)
     except PlanGenerationError as exc:
+        error_message = str(exc)
         def error_stream() -> Generator[str, None, None]:
-            yield _sse_event("error", {"message": str(exc)})
+            yield _sse_event("error", {"message": error_message})
 
         return StreamingResponse(error_stream(), media_type="text/event-stream", headers=_sse_headers())
 
