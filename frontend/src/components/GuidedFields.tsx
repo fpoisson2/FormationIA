@@ -6,6 +6,8 @@ import type {
   TableMenuDayValue,
   TableMenuFullValue,
   TableMenuFullMealValue,
+  MultipleChoiceFieldSpec,
+  SingleChoiceFieldSpec,
 } from "../api";
 
 interface GuidedFieldsProps {
@@ -40,6 +42,124 @@ function GuidedFields({ fields, values, onChange, errors }: GuidedFieldsProps): 
       {fields.map((field) => {
         const error = errors[field.id];
         switch (field.type) {
+          case "single_choice": {
+            const { options } = field as SingleChoiceFieldSpec;
+            const selected = typeof values[field.id] === "string" ? (values[field.id] as string) : "";
+            return (
+              <fieldset key={field.id} className="space-y-3">
+                <legend className="text-sm font-semibold text-[color:var(--brand-black)]">
+                  {field.label}
+                </legend>
+                <div className="space-y-2">
+                  {options.map((option) => {
+                    const isChecked = selected === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex w-full cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
+                          isChecked
+                            ? "border-[color:var(--brand-red)] bg-[color:var(--brand-red)]/5"
+                            : "border-slate-200 hover:border-[color:var(--brand-red)]/60"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name={field.id}
+                          value={option.value}
+                          checked={isChecked}
+                          onChange={() => onChange(field.id, option.value)}
+                          className="mt-1 h-4 w-4 shrink-0 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                        />
+                        <span className="flex-1">
+                          <span className="font-medium text-[color:var(--brand-black)]">
+                            {option.label}
+                          </span>
+                          {option.description && (
+                            <span className="mt-1 block text-xs text-[color:var(--brand-charcoal)]/80">
+                              {option.description}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+              </fieldset>
+            );
+          }
+          case "multiple_choice": {
+            const spec = field as MultipleChoiceFieldSpec;
+            const options = spec.options;
+            const rawSelection = Array.isArray(values[field.id])
+              ? ((values[field.id] as string[]).filter((item) => typeof item === "string").slice())
+              : [];
+            const selected = new Set(rawSelection);
+            const toggleValue = (value: string) => {
+              const next = new Set(selected);
+              if (next.has(value)) {
+                next.delete(value);
+              } else {
+                next.add(value);
+              }
+              const ordered = options
+                .map((option) => option.value)
+                .filter((optionValue) => next.has(optionValue));
+              onChange(field.id, ordered);
+            };
+            return (
+              <fieldset key={field.id} className="space-y-3">
+                <legend className="text-sm font-semibold text-[color:var(--brand-black)]">
+                  {field.label}
+                </legend>
+                <div className="space-y-2">
+                  {options.map((option) => {
+                    const isChecked = selected.has(option.value);
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex w-full cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition ${
+                          isChecked
+                            ? "border-[color:var(--brand-red)] bg-[color:var(--brand-red)]/5"
+                            : "border-slate-200 hover:border-[color:var(--brand-red)]/60"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          value={option.value}
+                          checked={isChecked}
+                          onChange={() => toggleValue(option.value)}
+                          className="mt-1 h-4 w-4 shrink-0 rounded text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                        />
+                        <span className="flex-1">
+                          <span className="font-medium text-[color:var(--brand-black)]">
+                            {option.label}
+                          </span>
+                          {option.description && (
+                            <span className="mt-1 block text-xs text-[color:var(--brand-charcoal)]/80">
+                              {option.description}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {(spec.minSelections || spec.maxSelections) && (
+                  <p className="text-xs text-[color:var(--brand-charcoal)]/70">
+                    {spec.minSelections
+                      ? `Sélectionne au moins ${spec.minSelections} option${spec.minSelections > 1 ? "s" : ""}`
+                      : null}
+                    {spec.minSelections && spec.maxSelections ? " · " : null}
+                    {spec.maxSelections
+                      ? `Maximum ${spec.maxSelections} option${spec.maxSelections > 1 ? "s" : ""}`
+                      : null}
+                  </p>
+                )}
+                {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+              </fieldset>
+            );
+          }
           case "bulleted_list": {
             const currentBullets = ensureArray(values[field.id], field.minBullets);
             const canAdd = currentBullets.length < Math.min(field.maxBullets, 5);

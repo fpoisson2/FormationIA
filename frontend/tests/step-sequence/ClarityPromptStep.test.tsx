@@ -75,7 +75,7 @@ describe("ClarityPromptStep", () => {
     const textarea = screen.getByPlaceholderText(/décris l'action/i);
     fireEvent.change(textarea, { target: { value: "Avance vers la droite" } });
 
-    const button = screen.getByRole("button", { name: /continuer/i });
+    const button = screen.getByRole("button", { name: /soumettre/i });
     fireEvent.click(button);
 
     expect(onAdvance).toHaveBeenCalledTimes(1);

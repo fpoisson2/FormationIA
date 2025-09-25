@@ -186,7 +186,7 @@ export function ClarityPromptStep({
             type="submit"
             className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)]"
           >
-            Continuer
+            Soumettre
           </button>
         )}
       </div>
