@@ -10,6 +10,17 @@ import type {
   StepSequenceActivityContextBridge,
   StepSequenceLayoutOverrides,
 } from "./types";
+import { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
+
+function buildInitialConfigs(steps: StepDefinition[]): Record<string, unknown> {
+  const nextConfigs: Record<string, unknown> = {};
+  for (const step of steps) {
+    nextConfigs[step.id] = isCompositeStepDefinition(step)
+      ? step.composite
+      : step.config;
+  }
+  return nextConfigs;
+}
 
 export interface StepSequenceRenderWrapperProps {
   step: StepDefinition;
@@ -44,13 +55,9 @@ export function StepSequenceRenderer({
     Math.min(initialIndex, Math.max(steps.length - 1, 0))
   );
   const [stepPayloads, setStepPayloads] = useState<Record<string, unknown>>({});
-  const [stepConfigs, setStepConfigs] = useState<Record<string, unknown>>(() => {
-    const nextConfigs: Record<string, unknown> = {};
-    for (const step of steps) {
-      nextConfigs[step.id] = step.config;
-    }
-    return nextConfigs;
-  });
+  const [stepConfigs, setStepConfigs] = useState<Record<string, unknown>>(() =>
+    buildInitialConfigs(steps)
+  );
 
   const stepIdsKey = useMemo(() => steps.map((step) => step.id).join("|"), [steps]);
 
@@ -62,11 +69,7 @@ export function StepSequenceRenderer({
   }, [stepIdsKey, steps.length]);
 
   useEffect(() => {
-    const nextConfigs: Record<string, unknown> = {};
-    for (const step of steps) {
-      nextConfigs[step.id] = step.config;
-    }
-    setStepConfigs(nextConfigs);
+    setStepConfigs(buildInitialConfigs(steps));
   }, [stepIdsKey, steps]);
 
   const handleAdvance = useCallback(
@@ -154,20 +157,37 @@ export function StepSequenceRenderer({
     return null;
   }
 
-  const StepComponent = getStepComponent(activeStep.component);
-  if (!StepComponent) {
+  const stepComponentKey = resolveStepComponentKey(activeStep);
+  if (!stepComponentKey) {
     if (import.meta.env.DEV) {
       // eslint-disable-next-line no-console
       console.warn(
-        `No step component registered for key "${activeStep.component}".`
+        `No step component key could be resolved for step "${activeStep.id}".`
       );
     }
     return null;
   }
 
+  const StepComponent = getStepComponent(stepComponentKey);
+  if (!StepComponent) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `No step component registered for key "${stepComponentKey}".`
+      );
+    }
+    return null;
+  }
+
+  const resolvedConfig =
+    stepConfigs[activeStep.id] ??
+    (isCompositeStepDefinition(activeStep)
+      ? activeStep.composite
+      : activeStep.config);
+
   const componentProps: StepComponentProps = {
     definition: activeStep,
-    config: stepConfigs[activeStep.id],
+    config: resolvedConfig,
     payload: stepPayloads[activeStep.id],
     isActive: true,
     isEditMode,

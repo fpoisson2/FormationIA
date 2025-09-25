@@ -55,6 +55,37 @@ function ConfirmationStep() {
 }
 ```
 
+## Étapes composites
+
+Le composant `composite` permet d’orchestrer plusieurs modules d’étape au sein d’une même vue tout en agrégant leurs `payloads`.
+
+```tsx
+import type { CompositeStepConfig } from "@/modules/step-sequence";
+
+const recapConfig: CompositeStepConfig = {
+  modules: [
+    { id: "context", component: "rich-content" },
+    { id: "feedback", component: "form", slot: "sidebar" },
+  ],
+};
+
+const steps = [
+  { id: "recap", composite: recapConfig },
+];
+```
+
+Chaque entrée de `modules[]` doit fournir un `id` unique et la clé `component` enregistrée dans le registre. Les propriétés optionnelles sont :
+
+- `slot`: positionne le module dans la mise en page (`"main"` par défaut, `"sidebar"` pour la colonne latérale, `"footer"` pour un bloc plein largeur sous le contenu principal).
+- `config`: configuration spécifique transmise au sous-module concerné.
+
+Le composite expose aux sous-modules un contexte StepSequence complet, mais intercepte leurs appels `onAdvance` afin de stocker les `payloads` localement (sous la forme `{ [moduleId]: payload }`).
+
+Deux comportements sont possibles pour finaliser l’étape :
+
+- `autoAdvance: true` : l’étape est validée automatiquement lorsque tous les sous-modules ont déclenché `onAdvance`.
+- par défaut, un bouton « Continuer » est affiché et fusionne les `payloads` des modules avant de quitter l’étape.
+
 ## Activité clé en main
 
 Le module expose également un composant `StepSequenceActivity` utilisable via le registre global des activités. Il attend une configuration de métadonnées respectant la forme suivante :

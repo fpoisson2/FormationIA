@@ -50,6 +50,9 @@ export {
 
 export * from "./modules";
 
+export { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
+export type { CompositeStepConfig, CompositeStepModuleDefinition } from "./types";
+
 export type {
   StepSequenceActivityConfig,
   StepSequenceActivityProps,
