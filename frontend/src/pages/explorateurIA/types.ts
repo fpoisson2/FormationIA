@@ -1,13 +1,16 @@
-export type QuarterId = "clarte" | "creation" | "decision" | "ethique" | "mairie";
-
-export const QUARTER_ORDER: QuarterId[] = [
+export const DEFAULT_QUARTER_IDS = [
   "clarte",
   "creation",
   "decision",
   "ethique",
   "mairie",
-];
+] as const;
+
+export type QuarterId = (typeof DEFAULT_QUARTER_IDS)[number];
 
 export function isQuarterId(value: unknown): value is QuarterId {
-  return typeof value === "string" && (QUARTER_ORDER as string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (DEFAULT_QUARTER_IDS as readonly string[]).includes(value)
+  );
 }

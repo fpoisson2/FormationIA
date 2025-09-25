@@ -1,5 +1,6 @@
 import { cloneProgress, type ExplorateurProgress } from "./progress";
-import { QUARTER_ORDER, type QuarterId } from "./types";
+import { isQuarterId, type QuarterId } from "./types";
+import { DEFAULT_DERIVED_QUARTERS } from "./config";
 
 export interface QuarterExportEntry {
   id: QuarterId;
@@ -27,18 +28,75 @@ function sanitizePayloads(value: Record<string, unknown>): Record<string, unknow
   return { ...value };
 }
 
-function computeCompletionRate(progress: ExplorateurProgress): number {
-  const completedCount = QUARTER_ORDER.reduce((total, quarter) => {
-    const isDone = progress[quarter]?.done ?? false;
-    return total + (isDone ? 1 : 0);
-  }, 0);
-  return Math.round((completedCount / QUARTER_ORDER.length) * 100);
+const DEFAULT_QUARTER_ORDER: QuarterId[] = [
+  ...DEFAULT_DERIVED_QUARTERS.quarterOrder,
+];
+
+function normalizeQuarterOrder(order?: QuarterId[]): QuarterId[] {
+  const seen = new Set<QuarterId>();
+  const result: QuarterId[] = [];
+
+  if (Array.isArray(order)) {
+    for (const candidate of order) {
+      if (!isQuarterId(candidate) || seen.has(candidate)) {
+        continue;
+      }
+      seen.add(candidate);
+      result.push(candidate);
+    }
+  }
+
+  for (const id of DEFAULT_QUARTER_ORDER) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+
+  return result;
+}
+
+function isQuarterDone(progress: ExplorateurProgress, id: QuarterId): boolean {
+  switch (id) {
+    case "clarte":
+      return progress.clarte.done;
+    case "creation":
+      return progress.creation.done;
+    case "decision":
+      return progress.decision.done;
+    case "ethique":
+      return progress.ethique.done;
+    case "mairie":
+      return progress.mairie.done;
+    default:
+      return false;
+  }
+}
+
+function computeCompletionRate(
+  progress: ExplorateurProgress,
+  order: QuarterId[]
+): number {
+  if (order.length === 0) {
+    return 0;
+  }
+  const completedCount = order.reduce(
+    (total, quarter) => total + (isQuarterDone(progress, quarter) ? 1 : 0),
+    0
+  );
+  return Math.round((completedCount / order.length) * 100);
+}
+
+export interface CreateExplorateurExportOptions {
+  quarterOrder?: QuarterId[];
 }
 
 export function createExplorateurExport(
-  progress: ExplorateurProgress
+  progress: ExplorateurProgress,
+  options?: CreateExplorateurExportOptions
 ): ExplorateurExportData {
   const cloned = cloneProgress(progress);
+  const quarterOrder = normalizeQuarterOrder(options?.quarterOrder);
 
   const quarters: Record<QuarterId, QuarterExportEntry> = {
     clarte: {
@@ -92,7 +150,7 @@ export function createExplorateurExport(
   return {
     activity: "Explorateur IA",
     generatedAt: new Date().toISOString(),
-    completionRate: computeCompletionRate(cloned),
+    completionRate: computeCompletionRate(cloned, quarterOrder),
     visited: [...cloned.visited],
     quarters,
   };

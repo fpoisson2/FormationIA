@@ -9,9 +9,17 @@ import {
   DEFAULT_DECISION_PATH_CONFIG,
   DEFAULT_ETHICS_DILEMMAS_CONFIG,
 } from "../../modules";
-import { QUARTER_ORDER, isQuarterId, type QuarterId } from "../../types";
+import {
+  DEFAULT_EXPLORATEUR_QUARTERS,
+  deriveQuarterData,
+} from "../../config";
+import { isQuarterId, type QuarterId } from "../../types";
 
 export type QuarterSteps = Record<QuarterId, StepDefinition[]>;
+
+const DEFAULT_QUARTER_ORDER = deriveQuarterData(
+  DEFAULT_EXPLORATEUR_QUARTERS
+).quarterOrder;
 
 function cloneConfig<T>(value: T): T {
   if (value === null || value === undefined) {
@@ -32,7 +40,7 @@ function cloneConfig<T>(value: T): T {
 }
 
 function cloneStep(step: StepDefinition): StepDefinition {
-  if (isCompositeStepDefinition(step)) {
+  if (typeof isCompositeStepDefinition === "function" && isCompositeStepDefinition(step)) {
     return {
       ...step,
       composite: cloneConfig(step.composite),
@@ -224,9 +232,12 @@ export const WORLD1_QUARTER_STEPS: QuarterSteps = {
   mairie: MAIRIE_STEPS.map(cloneStep),
 };
 
-export function flattenQuarterSteps(map: QuarterSteps): StepDefinition[] {
+export function flattenQuarterSteps(
+  map: QuarterSteps,
+  quarterOrder: QuarterId[] = DEFAULT_QUARTER_ORDER
+): StepDefinition[] {
   const result: StepDefinition[] = [];
-  for (const quarter of QUARTER_ORDER) {
+  for (const quarter of quarterOrder) {
     const steps = map[quarter] ?? [];
     for (const step of steps) {
       result.push(cloneStep(step));
@@ -245,7 +256,8 @@ export function getQuarterFromStepId(stepId: string): QuarterId | null {
 
 export function expandQuarterSteps(
   stepSequence: StepDefinition[] | undefined,
-  fallback: QuarterSteps = WORLD1_QUARTER_STEPS
+  fallback: QuarterSteps = WORLD1_QUARTER_STEPS,
+  quarterOrder: QuarterId[] = DEFAULT_QUARTER_ORDER
 ): QuarterSteps {
   const result: Partial<QuarterSteps> = {};
 
@@ -262,7 +274,7 @@ export function expandQuarterSteps(
     }
   }
 
-  for (const quarter of QUARTER_ORDER) {
+  for (const quarter of quarterOrder) {
     const baseSteps = fallback[quarter] ?? [];
     const overrides = overridesByQuarter.get(quarter);
     const merged: StepDefinition[] = baseSteps.map((step) =>

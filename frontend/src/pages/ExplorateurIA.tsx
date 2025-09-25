@@ -40,7 +40,18 @@ import {
   getQuarterFromStepId,
   type QuarterSteps,
 } from "./explorateurIA/worlds/world1/steps";
-import { QUARTER_ORDER, type QuarterId } from "./explorateurIA/types";
+import { type QuarterId } from "./explorateurIA/types";
+import {
+  DEFAULT_DERIVED_QUARTERS,
+  DEFAULT_EXPLORATEUR_QUARTERS,
+  cloneDerivedQuarterData,
+  deriveQuarterData,
+  sanitizeQuarterConfigs,
+  type DerivedQuarterData,
+  type ExplorateurIAInventoryDefinition,
+  type ExplorateurIAQuarterConfig,
+  type RewardStage,
+} from "./explorateurIA/config";
 import {
   createChiptuneTheme,
   type ChiptuneTheme,
@@ -58,52 +69,57 @@ import {
 // Export JSON + impression PDF via window.print().
 // ---
 
-type RewardStage = Exclude<QuarterId, "mairie">;
-
-type InventoryDefinition = {
-  stage: RewardStage;
-  title: string;
-  description: string;
-  hint: string;
-  icon: string;
-};
+type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
 
-const INVENTORY_ITEMS: InventoryDefinition[] = [
-  {
-    stage: "clarte",
-    title: "Boussole de clarté",
-    description:
-      "Une boussole calibrée pour pointer vers les consignes les plus limpides.",
-    hint: "Réussissez le défi Clarté pour l'ajouter à votre sac.",
-    icon: "🧭",
-  },
-  {
-    stage: "creation",
-    title: "Palette synthétique",
-    description:
-      "Un set modulable pour combiner styles, médias et tonalités à la demande.",
-    hint: "Terminez le défi Création pour débloquer cet outil.",
-    icon: "🎨",
-  },
-  {
-    stage: "decision",
-    title: "Balance d'arbitrage",
-    description:
-      "Une balance portative qui révèle instantanément impacts et compromis.",
-    hint: "Gagnez le défi Décision pour la remporter.",
-    icon: "⚖️",
-  },
-  {
-    stage: "ethique",
-    title: "Lanterne déontique",
-    description:
-      "Une lanterne qui éclaire les zones d'ombre pour garder le cap éthique.",
-    hint: "Relevez le défi Éthique pour la récupérer.",
-    icon: "🕯️",
-  },
-];
+let currentDerivedData: DerivedQuarterData = cloneDerivedQuarterData(
+  DEFAULT_DERIVED_QUARTERS
+);
+
+let PROGRESSION_SEQUENCE: RewardStage[] = [];
+let PROGRESSION_WITH_GOAL: QuarterId[] = [];
+let BUILDING_DISPLAY_ORDER: QuarterId[] = [];
+let BUILDING_META: Record<
+  QuarterId,
+  { label: string; color: string; number?: number }
+> = {} as Record<QuarterId, { label: string; color: string; number?: number }>;
+let INVENTORY_ITEMS: InventoryDefinition[] = [];
+
+function updateDerivedQuarterCaches(data: DerivedQuarterData) {
+  currentDerivedData = cloneDerivedQuarterData(data);
+  PROGRESSION_SEQUENCE = [...currentDerivedData.progressionSequence];
+  const goal = currentDerivedData.goalIds[0];
+  PROGRESSION_WITH_GOAL =
+    goal === undefined
+      ? [...PROGRESSION_SEQUENCE]
+      : [...PROGRESSION_SEQUENCE, goal];
+  BUILDING_DISPLAY_ORDER = [...currentDerivedData.buildingDisplayOrder];
+  BUILDING_META = Object.entries(currentDerivedData.buildingMeta).reduce(
+    (acc, [id, meta]) => {
+      acc[id as QuarterId] = {
+        label: meta.label,
+        color: meta.color,
+        ...(meta.number === undefined ? {} : { number: meta.number }),
+      };
+      return acc;
+    },
+    {} as Record<QuarterId, { label: string; color: string; number?: number }>
+  );
+  INVENTORY_ITEMS = currentDerivedData.inventoryItems.map((item) => ({
+    ...item,
+  }));
+}
+
+updateDerivedQuarterCaches(DEFAULT_DERIVED_QUARTERS);
+
+function applyDerivedQuarterData(next: DerivedQuarterData) {
+  updateDerivedQuarterCaches(next);
+  rebuildBuildings();
+  rebuildBuildingLookup();
+  rebuildPathGates();
+  rebuildGateLookup();
+}
 
 const MANUAL_ADVANCE_COMPONENTS = new Set<string>(["rich-content", "video"]);
 
@@ -2393,6 +2409,7 @@ export interface ExplorateurIATerrainConfig {
 export interface ExplorateurIAConfig {
   terrain: ExplorateurIATerrainConfig;
   steps: StepDefinition[];
+  quarters: ExplorateurIAQuarterConfig[];
 }
 
 function cloneStepConfig<T>(value: T): T {
@@ -2474,13 +2491,20 @@ function sanitizeSteps(value: unknown): StepDefinition[] {
 }
 
 function getDefaultExplorateurSteps(): StepDefinition[] {
-  return flattenQuarterSteps(WORLD1_QUARTER_STEPS).map(cloneStepDefinition);
+  return flattenQuarterSteps(
+    WORLD1_QUARTER_STEPS,
+    DEFAULT_DERIVED_QUARTERS.quarterOrder
+  ).map(cloneStepDefinition);
 }
 
 export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
   return {
     terrain: { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED },
     steps: getDefaultExplorateurSteps(),
+    quarters: DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
+      ...quarter,
+      inventory: quarter.inventory ? { ...quarter.inventory } : null,
+    })),
   };
 }
 
@@ -2493,12 +2517,18 @@ export function sanitizeExplorateurIAConfig(
   const base = config as Partial<ExplorateurIAConfig> & {
     terrain?: unknown;
     steps?: unknown;
+    quarters?: unknown;
   };
   const terrain = sanitizeTerrainConfig(base.terrain);
   const steps = sanitizeSteps(base.steps);
+  const quarters = sanitizeQuarterConfigs(
+    base.quarters,
+    DEFAULT_EXPLORATEUR_QUARTERS
+  );
   return {
     terrain,
     steps: steps.length > 0 ? steps : getDefaultExplorateurSteps(),
+    quarters,
   };
 }
 
@@ -2510,22 +2540,9 @@ const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
   ethique: { x: 18, y: 18 },
 };
 
-const LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
-  "clarte",
-  "mairie",
-  "creation",
-  "decision",
-  "ethique",
+const DEFAULT_LANDMARK_ASSIGNMENT_ORDER: QuarterId[] = [
+  ...DEFAULT_DERIVED_QUARTERS.buildingDisplayOrder,
 ];
-
-const PROGRESSION_SEQUENCE: QuarterId[] = [
-  "clarte",
-  "creation",
-  "decision",
-  "ethique",
-];
-
-const PROGRESSION_WITH_GOAL: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
 
 type PathMarkerPlacement = { x: number; y: number; coord: TileCoord };
 
@@ -2545,7 +2562,12 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     ethique: { ...FALLBACK_LANDMARKS.ethique },
   };
 
-  if (path.length < LANDMARK_ASSIGNMENT_ORDER.length) {
+  const assignmentOrder =
+    currentDerivedData.buildingDisplayOrder.length > 0
+      ? currentDerivedData.buildingDisplayOrder
+      : DEFAULT_LANDMARK_ASSIGNMENT_ORDER;
+
+  if (path.length < assignmentOrder.length) {
     return assignments;
   }
 
@@ -2554,20 +2576,20 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     .filter((index) => index > 0 && index < path.length - 1);
 
   const pickFrom = (indices: number[]) => {
-    const distributed = distributeIndices(indices.length, LANDMARK_ASSIGNMENT_ORDER.length);
-    LANDMARK_ASSIGNMENT_ORDER.forEach((id, index) => {
+    const distributed = distributeIndices(indices.length, assignmentOrder.length);
+    assignmentOrder.forEach((id, index) => {
       const [x, y] = path[indices[distributed[index]]];
       assignments[id] = { x, y };
     });
   };
 
-  if (interiorIndices.length >= LANDMARK_ASSIGNMENT_ORDER.length) {
+  if (interiorIndices.length >= assignmentOrder.length) {
     pickFrom(interiorIndices);
   } else {
     pickFrom(path.map((_, index) => index));
   }
 
-  const stageOrder: QuarterId[] = [...PROGRESSION_SEQUENCE, "mairie"];
+  const stageOrder: QuarterId[] = [...PROGRESSION_WITH_GOAL];
   const indexByStage = new Map<QuarterId, number>();
   const takenIndices = new Set<number>();
 
@@ -2586,9 +2608,15 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
   }
 
   if (path.length > 0) {
-    indexByStage.set("mairie", path.length - 1);
+    const goalIds =
+      currentDerivedData.goalIds.length > 0
+        ? currentDerivedData.goalIds
+        : (["mairie"] as QuarterId[]);
     const [goalX, goalY] = path[path.length - 1];
-    assignments.mairie = { x: goalX, y: goalY };
+    for (const goalId of goalIds) {
+      indexByStage.set(goalId, path.length - 1);
+      assignments[goalId] = { x: goalX, y: goalY };
+    }
   }
 
   const moveStage = (stage: QuarterId, targetIndex: number) => {
@@ -2688,8 +2716,13 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
     };
   }
 
+  const assignmentOrder =
+    currentDerivedData.buildingDisplayOrder.length > 0
+      ? currentDerivedData.buildingDisplayOrder
+      : DEFAULT_LANDMARK_ASSIGNMENT_ORDER;
+
   const desiredPathLength = Math.max(
-    LANDMARK_ASSIGNMENT_ORDER.length,
+    assignmentOrder.length,
     Math.floor(island.size * 0.45)
   );
 
@@ -2763,25 +2796,6 @@ function updatePathIndexCache(path: Coord[]) {
   });
 }
 updatePathIndexCache(generatedWorld.path);
-
-const BUILDING_META: Record<
-  QuarterId,
-  { label: string; color: string; number?: number }
-> = {
-  mairie: { label: "Mairie (Bilan)", color: "#ffd166" },
-  clarte: { label: "Quartier Clarté", color: "#06d6a0", number: 1 },
-  creation: { label: "Quartier Création", color: "#118ab2", number: 2 },
-  decision: { label: "Quartier Décision", color: "#ef476f", number: 3 },
-  ethique: { label: "Quartier Éthique", color: "#8338ec", number: 4 },
-};
-
-const BUILDING_DISPLAY_ORDER: QuarterId[] = [
-  "mairie",
-  "clarte",
-  "creation",
-  "decision",
-  "ethique",
-];
 
 const buildings: Array<{
   id: QuarterId;
@@ -4316,6 +4330,15 @@ export default function ExplorateurIA({
     [config]
   );
 
+  const derivedQuarterData = useMemo(
+    () => deriveQuarterData(sanitizedConfig.quarters),
+    [sanitizedConfig.quarters]
+  );
+
+  useEffect(() => {
+    applyDerivedQuarterData(derivedQuarterData);
+  }, [derivedQuarterData]);
+
   const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
   const tileSize = useResponsiveTileSize("cover", {
@@ -4330,13 +4353,21 @@ export default function ExplorateurIA({
     () => createInitialProgress()
   );
   const [quarterSteps, setQuarterSteps] = useState<QuarterSteps>(() =>
-    expandQuarterSteps(sanitizedConfig.steps, WORLD1_QUARTER_STEPS)
+    expandQuarterSteps(
+      sanitizedConfig.steps,
+      WORLD1_QUARTER_STEPS,
+      derivedQuarterData.quarterOrder
+    )
   );
   useEffect(() => {
     setQuarterSteps(
-      expandQuarterSteps(sanitizedConfig.steps, WORLD1_QUARTER_STEPS)
+      expandQuarterSteps(
+        sanitizedConfig.steps,
+        WORLD1_QUARTER_STEPS,
+        derivedQuarterData.quarterOrder
+      )
     );
-  }, [sanitizedConfig.steps]);
+  }, [derivedQuarterData, sanitizedConfig.steps]);
   const [celebrate, setCelebrate] = useState(false);
   const [isInventoryOpen, setInventoryOpen] = useState(false);
   const [tileset] = useTileset();
@@ -4374,6 +4405,10 @@ export default function ExplorateurIA({
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
+      const nextQuarters = sanitizeQuarterConfigs(
+        patch.quarters ?? sanitizedConfig.quarters,
+        DEFAULT_EXPLORATEUR_QUARTERS
+      );
       const next: ExplorateurIAConfig = {
         terrain: {
           themeId:
@@ -4381,6 +4416,7 @@ export default function ExplorateurIA({
           seed: patch.terrain?.seed ?? sanitizedConfig.terrain.seed,
         },
         steps: (patch.steps ?? sanitizedConfig.steps).map(cloneStepDefinition),
+        quarters: nextQuarters,
       };
       effectiveOnUpdateConfig(next);
     },
@@ -4500,7 +4536,7 @@ export default function ExplorateurIA({
       }
     }
     return active;
-  }, [isQuarterCompleted, worldVersion]);
+  }, [derivedQuarterData, isQuarterCompleted, worldVersion]);
 
   const inventoryEntries = useMemo<InventoryEntry[]>(
     () =>
@@ -4508,7 +4544,7 @@ export default function ExplorateurIA({
         ...item,
         obtained: isQuarterCompleted(item.stage),
       })),
-    [isQuarterCompleted]
+    [derivedQuarterData, isQuarterCompleted]
   );
   const inventoryCollected = inventoryEntries.reduce(
     (total, item) => total + (item.obtained ? 1 : 0),
@@ -4529,11 +4565,13 @@ export default function ExplorateurIA({
           step.id === stepId ? { ...step, config } : step
         );
         const next: QuarterSteps = { ...previous, [quarter]: nextSteps };
-        emitConfig({ steps: flattenQuarterSteps(next) });
+        emitConfig({
+          steps: flattenQuarterSteps(next, derivedQuarterData.quarterOrder),
+        });
         return next;
       });
     },
-    [emitConfig]
+    [derivedQuarterData, emitConfig]
   );
 
   const handleThemeChange = useCallback(
@@ -4786,14 +4824,14 @@ export default function ExplorateurIA({
     if (completionTriggered.current) {
       return;
     }
-    const allQuartersCompleted = QUARTER_ORDER.every(
-      (quarter) => progress[quarter].done
+    const allQuartersCompleted = derivedQuarterData.quarterOrder.every(
+      (quarter) => isQuarterCompleted(quarter)
     );
     if (allQuartersCompleted) {
       completionTriggered.current = true;
       void markCompleted({ triggerCompletionCallback: true });
     }
-  }, [progress, markCompleted]);
+  }, [derivedQuarterData, isQuarterCompleted, markCompleted]);
 
   useEffect(() => {
     if (blockedStage && isQuarterCompleted(blockedStage)) {
@@ -5064,7 +5102,9 @@ export default function ExplorateurIA({
   );
 
   const downloadJSON = () => {
-    const data = createExplorateurExport(progress);
+    const data = createExplorateurExport(progress, {
+      quarterOrder: derivedQuarterData.quarterOrder,
+    });
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
     });

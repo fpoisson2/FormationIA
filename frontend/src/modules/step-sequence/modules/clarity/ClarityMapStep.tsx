@@ -232,7 +232,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
       obstacleCount: DEFAULT_OBSTACLE_COUNT,
       initialTarget: null,
       promptStepId: "",
-      allowInstructionInput: false,
+      allowInstructionInput: true,
       instructionLabel: "Commande transmise",
       instructionPlaceholder: "La consigne reçue s'affichera ici…",
     };
@@ -246,7 +246,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
   );
   const initialTarget = sanitizeGridCoord(raw.initialTarget ?? null);
   const promptStepId = typeof raw.promptStepId === "string" ? raw.promptStepId.trim() : "";
-  const allowInstructionInput = raw.allowInstructionInput === true;
+  const allowInstructionInput = raw.allowInstructionInput !== false;
   const instructionLabel =
     typeof raw.instructionLabel === "string" && raw.instructionLabel.trim()
       ? raw.instructionLabel.trim()
@@ -486,7 +486,9 @@ export function ClarityMapStep({
     }
   }, [effectiveStatus]);
 
-  const shouldShowInstructionPanel = Boolean(normalizedConfig.allowInstructionInput);
+  const shouldShowInstructionPanel = Boolean(
+    normalizedConfig.allowInstructionInput && promptInstruction === null
+  );
 
   const blockedSignature = useMemo(
     () => blocked.map((cell) => gridKey(cell)).sort().join("|"),
