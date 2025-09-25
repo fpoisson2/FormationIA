@@ -157,6 +157,38 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
       },
     },
   },
+  stepsequence: {
+    componentKey: "stepsequence",
+    path: "/activites/stepsequence",
+    defaults: {
+      completionId: "stepsequence",
+      enabled: true,
+      header: {
+        eyebrow: "StepSequence",
+        title: "Module StepSequence personnalisé",
+        subtitle:
+          "Assemblez votre propre séquence pas à pas en important une configuration StepSequence.",
+        badge: "Module générique",
+      },
+      layout: {
+        contentClassName: "space-y-12",
+      },
+      card: {
+        title: "Module StepSequence",
+        description:
+          "Objectif : proposer une expérience StepSequence sur mesure à partir d'un scénario configuré.",
+        highlights: [
+          "Compatible avec vos scripts StepSequence existants",
+          "Interface accessible au clavier et à la souris",
+          "Hébergement directement dans la plateforme Formation IA",
+        ],
+        cta: {
+          label: "Configurer le module",
+          to: "/activites/stepsequence",
+        },
+      },
+    },
+  },
   clarity: {
     componentKey: "clarity-path",
     path: "/parcours-clarte",
