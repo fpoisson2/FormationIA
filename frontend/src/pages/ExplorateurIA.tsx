@@ -2403,11 +2403,27 @@ function distributeIndices(total: number, count: number): number[] {
   if (count <= 0) {
     return [];
   }
-  if (count === 1 || total <= 1) {
-    return [0];
+  if (total <= 0) {
+    return Array(count).fill(0);
+  }
+  if (count === 1 || total === 1) {
+    return Array(count).fill(0);
   }
   const step = (total - 1) / (count - 1);
-  return Array.from({ length: count }, (_, index) => Math.round(index * step));
+  return Array.from({ length: count }, (_, index) => {
+    const candidate = Math.round(index * step);
+    if (!Number.isFinite(candidate)) {
+      return 0;
+    }
+    if (candidate <= 0) {
+      return 0;
+    }
+    const max = total - 1;
+    if (candidate >= max) {
+      return max;
+    }
+    return candidate;
+  });
 }
 
 const WORLD_WIDTH = 25;
@@ -2583,10 +2599,6 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
       ? currentDerivedData.buildingDisplayOrder
       : DEFAULT_LANDMARK_ASSIGNMENT_ORDER;
 
-  if (path.length < assignmentOrder.length) {
-    return assignments;
-  }
-
   const interiorIndices = path
     .map((_, index) => index)
     .filter((index) => index > 0 && index < path.length - 1);
@@ -2616,6 +2628,9 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
         continue;
       }
       const assignment = assignments[stage];
+      if (!assignment) {
+        continue;
+      }
       if (assignment.x === x && assignment.y === y) {
         indexByStage.set(stage, index);
         takenIndices.add(index);
