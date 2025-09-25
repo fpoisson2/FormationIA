@@ -5,6 +5,11 @@ import {
   StepSequenceRenderer,
   type StepSequenceRenderWrapperProps,
 } from "./StepSequenceRenderer";
+import type {
+  StepDefinition,
+  StepSequenceActivityContextBridge,
+  StepSequenceWrapperPreference,
+} from "./types";
 import type { StepDefinition } from "./types";
 import { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
 import { useActivityCompletion } from "../../hooks/useActivityCompletion";
@@ -56,6 +61,7 @@ export function StepSequenceActivity({
   header,
   card,
   layout,
+  layoutOverrides,
 }: StepSequenceActivityProps): JSX.Element {
   const metadataSteps = metadata?.steps;
   const resolvedSteps = useMemo(() => {
@@ -104,7 +110,7 @@ export function StepSequenceActivity({
     [finalizeSequence, onComplete]
   );
 
-  const activityContext = useMemo(
+  const activityContext = useMemo<StepSequenceActivityContextBridge>(
     () => ({
       activityId,
       completionId,
@@ -114,6 +120,7 @@ export function StepSequenceActivity({
       header,
       card,
       layout,
+      layoutOverrides,
     }),
     [
       activityId,
@@ -121,6 +128,7 @@ export function StepSequenceActivity({
       completionId,
       header,
       layout,
+      layoutOverrides,
       navigateToActivities,
       resetLayoutOverrides,
       setLayoutOverrides,
@@ -137,6 +145,13 @@ export function StepSequenceActivity({
       context,
       advance,
     }: StepSequenceRenderWrapperProps) => {
+      const wrapperPreference: StepSequenceWrapperPreference =
+        StepComponent.stepSequenceWrapper ?? "default";
+
+      if (wrapperPreference === "bare") {
+        return <StepComponent {...componentProps} />;
+      }
+
       const canGoBack = stepIndex > 0;
       const isLastStep = stepIndex === stepCount - 1;
       const resolvedComponentKey = resolveStepComponentKey(step);

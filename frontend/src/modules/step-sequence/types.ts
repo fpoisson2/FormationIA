@@ -62,7 +62,23 @@ export interface StepComponentProps {
   onUpdateConfig: (config: unknown) => void;
 }
 
-export type StepRegistry = Record<string, ComponentType<StepComponentProps>>;
+export type StepSequenceWrapperPreference = "default" | "bare";
+
+export type StepSequenceLayoutOverrides = Record<string, unknown>;
+
+export interface StepSequenceActivityContextBridge {
+  layoutOverrides?: StepSequenceLayoutOverrides;
+  setLayoutOverrides?: (overrides: StepSequenceLayoutOverrides) => void;
+  resetLayoutOverrides?: () => void;
+  [key: string]: unknown;
+}
+
+export type StepComponentWithMetadata = ComponentType<StepComponentProps> & {
+  stepSequenceWrapper?: StepSequenceWrapperPreference;
+  stepSequenceLayoutOverrides?: StepSequenceLayoutOverrides;
+};
+
+export type StepRegistry = Record<string, StepComponentWithMetadata>;
 
 export interface StepSequenceContextValue {
   stepIndex: number;
@@ -73,6 +89,7 @@ export interface StepSequenceContextValue {
   onAdvance: (payload?: unknown) => void;
   onUpdateConfig: (config: unknown) => void;
   goToStep: (target: number | string) => void;
+  activityContext?: StepSequenceActivityContextBridge | null;
   activityContext?: Record<string, unknown> | null;
   compositeModules?: Record<string, CompositeStepModuleDefinition[]>;
 }

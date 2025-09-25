@@ -32,6 +32,7 @@ import type {
   SimulationChatStageConfig,
 } from "./SimulationChatStep";
 import "./workshop";
+import "./explorateur-world";
 import type {
   RichContentChecklistItem,
   RichContentChecklistSidebar,
@@ -127,3 +128,4 @@ export type {
 export { ClarityMapStep, ClarityPromptStep };
 
 export * from "./workshop";
+export * from "./explorateur-world";
