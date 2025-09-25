@@ -50,6 +50,7 @@ export interface ExplorateurProgress {
   decision: DecisionProgress;
   ethique: EthicsProgress;
   mairie: MairieProgress;
+  extras: Record<QuarterId, QuarterProgressBase>;
   visited: QuarterId[];
 }
 
@@ -60,6 +61,7 @@ export function createInitialProgress(): ExplorateurProgress {
     decision: { done: false, payloads: {} },
     ethique: { done: false, averageScore: 0, answers: [], payloads: {} },
     mairie: { done: false, payloads: {} },
+    extras: {},
     visited: [],
   };
 }
@@ -240,6 +242,17 @@ export function updateMairieProgress(
   };
 }
 
+export function updateGenericQuarterProgress(
+  previous: QuarterProgressBase | undefined,
+  payloads: QuarterPayloadMap | undefined
+): QuarterProgressBase {
+  const sanitized = sanitizePayloadMap(payloads);
+  return {
+    done: true,
+    payloads: previous ? { ...previous.payloads, ...sanitized } : sanitized,
+  } satisfies QuarterProgressBase;
+}
+
 export function cloneProgress(progress: ExplorateurProgress): ExplorateurProgress {
   return {
     clarte: { ...progress.clarte, payloads: cloneValue(progress.clarte.payloads) },
@@ -276,6 +289,16 @@ export function cloneProgress(progress: ExplorateurProgress): ExplorateurProgres
         ? cloneValue(progress.mairie.reflection)
         : progress.mairie.reflection,
     },
+    extras: Object.entries(progress.extras).reduce(
+      (acc, [id, extra]) => {
+        acc[id as QuarterId] = {
+          done: extra.done,
+          payloads: cloneValue(extra.payloads),
+        } satisfies QuarterProgressBase;
+        return acc;
+      },
+      {} as Record<QuarterId, QuarterProgressBase>
+    ),
     visited: [...progress.visited],
   };
 }

@@ -30,6 +30,7 @@ import {
   updateCreationProgress,
   updateDecisionProgress,
   updateEthicsProgress,
+  updateGenericQuarterProgress,
   updateMairieProgress,
   type ExplorateurProgress,
   type QuarterPayloadMap,
@@ -42,7 +43,11 @@ import {
   getQuarterFromStepId,
   type QuarterSteps,
 } from "./explorateurIA/worlds/world1/steps";
-import { type QuarterId } from "./explorateurIA/types";
+import {
+  DEFAULT_QUARTER_IDS,
+  normalizeQuarterId,
+  type QuarterId,
+} from "./explorateurIA/types";
 import {
   DEFAULT_DERIVED_QUARTERS,
   DEFAULT_EXPLORATEUR_QUARTERS,
@@ -78,6 +83,10 @@ type InventoryEntry = InventoryDefinition & { obtained: boolean };
 
 const DEFAULT_QUARTER_MAP = new Map(
   DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => [quarter.id, quarter])
+);
+
+const KNOWN_QUARTER_IDS = new Set<QuarterId>(
+  Array.from(DEFAULT_QUARTER_IDS) as QuarterId[]
 );
 
 let currentDerivedData: DerivedQuarterData = cloneDerivedQuarterData(
@@ -4575,7 +4584,7 @@ export default function ExplorateurIA({
         case "mairie":
           return progress.mairie.done;
         default:
-          return false;
+          return Boolean(progress.extras[id]?.done);
       }
     },
     [progress]
@@ -5121,7 +5130,7 @@ export default function ExplorateurIA({
         const visited = previous.visited.includes(id)
           ? previous.visited
           : [...previous.visited, id];
-        return {
+        const next: ExplorateurProgress = {
           ...previous,
           visited,
           clarte:
@@ -5144,7 +5153,17 @@ export default function ExplorateurIA({
             id === "mairie"
               ? updateMairieProgress(previous.mairie, payloads)
               : previous.mairie,
+          extras: previous.extras,
         } satisfies ExplorateurProgress;
+
+        if (!KNOWN_QUARTER_IDS.has(id)) {
+          next.extras = {
+            ...previous.extras,
+            [id]: updateGenericQuarterProgress(previous.extras[id], payloads),
+          };
+        }
+
+        return next;
       });
       setOpen(null);
       setBlockedStage(null);
@@ -5799,6 +5818,48 @@ function getDefaultInventory(
   } satisfies ExplorateurIAInventoryConfig;
 }
 
+const FALLBACK_CUSTOM_COLOR_PALETTE = [
+  "#f97316",
+  "#0ea5e9",
+  "#22c55e",
+  "#a855f7",
+  "#ec4899",
+];
+
+function createNewQuarterTemplate(
+  existing: readonly ExplorateurIAQuarterConfig[]
+): ExplorateurIAQuarterConfig {
+  const usedIds = new Set(existing.map((quarter) => quarter.id));
+  const nonGoalCount = existing.filter((quarter) => !quarter.isGoal).length;
+  const baseLabel = `Nouveau quartier ${nonGoalCount + 1}`;
+  const normalized =
+    normalizeQuarterId(baseLabel) ??
+    (`quartier-${nonGoalCount + 1}` as QuarterId);
+  let id = normalized as QuarterId;
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${normalized}-${suffix}` as QuarterId;
+    suffix += 1;
+  }
+
+  const palette = DEFAULT_EXPLORATEUR_QUARTERS.filter(
+    (quarter) => !quarter.isGoal && typeof quarter.color === "string"
+  ).map((quarter) => quarter.color);
+  const colorPalette = palette.length ? palette : FALLBACK_CUSTOM_COLOR_PALETTE;
+  const color =
+    colorPalette[nonGoalCount % colorPalette.length] ??
+    FALLBACK_CUSTOM_COLOR_PALETTE[0];
+
+  return {
+    id,
+    label: baseLabel,
+    color,
+    buildingNumber: nonGoalCount + 1,
+    isGoal: false,
+    inventory: null,
+  } satisfies ExplorateurIAQuarterConfig;
+}
+
 function ExplorateurIAConfigDesigner({
   config,
   onUpdateQuarters,
@@ -5809,6 +5870,18 @@ function ExplorateurIAConfigDesigner({
     () => config.quarters.filter((quarter) => !quarter.isGoal).length,
     [config.quarters]
   );
+
+  const handleAddQuarter = useCallback(() => {
+    const nextQuarter = createNewQuarterTemplate(config.quarters);
+    const next = config.quarters.map(cloneQuarter);
+    const goalIndex = next.findIndex((quarter) => quarter.isGoal);
+    if (goalIndex === -1) {
+      next.push(nextQuarter);
+    } else {
+      next.splice(goalIndex, 0, nextQuarter);
+    }
+    onUpdateQuarters(next);
+  }, [config.quarters, onUpdateQuarters]);
 
   const handleQuarterChange = useCallback(
     (
@@ -5991,9 +6064,21 @@ function ExplorateurIAConfigDesigner({
         </dl>
       </header>
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
-          Quartiers et défis
-        </h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+            Quartiers et défis
+          </h2>
+          <button
+            type="button"
+            onClick={handleAddQuarter}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-orange-200 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wide text-orange-700 shadow-sm transition hover:border-orange-300 hover:text-orange-900 focus:outline-none focus:ring-2 focus:ring-orange-300"
+          >
+            <span aria-hidden="true" className="text-base leading-none">
+              +
+            </span>
+            Ajouter un quartier
+          </button>
+        </div>
         <p className="text-sm text-orange-900/80">
           Ajustez l'ordre des quartiers, renommez-les et définissez le numéro du défi pour chaque zone.
         </p>

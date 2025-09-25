@@ -1,4 +1,4 @@
-import { isQuarterId, type QuarterId } from "./types";
+import { isQuarterId, normalizeQuarterId, type QuarterId } from "./types";
 
 export type RewardStage = Exclude<QuarterId, "mairie">;
 
@@ -147,6 +147,51 @@ function sanitizeInventoryConfig(
   } satisfies ExplorateurIAInventoryConfig;
 }
 
+function makeUniqueQuarterId(baseId: QuarterId, used: Set<QuarterId>): QuarterId {
+  let candidate = baseId;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${baseId}-${suffix}` as QuarterId;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function resolveQuarterId(
+  candidate: Partial<ExplorateurIAQuarterConfig>,
+  used: Set<QuarterId>,
+  defaultsById: Map<QuarterId, ExplorateurIAQuarterConfig>
+): { id: QuarterId; defaults?: ExplorateurIAQuarterConfig } | null {
+  const rawId =
+    typeof candidate.id === "string" && candidate.id.trim().length > 0
+      ? candidate.id.trim()
+      : undefined;
+
+  let normalizedId: QuarterId | null = null;
+  if (rawId && isQuarterId(rawId)) {
+    normalizedId = rawId as QuarterId;
+  } else if (rawId) {
+    normalizedId = normalizeQuarterId(rawId);
+  }
+
+  if (!normalizedId) {
+    const label =
+      typeof candidate.label === "string" && candidate.label.trim().length > 0
+        ? candidate.label
+        : undefined;
+    normalizedId = label ? normalizeQuarterId(label) : null;
+  }
+
+  if (!normalizedId) {
+    return null;
+  }
+
+  const defaults = defaultsById.get(normalizedId) ?? undefined;
+
+  const id = makeUniqueQuarterId(normalizedId, used);
+  return { id, defaults };
+}
+
 export function sanitizeQuarterConfigs(
   value: unknown,
   fallback: readonly ExplorateurIAQuarterConfig[] = DEFAULT_EXPLORATEUR_QUARTERS
@@ -168,14 +213,13 @@ export function sanitizeQuarterConfigs(
         id?: unknown;
         inventory?: unknown;
       };
-      if (!isQuarterId(candidate.id)) {
+
+      const resolved = resolveQuarterId(candidate, used, defaultsById);
+      if (!resolved) {
         continue;
       }
-      const id = candidate.id;
-      if (used.has(id)) {
-        continue;
-      }
-      const defaults = defaultsById.get(id);
+      const { id, defaults } = resolved;
+
       const label =
         typeof candidate.label === "string" && candidate.label.trim().length > 0
           ? candidate.label
