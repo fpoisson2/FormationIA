@@ -398,6 +398,7 @@ export function ClarityMapStep({
   const sequenceContext = useContext(StepSequenceContext);
   const activeStepId = sequenceContext?.steps?.[sequenceContext.stepIndex]?.id;
   const shouldAutoPublish = Boolean(sequenceContext) && activeStepId !== definition.id;
+  const allowManualSubmit = isEditMode || !shouldAutoPublish;
   const sequencePayloads = sequenceContext?.payloads ?? null;
   const compositeModules = sequenceContext?.compositeModules ?? null;
 
@@ -705,7 +706,7 @@ export function ClarityMapStep({
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (shouldAutoPublish) {
+      if (!allowManualSubmit) {
         return;
       }
 
@@ -724,7 +725,7 @@ export function ClarityMapStep({
         void triggerExecution({ force: true }).catch(() => {});
       }
     },
-    [blocked, onAdvance, runId, shouldAutoPublish, target, trimmedInstruction, triggerExecution]
+    [allowManualSubmit, blocked, onAdvance, runId, target, trimmedInstruction, triggerExecution]
   );
 
   useEffect(() => {
@@ -830,13 +831,13 @@ export function ClarityMapStep({
     <form className="space-y-6" onSubmit={handleSubmit}>
       {isEditMode && (
         <div className="space-y-4">
-          <fieldset className="rounded-2xl border border-dashed border-white/40 bg-[color:var(--brand-charcoal)]/20 p-4 text-sm text-white/80">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wide text-white/70">
+          <fieldset className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-[color:var(--brand-charcoal)]">
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
               Configuration
             </legend>
             <div className="mt-2 grid gap-4 md:grid-cols-2">
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                   Obstacles
                 </span>
                 <input
@@ -845,11 +846,11 @@ export function ClarityMapStep({
                   max={MAX_OBSTACLE_COUNT}
                   value={obstacleCount}
                   onChange={handleObstacleCountChange}
-                  className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                   Étape prompt liée
                 </span>
                 <input
@@ -857,15 +858,15 @@ export function ClarityMapStep({
                   value={normalizedConfig.promptStepId}
                   onChange={handlePromptIdChange}
                   placeholder="ID du module prompt"
-                  className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
                 />
-                <span className="text-xs text-white/60">
+                <span className="text-xs text-[color:var(--brand-charcoal)]/70">
                   Laisse vide pour relier automatiquement le module prompt du composite.
                 </span>
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                     Cible X
                   </span>
                   <input
@@ -875,11 +876,11 @@ export function ClarityMapStep({
                     value={targetFromConfig ? targetFromConfig.x : ""}
                     onChange={handleTargetFieldChange("x")}
                     placeholder="auto"
-                    className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
                   />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                     Cible Y
                   </span>
                   <input
@@ -889,7 +890,7 @@ export function ClarityMapStep({
                     value={targetFromConfig ? targetFromConfig.y : ""}
                     onChange={handleTargetFieldChange("y")}
                     placeholder="auto"
-                    className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                    className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
                   />
                 </label>
               </div>
@@ -898,20 +899,20 @@ export function ClarityMapStep({
                   type="checkbox"
                   checked={normalizedConfig.allowInstructionInput}
                   onChange={handleAllowInputToggle}
-                  className="h-4 w-4 rounded border-white/50 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                  className="h-4 w-4 rounded border-gray-400 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
                 />
-                <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                   Autoriser la saisie manuelle
                 </span>
               </label>
             </div>
           </fieldset>
-          <div className="rounded-2xl border border-white/30 bg-black/30 p-4 text-xs text-white/80">
+          <div className="rounded-2xl border border-gray-300 bg-gray-50 p-4 text-xs text-[color:var(--brand-charcoal)]">
             <div className="flex items-center justify-between gap-3">
               <span className="font-semibold uppercase tracking-wide">Aperçu structured output</span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">Lecture seule</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--brand-charcoal)]/60">Lecture seule</span>
             </div>
-            <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/40 p-3 text-[11px] leading-relaxed text-white/80">
+            <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-[11px] leading-relaxed text-[color:var(--brand-charcoal)]">
               {structuredRequestPreview}
             </pre>
           </div>
@@ -920,21 +921,21 @@ export function ClarityMapStep({
 
       <div className="grid gap-6 lg:grid-cols-[3fr,2fr]">
         <div className="space-y-4">
-          <div className="rounded-3xl border border-white/40 bg-[color:var(--brand-charcoal)]/25 p-4 shadow-inner backdrop-blur">
+          <div className="rounded-3xl border border-gray-300 bg-gray-100 p-4 shadow-inner backdrop-blur">
             <ClarityGrid player={START_POSITION} target={target} blocked={blocked} visited={visited} />
           </div>
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
               onClick={handleShuffleTarget}
-              className="inline-flex items-center justify-center rounded-full border border-white/40 bg-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-charcoal)]/45"
+              className="inline-flex items-center justify-center rounded-full border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-semibold text-[color:var(--brand-charcoal)] shadow-sm transition hover:bg-gray-200"
             >
               Nouvelle cible
             </button>
             <button
               type="button"
               onClick={handleShuffleObstacles}
-              className="inline-flex items-center justify-center rounded-full border border-white/40 bg-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-charcoal)]/45"
+              className="inline-flex items-center justify-center rounded-full border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-semibold text-[color:var(--brand-charcoal)] shadow-sm transition hover:bg-gray-200"
             >
               Mélanger les obstacles
             </button>
@@ -942,45 +943,45 @@ export function ClarityMapStep({
         </div>
         <div className="space-y-3">
           <label className="flex flex-col gap-2">
-            <span className="text-sm font-semibold text-white/90">{normalizedConfig.instructionLabel}</span>
+            <span className="text-sm font-semibold text-[color:var(--brand-charcoal)]">{normalizedConfig.instructionLabel}</span>
             <textarea
               rows={6}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
               placeholder={normalizedConfig.instructionPlaceholder}
               readOnly={shouldLockInstruction}
-              className={`min-h-[160px] rounded-2xl border border-white/30 px-4 py-3 text-base text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40 ${
+              className={`min-h-[160px] rounded-2xl border border-gray-300 px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20 ${
                 shouldLockInstruction
-                  ? "bg-[color:var(--brand-charcoal)]/35 text-white/80"
-                  : "bg-[color:var(--brand-charcoal)]/25"
+                  ? "bg-gray-100 text-[color:var(--brand-charcoal)]/80"
+                  : "bg-white"
               }`}
             />
           </label>
           {promptSnapshot !== null && (
-            <p className="text-sm text-white/70">
+            <p className="text-sm text-[color:var(--brand-charcoal)]/80">
               Commande synchronisée depuis le module « {promptSourceLabel || "?"} ».
             </p>
           )}
           {promptSnapshot && (shouldExposePromptSettings || shouldExposeDeveloperMessage) && (
-            <div className="rounded-2xl border border-white/25 bg-black/30 p-4 text-sm text-white/80 shadow-inner">
+            <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-[color:var(--brand-charcoal)] shadow-inner">
               <div className="flex flex-col gap-3">
                 {shouldExposePromptSettings && (
                   <dl className="grid gap-3 sm:grid-cols-3">
                     <div>
-                      <dt className="text-xs uppercase tracking-wide text-white/50">Modèle</dt>
-                      <dd className="mt-1 font-medium text-white/90">
+                      <dt className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">Modèle</dt>
+                      <dd className="mt-1 font-medium text-[color:var(--brand-charcoal)]">
                         {planModelOption?.label ?? planModel}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-xs uppercase tracking-wide text-white/50">Verbosité</dt>
-                      <dd className="mt-1 font-medium text-white/90">
+                      <dt className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">Verbosité</dt>
+                      <dd className="mt-1 font-medium text-[color:var(--brand-charcoal)]">
                         {planVerbosityOption?.label ?? planVerbosity}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-xs uppercase tracking-wide text-white/50">Raisonnement</dt>
-                      <dd className="mt-1 font-medium text-white/90">
+                      <dt className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">Raisonnement</dt>
+                      <dd className="mt-1 font-medium text-[color:var(--brand-charcoal)]">
                         {planThinkingOption?.label ?? planThinking}
                       </dd>
                     </div>
@@ -988,10 +989,10 @@ export function ClarityMapStep({
                 )}
                 {shouldExposeDeveloperMessage && (
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-white/50">
+                    <p className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                       Brief développeur transmis au modèle
                     </p>
-                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/40 p-3 text-xs leading-relaxed text-white/90">
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-xs leading-relaxed text-[color:var(--brand-charcoal)]">
                       {trimmedPlanDeveloperMessage || planDeveloperMessage}
                     </pre>
                   </div>
@@ -999,39 +1000,39 @@ export function ClarityMapStep({
               </div>
             </div>
           )}
-          <div className="rounded-2xl border border-white/30 bg-[color:var(--brand-charcoal)]/35 p-4 text-white/80 shadow-inner">
+          <div className="rounded-2xl border border-gray-300 bg-gray-100 p-4 text-[color:var(--brand-charcoal)] shadow-inner">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-sm font-semibold text-white/90">Plan IA</span>
+              <span className="text-sm font-semibold text-[color:var(--brand-charcoal)]">Plan IA</span>
               <button
                 type="button"
                 onClick={handleExecuteClick}
                 disabled={isLoading || !trimmedInstruction}
                 className={`inline-flex items-center justify-center rounded-full px-4 py-1.5 text-xs font-semibold transition ${
                   isLoading || !trimmedInstruction
-                    ? "cursor-not-allowed border border-white/20 bg-white/10 text-white/60"
-                    : "border border-white/40 bg-[color:var(--brand-red)]/90 text-white hover:bg-[color:var(--brand-red)]"
+                    ? "cursor-not-allowed border border-gray-200 bg-gray-100 text-[color:var(--brand-charcoal)]/60"
+                    : "border border-transparent bg-[color:var(--brand-red)] text-white hover:bg-[color:var(--brand-red-dark)]"
                 }`}
               >
                 {isLoading ? "Analyse en cours…" : shouldAutoPublish ? "Relancer l’IA" : "Tester la consigne"}
               </button>
             </div>
             {resolvedMessage && (
-              <p className="mt-3 text-sm text-white/80">{resolvedMessage}</p>
+              <p className="mt-3 text-sm text-[color:var(--brand-charcoal)]">{resolvedMessage}</p>
             )}
             <div className="mt-3">
-              <PlanPreview plan={resolvedPlan} notes={resolvedNotes} tone="dark" />
+              <PlanPreview plan={resolvedPlan} notes={resolvedNotes} tone="light" />
             </div>
           </div>
         </div>
       </div>
 
       <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-white/70">
-          {shouldAutoPublish
-            ? "Le module carte met à jour son payload automatiquement dans le composite."
-            : "Clique sur “Envoyer la requête” pour transmettre la commande à l’IA."}
+        <p className="text-sm text-[color:var(--brand-charcoal)]/80">
+          {allowManualSubmit
+            ? "Clique sur “Envoyer la requête” pour transmettre la commande à l’IA."
+            : "Le module carte met à jour son payload automatiquement dans le composite."}
         </p>
-        {!shouldAutoPublish && (
+        {allowManualSubmit && (
           <button
             type="submit"
             className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)]"

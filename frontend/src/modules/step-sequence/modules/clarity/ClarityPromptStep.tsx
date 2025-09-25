@@ -192,6 +192,7 @@ export function ClarityPromptStep({
   const sequenceContext = useContext(StepSequenceContext);
   const activeStepId = sequenceContext?.steps?.[sequenceContext.stepIndex]?.id;
   const shouldAutoPublish = Boolean(sequenceContext) && activeStepId !== definition.id;
+  const allowManualSubmit = isEditMode || !shouldAutoPublish;
 
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const sanitizedPayload = useMemo(
@@ -310,13 +311,13 @@ export function ClarityPromptStep({
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (shouldAutoPublish) {
+      if (!allowManualSubmit) {
         return;
       }
 
       onAdvance(buildPayload());
     },
-    [buildPayload, onAdvance, shouldAutoPublish]
+    [allowManualSubmit, buildPayload, onAdvance]
   );
 
   const activeModelOption = useMemo(
@@ -361,35 +362,35 @@ export function ClarityPromptStep({
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
       {isEditMode && (
-        <fieldset className="rounded-2xl border border-dashed border-white/30 bg-[color:var(--brand-charcoal)]/20 p-4 text-sm text-white/80">
-          <legend className="px-2 text-xs font-semibold uppercase tracking-wide text-white/70">
+        <fieldset className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-[color:var(--brand-charcoal)]">
+          <legend className="px-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
             Configuration
           </legend>
           <div className="mt-2 grid gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Libellé
               </span>
               <input
                 type="text"
                 value={normalizedConfig.promptLabel}
                 onChange={(event) => handleConfigChange({ promptLabel: event.target.value })}
-                className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Placeholder
               </span>
               <input
                 type="text"
                 value={normalizedConfig.promptPlaceholder}
                 onChange={(event) => handleConfigChange({ promptPlaceholder: event.target.value })}
-                className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Modèle par défaut
               </span>
               <select
@@ -397,7 +398,7 @@ export function ClarityPromptStep({
                 onChange={(event) =>
                   handleConfigChange({ defaultModel: event.target.value as ModelChoice })
                 }
-                className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
               >
                 {MODEL_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value} className="text-[color:var(--brand-charcoal)]">
@@ -407,7 +408,7 @@ export function ClarityPromptStep({
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Verbosité par défaut
               </span>
               <select
@@ -417,7 +418,7 @@ export function ClarityPromptStep({
                     defaultVerbosity: event.target.value as VerbosityChoice,
                   })
                 }
-                className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
               >
                 {VERBOSITY_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value} className="text-[color:var(--brand-charcoal)]">
@@ -427,7 +428,7 @@ export function ClarityPromptStep({
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Raisonnement par défaut
               </span>
               <select
@@ -435,7 +436,7 @@ export function ClarityPromptStep({
                 onChange={(event) =>
                   handleConfigChange({ defaultThinking: event.target.value as ThinkingChoice })
                 }
-                className="rounded-lg border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
               >
                 {THINKING_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value} className="text-[color:var(--brand-charcoal)]">
@@ -445,7 +446,7 @@ export function ClarityPromptStep({
               </select>
             </label>
             <label className="flex flex-col gap-1 md:col-span-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Message développeur par défaut
               </span>
               <textarea
@@ -454,7 +455,7 @@ export function ClarityPromptStep({
                 onChange={(event) =>
                   handleConfigChange({ defaultDeveloperMessage: event.target.value })
                 }
-                className="min-h-[120px] rounded-xl border border-white/40 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                className="min-h-[120px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
               />
             </label>
             <label className="flex items-center gap-2">
@@ -462,9 +463,9 @@ export function ClarityPromptStep({
                 type="checkbox"
                 checked={normalizedConfig.exposeSettings}
                 onChange={(event) => handleConfigChange({ exposeSettings: event.target.checked })}
-                className="h-4 w-4 rounded border-white/50 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                className="h-4 w-4 rounded border-gray-400 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
               />
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Afficher la configuration IA
               </span>
             </label>
@@ -475,21 +476,21 @@ export function ClarityPromptStep({
                 onChange={(event) =>
                   handleConfigChange({ exposeDeveloperMessage: event.target.checked })
                 }
-                className="h-4 w-4 rounded border-white/50 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                className="h-4 w-4 rounded border-gray-400 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
               />
-              <span className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Montrer le message développeur
               </span>
             </label>
           </div>
-          <div className="mt-4 rounded-xl border border-white/30 bg-black/30 p-4 text-xs">
-            <div className="flex items-center justify-between gap-3 text-white/70">
+          <div className="mt-4 rounded-xl border border-gray-300 bg-gray-50 p-4 text-xs">
+            <div className="flex items-center justify-between gap-3 text-[color:var(--brand-charcoal)]/80">
               <span className="font-semibold uppercase tracking-wide">Payload partagé</span>
-              <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--brand-charcoal)]/60">
                 Lecture seule
               </span>
             </div>
-            <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/40 p-3 text-[11px] leading-relaxed text-white/80">
+            <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 text-[11px] leading-relaxed text-[color:var(--brand-charcoal)]">
               {structuredPreview}
             </pre>
           </div>
@@ -497,26 +498,26 @@ export function ClarityPromptStep({
       )}
 
       <label className="flex flex-col gap-2">
-        <span className="text-sm font-semibold text-white/90">{normalizedConfig.promptLabel}</span>
+        <span className="text-sm font-semibold text-[color:var(--brand-charcoal)]">{normalizedConfig.promptLabel}</span>
         <textarea
           required
           rows={4}
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}
           placeholder={normalizedConfig.promptPlaceholder}
-          className="min-h-[120px] rounded-2xl border border-white/30 bg-[color:var(--brand-charcoal)]/40 px-4 py-3 text-base text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+          className="min-h-[120px] rounded-2xl border border-gray-300 bg-white px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
         />
       </label>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-white/70">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
             Modèle
           </span>
           <select
             value={model}
             onChange={(event) => setModel(event.target.value as ModelChoice)}
-            className="rounded-xl border border-white/30 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+            className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
           >
             {MODEL_OPTIONS.map((option) => (
               <option key={option.value} value={option.value} className="text-[color:var(--brand-charcoal)]">
@@ -526,13 +527,13 @@ export function ClarityPromptStep({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-white/70">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
             Verbosité
           </span>
           <select
             value={verbosity}
             onChange={(event) => setVerbosity(event.target.value as VerbosityChoice)}
-            className="rounded-xl border border-white/30 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+            className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
           >
             {VERBOSITY_OPTIONS.map((option) => (
               <option key={option.value} value={option.value} className="text-[color:var(--brand-charcoal)]">
@@ -542,13 +543,13 @@ export function ClarityPromptStep({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-white/70">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
             Raisonnement
           </span>
           <select
             value={thinking}
             onChange={(event) => setThinking(event.target.value as ThinkingChoice)}
-            className="rounded-xl border border-white/30 bg-[color:var(--brand-charcoal)]/40 px-3 py-2 text-sm text-white focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+            className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
           >
             {THINKING_OPTIONS.map((option) => (
               <option key={option.value} value={option.value} className="text-[color:var(--brand-charcoal)]">
@@ -560,37 +561,37 @@ export function ClarityPromptStep({
       </div>
 
       <label className="flex flex-col gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-white/70">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
           Message développeur transmis au modèle
         </span>
         <textarea
           rows={4}
           value={developerMessage}
           onChange={(event) => setDeveloperMessage(event.target.value)}
-          className="min-h-[120px] rounded-2xl border border-white/30 bg-[color:var(--brand-charcoal)]/40 px-4 py-3 text-sm text-white shadow-sm placeholder:text-white/60 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+          className="min-h-[120px] rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-gray-500 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20"
         />
       </label>
 
       {(exposeSettings || exposeDeveloperMessage) && (
-        <div className="rounded-2xl border border-white/25 bg-black/30 p-4 text-sm text-white/80 shadow-inner">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-[color:var(--brand-charcoal)] shadow-inner">
           <div className="flex flex-col gap-3">
             {exposeSettings && (
               <dl className="grid gap-3 sm:grid-cols-3">
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-white/50">Modèle</dt>
-                  <dd className="mt-1 font-medium text-white/90">
+                  <dt className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">Modèle</dt>
+                  <dd className="mt-1 font-medium text-[color:var(--brand-charcoal)]">
                     {activeModelOption?.label ?? model}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-white/50">Verbosité</dt>
-                  <dd className="mt-1 font-medium text-white/90">
+                  <dt className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">Verbosité</dt>
+                  <dd className="mt-1 font-medium text-[color:var(--brand-charcoal)]">
                     {activeVerbosityOption?.label ?? verbosity}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-white/50">Raisonnement</dt>
-                  <dd className="mt-1 font-medium text-white/90">
+                  <dt className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">Raisonnement</dt>
+                  <dd className="mt-1 font-medium text-[color:var(--brand-charcoal)]">
                     {activeThinkingOption?.label ?? thinking}
                   </dd>
                 </div>
@@ -598,10 +599,10 @@ export function ClarityPromptStep({
             )}
             {exposeDeveloperMessage && (
               <div>
-                <p className="text-xs uppercase tracking-wide text-white/50">
+                <p className="text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                   Brief développeur visible pour l’apprenant·e
                 </p>
-                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/40 p-3 text-xs leading-relaxed text-white/90">
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-3 text-xs leading-relaxed text-[color:var(--brand-charcoal)]">
                   {developerMessage.trim() || normalizedConfig.developerMessage}
                 </pre>
               </div>
@@ -611,12 +612,12 @@ export function ClarityPromptStep({
       )}
 
       <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-white/70">
-          {shouldAutoPublish
-            ? "Les modifications sont partagées automatiquement dans le module composite."
-            : "Clique sur “Envoyer la requête” pour transmettre la consigne au module suivant."}
+        <p className="text-sm text-[color:var(--brand-charcoal)]/80">
+          {allowManualSubmit
+            ? "Clique sur “Envoyer la requête” pour transmettre la consigne au module suivant."
+            : "Les modifications sont partagées automatiquement dans le module composite."}
         </p>
-        {!shouldAutoPublish && (
+        {allowManualSubmit && (
           <button
             type="submit"
             className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-[color:var(--brand-red)]/30 transition hover:bg-[color:var(--brand-red-dark)]"
