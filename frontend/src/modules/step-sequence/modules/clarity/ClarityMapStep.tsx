@@ -45,6 +45,10 @@ export interface ClarityMapStepPayload {
   trail?: GridCoord[];
   status?: RunStatus;
   message?: string;
+  model?: string;
+  verbosity?: "low" | "medium" | "high";
+  thinking?: "minimal" | "medium" | "high";
+  developerPrompt?: string;
 }
 
 export interface ClarityMapStepConfig {
@@ -307,11 +311,22 @@ function sanitizePayload(payload: unknown): ClarityMapStepPayload | null {
 interface PromptModulePayload {
   instruction: string | null;
   triggerId: string | null;
+  model: string | null;
+  verbosity: "low" | "medium" | "high" | null;
+  thinking: "minimal" | "medium" | "high" | null;
+  developerPrompt: string | null;
 }
 
 function sanitizePromptPayload(value: unknown): PromptModulePayload {
   if (!value || typeof value !== "object") {
-    return { instruction: null, triggerId: null };
+    return {
+      instruction: null,
+      triggerId: null,
+      model: null,
+      verbosity: null,
+      thinking: null,
+      developerPrompt: null,
+    };
   }
 
   const source = value as Partial<ClarityPromptStepPayload>;
@@ -319,8 +334,18 @@ function sanitizePromptPayload(value: unknown): PromptModulePayload {
   const triggerId = typeof source.triggerId === "string" && source.triggerId.trim()
     ? source.triggerId.trim()
     : null;
+  const model = typeof source.model === "string" && source.model.trim() ? source.model.trim() : null;
+  const verbosity =
+    source.verbosity === "low" || source.verbosity === "medium" || source.verbosity === "high"
+      ? source.verbosity
+      : null;
+  const thinking =
+    source.thinking === "minimal" || source.thinking === "medium" || source.thinking === "high"
+      ? source.thinking
+      : null;
+  const developerPrompt = typeof source.developerPrompt === "string" ? source.developerPrompt : null;
 
-  return { instruction, triggerId };
+  return { instruction, triggerId, model, verbosity, thinking, developerPrompt };
 }
 
 export function ClarityMapStep({

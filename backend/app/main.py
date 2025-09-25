@@ -452,19 +452,18 @@ def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, s
 
     messages: list[dict[str, str]] = [
         {"role": "system", "content": PLAN_SYSTEM_PROMPT},
-        {"role": "user", "content": user_payload},
     ]
 
     if attempt > 0:
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Rappel: ta réponse doit être strictement le JSON demandé, "
-                    "sans texte supplémentaire."
-                ),
-            }
+        reminder = (
+            "Rappel: ta réponse doit être strictement le JSON demandé, "
+            "sans texte supplémentaire."
         )
+        combined_user_payload = f"{user_payload}\n\n{reminder}"
+    else:
+        combined_user_payload = user_payload
+
+    messages.append({"role": "user", "content": combined_user_payload})
 
     return messages
 
