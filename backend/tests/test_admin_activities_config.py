@@ -3,7 +3,11 @@ import json
 from fastapi.testclient import TestClient
 
 from backend.app.admin_store import LocalUser
-from backend.app.main import _require_admin_user, app
+from backend.app.main import (
+    STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION,
+    _require_admin_user,
+    app,
+)
 
 
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
@@ -126,3 +130,77 @@ def test_admin_can_remove_all_activities(tmp_path, monkeypatch) -> None:
     assert config_path.exists(), "Une configuration vide doit être persistée"
     persisted = json.loads(config_path.read_text(encoding="utf-8"))
     assert persisted["activities"] == []
+
+
+def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    captured_request: dict[str, object] = {}
+
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.output = [
+                {
+                    "type": "function_call",
+                    "name": "build_step_sequence_activity",
+                    "call_id": "call_1",
+                    "arguments": {
+                        "activityId": "atelier-intro",
+                        "steps": [
+                            {
+                                "id": "step-1",
+                                "component": "rich-content",
+                                "config": {"title": "Bienvenue"},
+                                "composite": None,
+                            }
+                        ],
+                        "metadata": {
+                            "componentKey": "step-sequence",
+                            "path": None,
+                            "completionId": None,
+                            "enabled": True,
+                            "header": None,
+                            "layout": None,
+                            "card": None,
+                            "overrides": None,
+                        },
+                    },
+                },
+                {
+                    "type": "reasoning",
+                    "summary": [{"text": "Synthèse"}],
+                },
+            ]
+
+    class FakeResponsesClient:
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_request.update(kwargs)
+            return DummyResponse()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Introduction"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            data = response.json()
+            assert data["toolCall"]["definition"] == STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
+            assert captured_request["tools"] == [STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION]
+            assert captured_request["tool_choice"] == {
+                "type": "function",
+                "name": "build_step_sequence_activity",
+            }
+    finally:
+        app.dependency_overrides.clear()
