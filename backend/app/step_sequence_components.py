@@ -876,7 +876,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "parameters": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["activityId"],
+            "required": ["activityId", "steps", "metadata"],
             "properties": {
                 "activityId": {
                     "type": "string",
@@ -884,6 +884,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
                 "steps": {
                     "type": "array",
+                    "minItems": 0,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
