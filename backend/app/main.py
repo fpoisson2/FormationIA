@@ -194,37 +194,30 @@ COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
 }
 
 
-COMPONENT_STEP_JSON_SCHEMA: dict[str, Any] = {
+COMPOSITE_STEP_CONFIG_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["id", "component", "config"],
+    "required": ["modules", "autoAdvance", "continueLabel"],
     "properties": {
-        "id": {"type": "string"},
-        "component": {"type": "string"},
-        "config": _nullable_config_schema(),
+        "modules": {
+            "type": "array",
+            "items": COMPOSITE_MODULE_JSON_SCHEMA,
+        },
+        "autoAdvance": {"type": ["boolean", "null"]},
+        "continueLabel": {"type": ["string", "null"]},
     },
 }
 
 
-COMPOSITE_STEP_JSON_SCHEMA: dict[str, Any] = {
+STEP_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["id", "composite"],
+    "required": ["id"],
     "properties": {
         "id": {"type": "string"},
-        "composite": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["modules", "autoAdvance", "continueLabel"],
-            "properties": {
-                "modules": {
-                    "type": "array",
-                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
-                },
-                "autoAdvance": {"type": ["boolean", "null"]},
-                "continueLabel": {"type": ["string", "null"]},
-            },
-        },
+        "component": {"type": "string"},
+        "config": _nullable_config_schema(),
+        "composite": COMPOSITE_STEP_CONFIG_JSON_SCHEMA,
     },
 }
 
@@ -243,7 +236,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
             "steps": {
                 "type": "array",
                 "minItems": 1,
-                "items": {"oneOf": [COMPONENT_STEP_JSON_SCHEMA, COMPOSITE_STEP_JSON_SCHEMA]},
+                "items": STEP_JSON_SCHEMA,
             },
             "metadata": {
                 "type": "object",
@@ -378,12 +371,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                             "completionId": {"type": "string"},
                             "stepSequence": {
                                 "type": "array",
-                                "items": {
-                                    "oneOf": [
-                                        COMPONENT_STEP_JSON_SCHEMA,
-                                        COMPOSITE_STEP_JSON_SCHEMA,
-                                    ],
-                                },
+                                "items": STEP_JSON_SCHEMA,
                             },
                         },
                     },

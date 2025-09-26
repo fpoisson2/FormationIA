@@ -681,36 +681,29 @@ const compositeModuleSchema: JsonSchema = {
   },
 };
 
-const componentStepSchema: JsonSchema = {
+const compositeStepConfigSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "component", "config"],
+  required: ["modules", "autoAdvance", "continueLabel"],
+  properties: {
+    modules: {
+      type: "array",
+      items: compositeModuleSchema,
+    },
+    autoAdvance: { type: ["boolean", "null"] },
+    continueLabel: { type: ["string", "null"] },
+  },
+};
+
+const stepSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id"],
   properties: {
     id: { type: "string" },
     component: { type: "string" },
     config: nullableConfigSchema(),
-  },
-};
-
-const compositeStepSchema: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "composite"],
-  properties: {
-    id: { type: "string" },
-    composite: {
-      type: "object",
-      additionalProperties: false,
-      required: ["modules", "autoAdvance", "continueLabel"],
-      properties: {
-        modules: {
-          type: "array",
-          items: compositeModuleSchema,
-        },
-        autoAdvance: { type: ["boolean", "null"] },
-        continueLabel: { type: ["string", "null"] },
-      },
-    },
+    composite: compositeStepConfigSchema,
   },
 };
 
@@ -862,7 +855,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
         steps: {
           type: "array",
           minItems: 1,
-          items: { oneOf: [componentStepSchema, compositeStepSchema] },
+          items: stepSchema,
         },
         metadata: {
           type: "object",
@@ -887,7 +880,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
                 completionId: { type: "string" },
                 stepSequence: {
                   type: "array",
-                  items: { oneOf: [componentStepSchema, compositeStepSchema] },
+                  items: stepSchema,
                 },
               },
             },
