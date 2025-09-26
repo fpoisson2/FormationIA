@@ -908,7 +908,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["activityId", "steps"],
+      required: ["activityId", "steps", "metadata"],
       properties: {
         activityId: { type: "string" },
         steps: {

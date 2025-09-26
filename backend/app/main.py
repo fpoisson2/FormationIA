@@ -341,7 +341,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
     "parameters": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["activityId", "steps"],
+        "required": ["activityId", "steps", "metadata"],
         "properties": {
             "activityId": {"type": "string"},
             "steps": {
