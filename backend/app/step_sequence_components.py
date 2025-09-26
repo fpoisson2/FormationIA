@@ -66,12 +66,16 @@ def _strict_object_schema(
     """Return a strict schema requiring every declared property."""
 
     property_keys = tuple(properties.keys())
-    required_fields = tuple(required) if required is not None else property_keys
-    if set(required_fields) != set(property_keys):
-        raise ValueError(
-            "Strict schema must require the same keys as properties: "
-            f"expected {property_keys}, got {required_fields}"
-        )
+    if required is None:
+        required_fields = property_keys
+    else:
+        required_fields = tuple(required)
+        unknown = set(required_fields) - set(property_keys)
+        if unknown:
+            raise ValueError(
+                "Strict schema cannot require unknown keys: "
+                f"{sorted(unknown)} not in {property_keys}"
+            )
 
     return {
         "type": "object",
@@ -272,13 +276,72 @@ def add_rich_content_step(
     return _append_step(step_sequence, create_rich_content_step(**kwargs))
 
 
+GUIDED_FIELD_TYPES: tuple[str, ...] = (
+    "bulleted_list",
+    "table_menu_day",
+    "table_menu_full",
+    "textarea_with_counter",
+    "two_bullets",
+    "reference_line",
+    "single_choice",
+    "multiple_choice",
+)
+
+
+FIELD_OPTION_SCHEMA: dict[str, Any] = _strict_object_schema(
+    {
+        "value": {"type": "string"},
+        "label": {"type": "string"},
+        "description": _nullable_schema({"type": "string"}),
+    },
+    required=("value", "label"),
+)
+
+
+GUIDED_FIELD_SCHEMA: dict[str, Any] = _strict_object_schema(
+    {
+        "id": {"type": "string"},
+        "label": {"type": "string"},
+        "type": {"type": "string", "enum": list(GUIDED_FIELD_TYPES)},
+        "minBullets": _nullable_schema({"type": "number"}),
+        "maxBullets": _nullable_schema({"type": "number"}),
+        "maxWordsPerBullet": _nullable_schema({"type": "number"}),
+        "mustContainAny": _nullable_schema({
+            "type": "array",
+            "items": {"type": "string"},
+        }),
+        "meals": _nullable_schema({
+            "type": "array",
+            "items": {"type": "string"},
+        }),
+        "minWords": _nullable_schema({"type": "number"}),
+        "maxWords": _nullable_schema({"type": "number"}),
+        "forbidWords": _nullable_schema({
+            "type": "array",
+            "items": {"type": "string"},
+        }),
+        "tone": _nullable_schema({"type": "string"}),
+        "options": _nullable_schema({
+            "type": "array",
+            "items": FIELD_OPTION_SCHEMA,
+        }),
+        "minSelections": _nullable_schema({"type": "number"}),
+        "maxSelections": _nullable_schema({"type": "number"}),
+    },
+    required=("id", "label", "type"),
+)
+
+
 def create_form_step(
     *,
-    step_id: str,
+    step_id: str | None = None,
     fields: Sequence[Mapping[str, Any]],
     submit_label: str | None = None,
     allow_empty: bool | None = None,
     initial_values: Mapping[str, Any] | None = None,
+    id: str | None = None,
+    id_hint: str | None = None,
+    existing_step_ids: Sequence[str] | None = None,
 ) -> StepDefinition:
     """Crée une étape « form » interactive basée sur des GuidedFields.
 
@@ -304,7 +367,16 @@ def create_form_step(
         Définition d'étape prête à être ajoutée à la séquence.
     """
 
-    normalized_fields = [deepcopy(field) for field in fields if isinstance(field, Mapping)]
+    resolved_step_id = step_id or id
+    if not resolved_step_id:
+        raise ValueError("Un identifiant d'étape est requis pour create_form_step.")
+
+    normalized_fields = [
+        deepcopy(field) for field in fields if isinstance(field, Mapping)
+    ]
+
+    if not normalized_fields:
+        raise ValueError("Au moins un champ est requis pour configurer create_form_step.")
 
     config = {
         "fields": normalized_fields,
@@ -313,7 +385,7 @@ def create_form_step(
         "initialValues": deepcopy(initial_values) if isinstance(initial_values, Mapping) else None,
     }
     return {
-        "id": str(step_id),
+        "id": str(resolved_step_id),
         "component": "form",
         "config": config,
         "composite": None,
@@ -963,16 +1035,25 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "strict": True,
         "parameters": _strict_object_schema(
             {
-                "stepId": {"type": "string"},
+                "stepId": _nullable_schema({"type": "string"}),
+                "id": _nullable_schema({"type": "string"}),
+                "idHint": _nullable_schema({"type": "string"}),
+                "existingStepIds": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    }
+                ),
                 "fields": {
                     "type": "array",
                     "minItems": 1,
-                    "items": _any_object_schema(),
+                    "items": GUIDED_FIELD_SCHEMA,
                 },
                 "submitLabel": _nullable_schema({"type": "string"}),
                 "allowEmpty": _nullable_schema({"type": "boolean"}),
                 "initialValues": _nullable_schema(_any_object_schema()),
-            }
+            },
+            required=("fields",),
         ),
     },
     {

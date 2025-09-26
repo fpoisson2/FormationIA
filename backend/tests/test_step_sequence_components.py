@@ -60,6 +60,16 @@ def test_create_form_step_includes_all_fields() -> None:
     assert set(config) == {"fields", "submitLabel", "allowEmpty", "initialValues"}
 
 
+def test_create_form_step_accepts_id_alias() -> None:
+    step = create_form_step(
+        id="alias",
+        fields=[{"id": "field", "label": "Label", "type": "single_choice"}],
+    )
+
+    assert step["id"] == "alias"
+    assert step["config"]["fields"][0]["type"] == "single_choice"
+
+
 def test_create_video_step_preserves_sources_and_captions() -> None:
     step = create_video_step(
         step_id="video",
