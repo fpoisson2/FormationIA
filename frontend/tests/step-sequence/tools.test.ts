@@ -104,24 +104,16 @@ describe("STEP_SEQUENCE_TOOLS", () => {
     });
   });
 
-  it("crée les étapes de l'atelier", () => {
-    const contextStep = STEP_SEQUENCE_TOOLS.create_workshop_context_step.handler({
-      defaultText: "Texte exemple",
-    });
-    const comparisonStep =
-      STEP_SEQUENCE_TOOLS.create_workshop_comparison_step.handler({
-        contextStepId: contextStep.id,
-      });
-    const synthesisStep =
-      STEP_SEQUENCE_TOOLS.create_workshop_synthesis_step.handler({
-        contextStepId: contextStep.id,
-        comparisonStepId: comparisonStep.id,
-      });
-
-    [contextStep, comparisonStep, synthesisStep].forEach((step) => {
-      expectStepDefinition(step);
-      expect(typeof step.component).toBe("string");
-    });
+  it("n'expose pas les outils d'atelier", () => {
+    expect(STEP_SEQUENCE_TOOLS).not.toHaveProperty(
+      "create_workshop_context_step",
+    );
+    expect(STEP_SEQUENCE_TOOLS).not.toHaveProperty(
+      "create_workshop_comparison_step",
+    );
+    expect(STEP_SEQUENCE_TOOLS).not.toHaveProperty(
+      "create_workshop_synthesis_step",
+    );
   });
 
   it("crée une étape composite", () => {

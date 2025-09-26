@@ -5,7 +5,6 @@ import type {
   ActivityHeaderConfig,
   ActivityLayoutOptions,
 } from "../../config/activities";
-import type { ModelConfig } from "../../config";
 import type {
   CompositeStepConfig,
   CompositeStepModuleDefinition,
@@ -18,11 +17,6 @@ import type {
 } from "./modules";
 import type { FormStepConfig } from "./modules";
 import type { VideoCaption, VideoSource, VideoStepConfig } from "./modules";
-import type {
-  WorkshopComparisonStepConfig,
-  WorkshopContextStepConfig,
-  WorkshopSynthesisStepConfig,
-} from "./modules";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -511,162 +505,6 @@ const createVideoStep: StepSequenceFunctionTool<CreateVideoStepInput> = {
   },
 };
 
-interface CreateWorkshopContextStepInput extends ToolBaseInput {
-  defaultText?: string;
-}
-
-const createWorkshopContextStep: StepSequenceFunctionTool<
-  CreateWorkshopContextStepInput
-> = {
-  definition: {
-    type: "function",
-    name: "create_workshop_context_step",
-    description:
-      "Prépare l'étape d'ouverture de l'atelier comparatif (collecte du texte source).",
-    strict: true,
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: [],
-      properties: {
-        id: { type: "string" },
-        idHint: { type: "string" },
-        existingStepIds: {
-          type: "array",
-          items: { type: "string" },
-        },
-        defaultText: {
-          type: "string",
-          description: "Texte prérempli suggéré aux utilisateurs.",
-        },
-      },
-    },
-  },
-  handler: (input) => {
-    const id = resolveId(input, "workshop-context");
-    const config: WorkshopContextStepConfig = {
-      defaultText: input.defaultText,
-    };
-
-    return {
-      id,
-      component: "workshop-context",
-      config,
-      composite: null,
-    } satisfies StepDefinition;
-  },
-};
-
-interface CreateWorkshopComparisonStepInput extends ToolBaseInput {
-  contextStepId: string;
-  defaultConfigA?: ModelConfig;
-  defaultConfigB?: ModelConfig;
-}
-
-const modelConfigSchema: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["model", "verbosity", "thinking"],
-  properties: {
-    model: { type: "string" },
-    verbosity: { type: "string" },
-    thinking: { type: "string" },
-  },
-};
-
-const createWorkshopComparisonStep: StepSequenceFunctionTool<
-  CreateWorkshopComparisonStepInput
-> = {
-  definition: {
-    type: "function",
-    name: "create_workshop_comparison_step",
-    description:
-      "Génère l'étape de comparaison de modèles de l'atelier (paramétrage des variantes).",
-    strict: true,
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["contextStepId"],
-      properties: {
-        id: { type: "string" },
-        idHint: { type: "string" },
-        existingStepIds: {
-          type: "array",
-          items: { type: "string" },
-        },
-        contextStepId: {
-          type: "string",
-          description: "Identifiant de l'étape de contexte qui fournit le texte source.",
-        },
-        defaultConfigA: modelConfigSchema,
-        defaultConfigB: modelConfigSchema,
-      },
-    },
-  },
-  handler: (input) => {
-    const id = resolveId(input, "workshop-comparison");
-    const config: WorkshopComparisonStepConfig = {
-      contextStepId: input.contextStepId,
-      defaultConfigA: input.defaultConfigA,
-      defaultConfigB: input.defaultConfigB,
-    };
-
-    return {
-      id,
-      component: "workshop-comparison",
-      config,
-      composite: null,
-    } satisfies StepDefinition;
-  },
-};
-
-interface CreateWorkshopSynthesisStepInput extends ToolBaseInput {
-  contextStepId: string;
-  comparisonStepId: string;
-}
-
-const createWorkshopSynthesisStep: StepSequenceFunctionTool<
-  CreateWorkshopSynthesisStepInput
-> = {
-  definition: {
-    type: "function",
-    name: "create_workshop_synthesis_step",
-    description:
-      "Assemble l'étape finale de l'atelier en s'appuyant sur les réponses générées.",
-    strict: true,
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      required: ["contextStepId", "comparisonStepId"],
-      properties: {
-        id: { type: "string" },
-        idHint: { type: "string" },
-        existingStepIds: {
-          type: "array",
-          items: { type: "string" },
-        },
-        contextStepId: {
-          type: "string" },
-        comparisonStepId: { type: "string" },
-      },
-    },
-  },
-  handler: (input) => {
-    const id = resolveId(input, "workshop-synthesis");
-    const config: WorkshopSynthesisStepConfig = {
-      contextStepId: input.contextStepId,
-      comparisonStepId: input.comparisonStepId,
-    };
-
-    return {
-      id,
-      component: "workshop-synthesis",
-      config,
-      composite: null,
-    } satisfies StepDefinition;
-  },
-};
-
 interface CompositeModuleInput
   extends Partial<Omit<CompositeStepModuleDefinition, "id" | "component">> {
   id?: string;
@@ -974,9 +812,6 @@ export const STEP_SEQUENCE_TOOLS = {
   create_rich_content_step: createRichContentStep,
   create_form_step: createFormStep,
   create_video_step: createVideoStep,
-  create_workshop_context_step: createWorkshopContextStep,
-  create_workshop_comparison_step: createWorkshopComparisonStep,
-  create_workshop_synthesis_step: createWorkshopSynthesisStep,
   create_composite_step: createCompositeStep,
   build_step_sequence_activity: buildStepSequenceActivity,
 } as const;
