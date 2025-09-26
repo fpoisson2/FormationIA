@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Generator, Literal, Sequence
+from typing import Any, Generator, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -47,6 +47,7 @@ from .step_sequence_components import (
     STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION,
     STEP_SEQUENCE_TOOLKIT,
     STEP_SEQUENCE_TOOL_DEFINITIONS,
+    StepDefinition,
     normalize_tool_arguments,
 )
 
@@ -1042,6 +1043,49 @@ def _coerce_tool_arguments(raw_arguments: Any) -> tuple[dict[str, Any], str]:
         arguments_text = json.dumps(arguments_obj)
 
     return arguments_obj, arguments_text
+
+
+def _merge_step_definition(
+    provided: Mapping[str, Any] | None, cached: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Combine a raw step payload with the cached definition returned earlier."""
+
+    merged: dict[str, Any] = deepcopy(cached) if cached is not None else {}
+
+    if provided is not None:
+        for key, value in provided.items():
+            if value is None and cached is not None and key in {"config", "composite"}:
+                # The model omitted the nested payload, fall back to the cached one.
+                continue
+            merged[key] = deepcopy(value)
+
+    for key in ("id", "component", "config", "composite"):
+        merged.setdefault(key, None)
+
+    return merged
+
+
+def _enrich_steps_argument(
+    steps_argument: Any, cached_steps: Mapping[str, StepDefinition]
+) -> list[dict[str, Any]]:
+    """Return a list of fully hydrated step definitions for the final tool call."""
+
+    if not isinstance(steps_argument, list):
+        return []
+
+    enriched: list[dict[str, Any]] = []
+    for step in steps_argument:
+        if not isinstance(step, dict):
+            continue
+
+        step_id = step.get("id") or step.get("stepId")
+        cached = None
+        if step_id is not None:
+            cached = cached_steps.get(str(step_id))
+
+        enriched.append(_merge_step_definition(step, cached))
+
+    return enriched
 
 
 class SummaryRequest(BaseModel):
@@ -2427,6 +2471,16 @@ def admin_generate_activity(
         {"role": "user", "content": prompt},
     ]
     reasoning_summary: str | None = None
+    cached_steps: dict[str, StepDefinition] = {}
+
+    def _remember_step(result: Any) -> None:
+        if not isinstance(result, dict):
+            return
+        component = result.get("component")
+        step_id = result.get("id")
+        if component is None or step_id is None:
+            return
+        cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
 
     max_iterations = 12
     for _ in range(max_iterations):
@@ -2471,18 +2525,32 @@ def admin_generate_activity(
 
             arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
 
+            python_arguments = normalize_tool_arguments(arguments_obj)
+            if name == "build_step_sequence_activity":
+                merged_steps = _enrich_steps_argument(
+                    python_arguments.get("steps"), cached_steps
+                )
+                if merged_steps:
+                    python_arguments["steps"] = merged_steps
+                    arguments_obj["steps"] = deepcopy(merged_steps)
+                    try:
+                        arguments_text = json.dumps(arguments_obj)
+                    except TypeError:
+                        arguments_text = None
+
             tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
             if tool_callable is None:
                 raise HTTPException(
                     status_code=500,
                     detail=f"L'outil {name} n'est pas pris en charge par le backend.",
                 )
-
-            python_arguments = normalize_tool_arguments(arguments_obj)
             try:
                 result = tool_callable(**python_arguments)
             except Exception as exc:  # pragma: no cover - defensive
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            if name.startswith("create_") and name != "create_step_sequence_activity":
+                _remember_step(result)
 
             try:
                 serialized_output = json.dumps(result)

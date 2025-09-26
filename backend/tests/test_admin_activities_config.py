@@ -242,3 +242,125 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
                 assert request["tools"] == STEP_SEQUENCE_TOOL_DEFINITIONS
     finally:
         app.dependency_overrides.clear()
+
+
+def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    class DummyResponse:
+        def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+            self.output = output
+
+    class FakeResponsesClient:
+        def __init__(self) -> None:
+            self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "create_step_sequence_activity",
+                            "call_id": "call_1",
+                            "arguments": {"activityId": "atelier-intro"},
+                        }
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "create_rich_content_step",
+                            "call_id": "call_2",
+                            "arguments": {
+                                "stepId": "intro",
+                                "title": "Introduction",
+                                "body": "Bienvenue",
+                                "media": [
+                                    {
+                                        "url": "https://cdn.example.com/visuel.png",
+                                        "alt": "Illustration",
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "build_step_sequence_activity",
+                            "call_id": "call_3",
+                            "arguments": {
+                                "activityId": "atelier-intro",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "component": "rich-content",
+                                        "config": None,
+                                        "composite": None,
+                                    }
+                                ],
+                                "metadata": {
+                                    "componentKey": "step-sequence",
+                                    "path": "/atelier",
+                                    "completionId": None,
+                                    "enabled": True,
+                                    "header": None,
+                                    "layout": None,
+                                    "card": None,
+                                    "overrides": None,
+                                },
+                            },
+                        }
+                    ]
+                ),
+            ]
+            self._index = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            response = self._responses[self._index]
+            self._index += 1
+            return response
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Introduction"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            data = response.json()
+            steps = data["toolCall"]["arguments"]["steps"]
+            assert steps == [
+                {
+                    "id": "intro",
+                    "component": "rich-content",
+                    "config": {
+                        "title": "Introduction",
+                        "body": "Bienvenue",
+                        "media": [
+                            {
+                                "id": "intro-media-1",
+                                "url": "https://cdn.example.com/visuel.png",
+                                "alt": "Illustration",
+                                "caption": None,
+                            }
+                        ],
+                        "sidebar": None,
+                    },
+                    "composite": None,
+                }
+            ]
+    finally:
+        app.dependency_overrides.clear()
