@@ -1,4 +1,5 @@
 import { API_BASE_URL, API_AUTH_KEY } from "./config";
+import type { ModelChoice, VerbosityChoice, ThinkingChoice } from "./config";
 
 export type FieldType =
   | "bulleted_list"
@@ -374,6 +375,34 @@ export interface SaveActivityConfigResponse {
   message: string;
 }
 
+export interface ActivityGenerationDetailsPayload {
+  theme: string;
+  audience: string;
+  objectives: string;
+  deliverable: string;
+  constraints?: string;
+}
+
+export interface GenerateActivityPayload {
+  model: ModelChoice;
+  verbosity: VerbosityChoice;
+  thinking: ThinkingChoice;
+  details: ActivityGenerationDetailsPayload;
+  existingActivityIds?: string[];
+}
+
+export interface ActivityGenerationToolCall {
+  name: string;
+  callId?: string | null;
+  arguments: Record<string, unknown>;
+  argumentsText?: string | null;
+}
+
+export interface ActivityGenerationResponse {
+  toolCall: ActivityGenerationToolCall;
+  reasoningSummary?: string | null;
+}
+
 export const activities = {
   getConfig: async (): Promise<ActivityConfigResponse> =>
     fetchJson<ActivityConfigResponse>(`${API_BASE_URL}/activities-config`),
@@ -392,6 +421,23 @@ export const admin = {
     ): Promise<SaveActivityConfigResponse> =>
       fetchJson<SaveActivityConfigResponse>(
         `${API_BASE_URL}/admin/activities`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+          token
+        )
+      ),
+    generate: async (
+      payload: GenerateActivityPayload,
+      token?: string | null
+    ): Promise<ActivityGenerationResponse> =>
+      fetchJson<ActivityGenerationResponse>(
+        `${API_BASE_URL}/admin/activities/generate`,
         withAdminCredentials(
           {
             method: "POST",
