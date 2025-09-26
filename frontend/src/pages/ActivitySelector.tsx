@@ -19,6 +19,7 @@ import {
   type ActivityGenerationResponse,
   type ActivityGenerationDetailsPayload,
   type ActivityGenerationProgressEvent,
+  type ActivityGenerationToolCallEvent,
   type GenerateActivityPayload,
 } from "../api";
 import {
@@ -1334,6 +1335,15 @@ function ActivitySelector(): JSX.Element {
           .join(" ");
       };
 
+      const formatToolCallName = (value: string | null | undefined) => {
+        if (!value) {
+          return null;
+        }
+        const normalized = value.replace(/^(create|build)_/i, "");
+        const formatted = formatComponentLabel(normalized);
+        return formatted ?? value;
+      };
+
       const response: ActivityGenerationResponse = await admin.activities.generate(
         payload,
         token,
@@ -1349,6 +1359,33 @@ function ActivitySelector(): JSX.Element {
           },
           onReasoningSummary: (summary) => {
             setLiveReasoningSummary(summary.trim());
+          },
+          onToolCall: (event: ActivityGenerationToolCallEvent) => {
+            const readable = formatToolCallName(event.name);
+            if (!readable) {
+              return;
+            }
+            let target: string | null = null;
+            if (event.arguments && typeof event.arguments === "object") {
+              const args = event.arguments as Record<string, unknown>;
+              const candidateKeys = [
+                "stepId",
+                "step_id",
+                "activityId",
+                "activity_id",
+              ];
+              for (const key of candidateKeys) {
+                const rawValue = args[key];
+                if (typeof rawValue === "string" && rawValue.trim().length > 0) {
+                  target = rawValue.trim();
+                  break;
+                }
+              }
+            }
+            const message = target
+              ? `Appel de l'outil ${readable} (${target})`
+              : `Appel de l'outil ${readable}`;
+            setGenerationStatusMessage(message);
           },
         }
       );

@@ -405,6 +405,13 @@ export interface ActivityGenerationResponse {
   reasoningSummary?: string | null;
 }
 
+export interface ActivityGenerationToolCallEvent {
+  name: string;
+  callId?: string | null;
+  arguments?: unknown;
+  argumentsText?: string | null;
+}
+
 export interface ActivityGenerationProgressEvent {
   id?: string | null;
   component?: string | null;
@@ -417,6 +424,7 @@ export interface ActivityGenerationStreamOptions {
   onStatus?: (message: string) => void;
   onStep?: (event: ActivityGenerationProgressEvent) => void;
   onReasoningSummary?: (summary: string) => void;
+  onToolCall?: (event: ActivityGenerationToolCallEvent) => void;
 }
 
 export const activities = {
@@ -514,6 +522,35 @@ export const admin = {
         options.onStep({ id, component, count, highlight });
       };
 
+      const emitToolCall = (data: unknown) => {
+        if (!options?.onToolCall || typeof data !== "object" || data === null) {
+          return;
+        }
+        const payload = data as Record<string, unknown>;
+        const rawName = payload.name;
+        if (typeof rawName !== "string" || rawName.trim().length === 0) {
+          return;
+        }
+        const name = rawName.trim();
+        const callId =
+          typeof payload.callId === "string" && payload.callId.trim().length > 0
+            ? payload.callId.trim()
+            : null;
+        const argumentsText =
+          typeof payload.argumentsText === "string"
+            ? payload.argumentsText
+            : null;
+        const args = Object.prototype.hasOwnProperty.call(payload, "arguments")
+          ? payload.arguments
+          : undefined;
+        options.onToolCall({
+          name,
+          callId,
+          arguments: args,
+          argumentsText,
+        });
+      };
+
       const dispatchEvent = (eventName: string, data: unknown) => {
         switch (eventName) {
           case "status": {
@@ -550,6 +587,9 @@ export const admin = {
             if (data && typeof data === "object") {
               finalPayload = data as ActivityGenerationResponse;
             }
+            break;
+          case "tool_call":
+            emitToolCall(data);
             break;
           case "error": {
             const message =

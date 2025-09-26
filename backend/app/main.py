@@ -2662,6 +2662,16 @@ def admin_generate_activity(
                         except TypeError:
                             arguments_text = None
 
+                yield _format_sse_event(
+                    "tool_call",
+                    {
+                        "name": name,
+                        "callId": call_id,
+                        "arguments": arguments_obj,
+                        "argumentsText": arguments_text,
+                    },
+                )
+
                 tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
                 if tool_callable is None:
                     yield _format_sse_event(

@@ -269,6 +269,13 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
             )
             assert complete_payload is not None, "L'événement de complétion est attendu"
 
+            tool_call_events = [
+                data for event, data in events if event == "tool_call"
+            ]
+            assert len(tool_call_events) == 3
+            assert tool_call_events[0]["name"] == "create_step_sequence_activity"
+            assert tool_call_events[-1]["name"] == "build_step_sequence_activity"
+
             assert (
                 complete_payload["toolCall"]["definition"]
                 == STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
@@ -385,6 +392,12 @@ def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
                 (data for event, data in events if event == "complete"), None
             )
             assert complete_payload is not None
+
+            tool_call_events = [
+                data for event, data in events if event == "tool_call"
+            ]
+            assert len(tool_call_events) == 3
+            assert tool_call_events[-1]["name"] == "build_step_sequence_activity"
 
             steps = complete_payload["toolCall"]["arguments"]["steps"]
             assert steps == [
