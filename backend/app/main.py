@@ -68,6 +68,22 @@ DEFAULT_PLAN_MODEL = "gpt-5-mini"
 DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
 
+DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE = "\n".join(
+    [
+        "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente.",
+        "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète.",
+        "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header avec des formulations concises, inclusives et professionnelles.",
+        "",
+        "Exigences de conception :",
+        "- Génère 3 à 5 étapes maximum en privilégiant la progression pédagogique (accroche, exploration guidée, consolidation).",
+        "- Utilise uniquement les composants disponibles : rich-content, form, video, simulation-chat, info-cards, prompt-evaluation, ai-comparison, clarity-map, clarity-prompt, explorateur-world ou composite.",
+        "- Propose des identifiants d'étape courts en minuscules séparés par des tirets.",
+        "- Les formulaires doivent comporter des consignes explicites et des contraintes adaptées (nombre de mots, choix, etc.).",
+        "- Complète la carte d'activité (titre, description, highlights, CTA) et le header avec des textes synthétiques.",
+        "- Si aucun chemin spécifique n'est requis, oriente le CTA vers /activites/{activityId}.",
+    ]
+)
+
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 
 
@@ -628,7 +644,12 @@ def _load_activities_config() -> dict[str, Any]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
     uses_default_fallback = not ACTIVITIES_CONFIG_PATH.exists()
     if uses_default_fallback:
-        return {"activities": [], "usesDefaultFallback": True}
+        return {
+            "activities": [],
+            "usesDefaultFallback": True,
+            "activityGeneration": ActivityGenerationConfig()
+            .model_dump(by_alias=True, exclude_none=True),
+        }
 
     try:
         with ACTIVITIES_CONFIG_PATH.open("r", encoding="utf-8") as handle:
@@ -638,6 +659,7 @@ def _load_activities_config() -> dict[str, Any]:
 
     activities: list[dict[str, Any]]
     activity_selector_header: dict[str, Any] | None = None
+    activity_generation_data: dict[str, Any] | None = None
 
     if isinstance(raw_data, list):
         activities = raw_data
@@ -657,6 +679,14 @@ def _load_activities_config() -> dict[str, Any]:
                     detail="activitySelectorHeader doit être un objet JSON.",
                 )
             activity_selector_header = header_data
+        generation_data = raw_data.get("activityGeneration")
+        if generation_data is not None:
+            if not isinstance(generation_data, dict):
+                raise HTTPException(
+                    status_code=500,
+                    detail="activityGeneration doit être un objet JSON.",
+                )
+            activity_generation_data = generation_data
     else:
         raise HTTPException(
             status_code=500,
@@ -665,7 +695,23 @@ def _load_activities_config() -> dict[str, Any]:
 
     activities = _normalize_activities_payload(activities, error_status=500)
 
-    config: dict[str, Any] = {"activities": activities, "usesDefaultFallback": uses_default_fallback}
+    try:
+        generation_config = ActivityGenerationConfig.model_validate(
+            activity_generation_data or {}
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="activityGeneration contient une configuration invalide.",
+        ) from exc
+
+    config: dict[str, Any] = {
+        "activities": activities,
+        "usesDefaultFallback": uses_default_fallback,
+        "activityGeneration": generation_config.model_dump(
+            by_alias=True, exclude_none=True
+        ),
+    }
     if activity_selector_header is not None:
         config["activitySelectorHeader"] = activity_selector_header
 
@@ -683,7 +729,32 @@ def _save_activities_config(config: dict[str, Any]) -> None:
 
     normalized_activities = _normalize_activities_payload(activities, error_status=400)
 
-    payload: dict[str, Any] = {"activities": normalized_activities}
+    generation_data = config.get("activityGeneration")
+    generation_config: ActivityGenerationConfig
+    if generation_data is None:
+        generation_config = ActivityGenerationConfig()
+    else:
+        if not isinstance(generation_data, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="activityGeneration doit être un objet JSON.",
+            )
+        try:
+            generation_config = ActivityGenerationConfig.model_validate(
+                generation_data
+            )
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="activityGeneration contient une configuration invalide.",
+            ) from exc
+
+    payload: dict[str, Any] = {
+        "activities": normalized_activities,
+        "activityGeneration": generation_config.model_dump(
+            by_alias=True, exclude_none=True
+        ),
+    }
     header = config.get("activitySelectorHeader")
     if header is not None:
         if not isinstance(header, dict):
@@ -726,6 +797,7 @@ def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
         current_config = _load_activities_config()
         existing = list(current_config.get("activities", []))
         header = current_config.get("activitySelectorHeader")
+        generation = current_config.get("activityGeneration")
 
         filtered: list[dict[str, Any]] = []
         target_id = normalized_activity.get("id")
@@ -738,10 +810,32 @@ def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {"activities": filtered}
         if header is not None:
             payload["activitySelectorHeader"] = header
+        if generation is not None:
+            payload["activityGeneration"] = generation
 
         _save_activities_config(payload)
 
     return normalized_activity
+
+
+def _resolve_activity_generation_developer_message(
+    payload: ActivityGenerationRequest,
+) -> str:
+    if isinstance(payload.developer_message, str) and payload.developer_message:
+        return payload.developer_message
+
+    try:
+        config = _load_activities_config()
+    except HTTPException:
+        return DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+
+    generation_config = config.get("activityGeneration")
+    if isinstance(generation_config, Mapping):
+        candidate = generation_config.get("developerMessage")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    return DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
 
 
 def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, str]]:
@@ -1106,17 +1200,6 @@ def _build_activity_generation_prompt(
         sections.append(
             "Identifiants d'activité déjà utilisés (ne pas les réemployer) : " + ordered
         )
-    sections.extend(
-        [
-            "Exigences de conception :",
-            "- Génère 3 à 5 étapes maximum en privilégiant la progression pédagogique (accroche, exploration guidée, consolidation).",
-            "- Utilise uniquement les composants disponibles : rich-content, form, video, simulation-chat, info-cards, prompt-evaluation, ai-comparison, clarity-map, clarity-prompt, explorateur-world ou composite.",
-            "- Propose des identifiants d'étape courts en minuscules séparés par des tirets.",
-            "- Les formulaires doivent comporter des consignes explicites et des contraintes adaptées (nombre de mots, choix, etc.).",
-            "- Complète la carte d'activité (titre, description, highlights, CTA) et le header avec des textes synthétiques.",
-            "- Si aucun chemin spécifique n'est requis, oriente le CTA vers /activites/{activityId}.",
-        ]
-    )
     sections.append(
         "Réponds uniquement via l'appel à la fonction build_step_sequence_activity, sans texte libre supplémentaire."
     )
@@ -1261,6 +1344,9 @@ class ActivityGenerationRequest(BaseModel):
     existing_activity_ids: list[str] = Field(
         default_factory=list, alias="existingActivityIds"
     )
+    developer_message: str | None = Field(
+        default=None, alias="developerMessage", min_length=3, max_length=6000
+    )
 
     @model_validator(mode="after")
     def _normalize_ids(self) -> "ActivityGenerationRequest":
@@ -1275,6 +1361,9 @@ class ActivityGenerationRequest(BaseModel):
             seen.add(trimmed)
             normalized.append(trimmed)
         self.existing_activity_ids = normalized
+        if isinstance(self.developer_message, str):
+            trimmed_message = self.developer_message.strip()
+            self.developer_message = trimmed_message or None
         return self
 
 
@@ -1467,12 +1556,32 @@ class ActivityPayload(BaseModel):
     )
 
 
+class ActivityGenerationConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    developer_message: str = Field(
+        default=DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE,
+        alias="developerMessage",
+        min_length=3,
+        max_length=6000,
+    )
+
+    @model_validator(mode="after")
+    def _ensure_default_message(self) -> "ActivityGenerationConfig":
+        if not self.developer_message.strip():
+            self.developer_message = DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+        return self
+
+
 class ActivityConfigRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
     activities: list[ActivityPayload] = Field(..., min_items=0)
     activity_selector_header: ActivitySelectorHeader | None = Field(
         default=None, alias="activitySelectorHeader"
+    )
+    activity_generation: ActivityGenerationConfig | None = Field(
+        default=None, alias="activityGeneration"
     )
 
 class LTIScoreRequest(BaseModel):
@@ -2678,13 +2787,7 @@ def _run_activity_generation_job(
             "artificielle générative. Tu proposes des activités engageantes et "
             "structurées pour des professionnels en formation continue."
         )
-        developer_message = (
-            "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente. "
-            "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées "
-            "pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète. "
-            "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header "
-            "avec des formulations concises, inclusives et professionnelles."
-        )
+        developer_message = _resolve_activity_generation_developer_message(payload)
 
         conversation: list[dict[str, Any]] = [
             {"role": "system", "content": system_message},
