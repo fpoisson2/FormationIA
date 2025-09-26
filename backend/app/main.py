@@ -43,6 +43,12 @@ from .lti import (
 )
 from .lti import DeepLinkContext
 from .progress_store import ActivityRecord, ProgressStore, get_progress_store
+from .step_sequence_components import (
+    STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION,
+    STEP_SEQUENCE_TOOLKIT,
+    STEP_SEQUENCE_TOOL_DEFINITIONS,
+    normalize_tool_arguments,
+)
 
 SUPPORTED_MODELS = (
     "gpt-5",
@@ -328,53 +334,6 @@ OVERRIDES_JSON_SCHEMA: dict[str, Any] = {
                 {"type": "array", "items": STEP_JSON_SCHEMA},
                 {"type": "null"},
             ]
-        },
-    },
-}
-
-
-STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
-    "type": "function",
-    "name": "build_step_sequence_activity",
-    "description": "Assemble une configuration d'activité basée sur une suite d'étapes générées.",
-    "strict": True,
-    "parameters": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["activityId", "steps", "metadata"],
-        "properties": {
-            "activityId": {"type": "string"},
-            "steps": {
-                "type": "array",
-                "minItems": 1,
-                "items": STEP_JSON_SCHEMA,
-            },
-            "metadata": _nullable_schema(
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "componentKey",
-                        "path",
-                        "completionId",
-                        "enabled",
-                        "header",
-                        "layout",
-                        "card",
-                        "overrides",
-                    ],
-                    "properties": {
-                        "componentKey": {"type": ["string", "null"]},
-                        "path": {"type": ["string", "null"]},
-                        "completionId": {"type": ["string", "null"]},
-                        "enabled": {"type": ["boolean", "null"]},
-                        "header": _nullable_schema(HEADER_JSON_SCHEMA),
-                        "layout": _nullable_schema(LAYOUT_JSON_SCHEMA),
-                        "card": _nullable_schema(CARD_JSON_SCHEMA),
-                        "overrides": _nullable_schema(OVERRIDES_JSON_SCHEMA),
-                    },
-                }
-            ),
         },
     },
 }
@@ -1049,38 +1008,40 @@ def _build_activity_generation_prompt(
     return "\n".join(sections)
 
 
-def _extract_first_tool_call(response: Any) -> tuple[str, str | None, Any] | None:
-    output_items = getattr(response, "output", None)
-    if output_items is None and isinstance(response, dict):
-        output_items = response.get("output")
-    if not output_items:
-        return None
+def _coerce_tool_arguments(raw_arguments: Any) -> tuple[dict[str, Any], str]:
+    arguments_obj: dict[str, Any] | None = None
+    arguments_text: str | None = None
 
-    for item in output_items:
-        item_type = getattr(item, "type", None) or (
-            item.get("type") if isinstance(item, dict) else None
-        )
-        if item_type != "function_call":
-            continue
+    if isinstance(raw_arguments, dict):
+        arguments_obj = raw_arguments
+        try:
+            arguments_text = json.dumps(raw_arguments)
+        except TypeError:  # pragma: no cover - fallback
+            arguments_text = None
+    elif isinstance(raw_arguments, (bytes, bytearray)):
+        arguments_text = raw_arguments.decode("utf-8", "ignore")
+    elif raw_arguments is not None:
+        arguments_text = str(raw_arguments)
 
-        name = getattr(item, "name", None) or (
-            item.get("name") if isinstance(item, dict) else None
-        )
-        if not name:
-            continue
+    if arguments_obj is None:
+        try:
+            parsed = json.loads(arguments_text or "null")
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise HTTPException(
+                status_code=500,
+                detail="Arguments d'outil invalides renvoyés par le modèle.",
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=500,
+                detail="Les arguments d'outil ne sont pas un objet JSON.",
+            )
+        arguments_obj = parsed
 
-        call_id = getattr(item, "call_id", None) or (
-            item.get("call_id") if isinstance(item, dict) else None
-        )
-        arguments = getattr(item, "arguments", None)
-        if arguments is None and isinstance(item, dict):
-            arguments = item.get("arguments")
-        if arguments is None:
-            continue
+    if arguments_text is None:
+        arguments_text = json.dumps(arguments_obj)
 
-        return name, call_id, arguments
-
-    return None
+    return arguments_obj, arguments_text
 
 
 class SummaryRequest(BaseModel):
@@ -2453,81 +2414,107 @@ def admin_generate_activity(
         "structurées pour des professionnels en formation continue."
     )
     developer_message = (
-        "Réponds exclusivement via l'appel à la fonction build_step_sequence_activity. "
-        "Chaque étape doit utiliser un composant disponible et rester cohérente avec "
-        "les objectifs fournis. Assure-toi que la carte d'activité et le header sont "
-        "renseignés avec des textes concis, inclusifs et professionnels."
+        "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente. "
+        "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées "
+        "pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète. "
+        "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header "
+        "avec des formulations concises, inclusives et professionnelles."
     )
 
-    try:
-        response = client.responses.create(
-            model=model,
-            input=[
-                {"role": "system", "content": system_message},
-                {"role": "developer", "content": developer_message},
-                {"role": "user", "content": prompt},
-            ],
-            tools=[STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION],
-            tool_choice={"type": "function", "name": "build_step_sequence_activity"},
-            text={"verbosity": payload.verbosity},
-            reasoning={"effort": payload.thinking, "summary": "auto"},
-            parallel_tool_calls=False,
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    conversation: list[dict[str, Any]] = [
+        {"role": "system", "content": system_message},
+        {"role": "developer", "content": developer_message},
+        {"role": "user", "content": prompt},
+    ]
+    reasoning_summary: str | None = None
 
-    extracted = _extract_first_tool_call(response)
-    if not extracted:
-        raise HTTPException(
-            status_code=500,
-            detail="Le modèle n'a pas renvoyé d'appel d'outil valide.",
-        )
-
-    name, call_id, raw_arguments = extracted
-
-    arguments_obj: dict[str, Any] | None = None
-    arguments_text: str | None = None
-
-    if isinstance(raw_arguments, dict):
-        arguments_obj = raw_arguments
+    max_iterations = 12
+    for _ in range(max_iterations):
         try:
-            arguments_text = json.dumps(raw_arguments)
-        except TypeError:  # pragma: no cover - fallback
-            arguments_text = None
-    elif isinstance(raw_arguments, (bytes, bytearray)):
-        arguments_text = raw_arguments.decode("utf-8", "ignore")
-    else:
-        arguments_text = str(raw_arguments)
-
-    if arguments_obj is None:
-        try:
-            parsed = json.loads(arguments_text or "null")
-        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-            raise HTTPException(
-                status_code=500,
-                detail="Arguments d'outil invalides renvoyés par le modèle.",
-            ) from exc
-        if not isinstance(parsed, dict):
-            raise HTTPException(
-                status_code=500,
-                detail="Les arguments d'outil ne sont pas un objet JSON.",
+            response = client.responses.create(
+                model=model,
+                input=conversation,
+                tools=STEP_SEQUENCE_TOOL_DEFINITIONS,
+                parallel_tool_calls=False,
+                text={"verbosity": payload.verbosity},
+                reasoning={"effort": payload.thinking, "summary": "auto"},
             )
-        arguments_obj = parsed
+        except Exception as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    if arguments_text is None:
-        arguments_text = json.dumps(arguments_obj)
+        reasoning_summary = _extract_reasoning_summary(response) or reasoning_summary
+        output_items = getattr(response, "output", None)
+        if not output_items:
+            continue
 
-    reasoning_summary = _extract_reasoning_summary(response) or None
+        conversation += list(output_items)
 
-    return ActivityGenerationResponse(
-        tool_call=ActivityGenerationToolCall(
-            name=name,
-            call_id=call_id,
-            arguments=arguments_obj,
-            arguments_text=arguments_text,
-            definition=deepcopy(STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION),
-        ),
-        reasoning_summary=reasoning_summary or None,
+        for item in output_items:
+            item_type = getattr(item, "type", None) or (
+                item.get("type") if isinstance(item, dict) else None
+            )
+            if item_type != "function_call":
+                continue
+
+            name = getattr(item, "name", None) or (
+                item.get("name") if isinstance(item, dict) else None
+            )
+            if not name:
+                continue
+
+            call_id = getattr(item, "call_id", None) or (
+                item.get("call_id") if isinstance(item, dict) else None
+            )
+            raw_arguments = getattr(item, "arguments", None)
+            if raw_arguments is None and isinstance(item, dict):
+                raw_arguments = item.get("arguments")
+
+            arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
+
+            tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
+            if tool_callable is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"L'outil {name} n'est pas pris en charge par le backend.",
+                )
+
+            python_arguments = normalize_tool_arguments(arguments_obj)
+            try:
+                result = tool_callable(**python_arguments)
+            except Exception as exc:  # pragma: no cover - defensive
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            try:
+                serialized_output = json.dumps(result)
+            except TypeError as exc:  # pragma: no cover - defensive
+                raise HTTPException(
+                    status_code=500,
+                    detail="Résultat d'outil non sérialisable.",
+                ) from exc
+
+            conversation.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": serialized_output,
+                }
+            )
+
+            if name == "build_step_sequence_activity":
+                return ActivityGenerationResponse(
+                    tool_call=ActivityGenerationToolCall(
+                        name=name,
+                        call_id=call_id,
+                        arguments=arguments_obj,
+                        arguments_text=arguments_text,
+                        definition=deepcopy(STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION),
+                    ),
+                    reasoning_summary=reasoning_summary or None,
+                )
+
+    raise HTTPException(
+        status_code=500,
+        detail="Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations.",
     )
 
 
