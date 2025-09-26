@@ -17,14 +17,14 @@ export interface CompositeStepConfig {
 export interface ComponentStepDefinition {
   id: string;
   component: string;
-  config?: unknown;
-  composite?: never;
+  config?: unknown | null;
+  composite?: null;
 }
 
 export interface CompositeStepDefinition {
   id: string;
   component?: string;
-  config?: unknown;
+  config?: unknown | null;
   composite: CompositeStepConfig;
 }
 
@@ -39,6 +39,7 @@ export function isCompositeStepDefinition(
     typeof step === "object" &&
     step !== null &&
     "composite" in step &&
+    step.composite !== null &&
     typeof step.composite !== "undefined"
   );
 }

@@ -48,7 +48,8 @@ function cloneStep(step: StepDefinition): StepDefinition {
   }
   return {
     ...step,
-    config: step.config ? cloneConfig(step.config) : undefined,
+    config: step.config == null ? step.config : cloneConfig(step.config),
+    composite: step.composite ?? null,
   };
 }
 

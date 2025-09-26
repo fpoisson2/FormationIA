@@ -279,6 +279,7 @@ const createRichContentStep: StepSequenceFunctionTool<
       id,
       component: "rich-content",
       config,
+      composite: null,
     } satisfies StepDefinition;
   },
 };
@@ -419,6 +420,7 @@ const createFormStep: StepSequenceFunctionTool<CreateFormStepInput> = {
       id,
       component: "form",
       config,
+      composite: null,
     } satisfies StepDefinition;
   },
 };
@@ -500,6 +502,7 @@ const createVideoStep: StepSequenceFunctionTool<CreateVideoStepInput> = {
       id,
       component: "video",
       config,
+      composite: null,
     } satisfies StepDefinition;
   },
 };
@@ -545,6 +548,7 @@ const createWorkshopContextStep: StepSequenceFunctionTool<
       id,
       component: "workshop-context",
       config,
+      composite: null,
     } satisfies StepDefinition;
   },
 };
@@ -607,6 +611,7 @@ const createWorkshopComparisonStep: StepSequenceFunctionTool<
       id,
       component: "workshop-comparison",
       config,
+      composite: null,
     } satisfies StepDefinition;
   },
 };
@@ -653,6 +658,7 @@ const createWorkshopSynthesisStep: StepSequenceFunctionTool<
       id,
       component: "workshop-synthesis",
       config,
+      composite: null,
     } satisfies StepDefinition;
   },
 };
@@ -695,15 +701,22 @@ const compositeStepConfigSchema: JsonSchema = {
   },
 };
 
+const nullableCompositeStepConfigSchema = (): JsonSchema => ({
+  anyOf: [
+    JSON.parse(JSON.stringify(compositeStepConfigSchema)),
+    { type: "null" },
+  ],
+});
+
 const stepSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id"],
+  required: ["id", "component", "config", "composite"],
   properties: {
     id: { type: "string" },
-    component: { type: "string" },
+    component: { type: ["string", "null"] },
     config: nullableConfigSchema(),
-    composite: compositeStepConfigSchema,
+    composite: nullableCompositeStepConfigSchema(),
   },
 };
 
@@ -759,6 +772,8 @@ const createCompositeStep: StepSequenceFunctionTool<
 
     return {
       id,
+      component: "composite",
+      config: null,
       composite,
     } satisfies StepDefinition;
   },

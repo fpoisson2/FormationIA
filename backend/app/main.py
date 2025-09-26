@@ -212,12 +212,14 @@ COMPOSITE_STEP_CONFIG_JSON_SCHEMA: dict[str, Any] = {
 STEP_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["id"],
+    "required": ["id", "component", "config", "composite"],
     "properties": {
         "id": {"type": "string"},
-        "component": {"type": "string"},
+        "component": {"type": ["string", "null"]},
         "config": _nullable_config_schema(),
-        "composite": COMPOSITE_STEP_CONFIG_JSON_SCHEMA,
+        "composite": {
+            "anyOf": [COMPOSITE_STEP_CONFIG_JSON_SCHEMA, {"type": "null"}]
+        },
     },
 }
 
