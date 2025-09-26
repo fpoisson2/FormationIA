@@ -149,7 +149,7 @@ COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
         "id": {"type": "string"},
         "component": {"type": "string"},
         "slot": {"type": "string"},
-        "config": {},
+        "config": {"type": "object"},
     },
 }
 
@@ -175,7 +175,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                     "properties": {
                         "id": {"type": "string"},
                         "component": {"type": "string"},
-                        "config": {},
+                        "config": {"type": "object"},
                         "composite": {
                             "type": "object",
                             "additionalProperties": False,
@@ -232,9 +232,9 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                             "withBasePadding": {"type": "boolean"},
                             "withBaseContentSpacing": {"type": "boolean"},
                             "withBaseInnerGap": {"type": "boolean"},
-                            "actions": {},
-                            "headerChildren": {},
-                            "beforeHeader": {},
+                            "actions": {"type": "object"},
+                            "headerChildren": {"type": "object"},
+                            "beforeHeader": {"type": "object"},
                         },
                     },
                     "card": {
@@ -295,9 +295,9 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                                     "withBasePadding": {"type": "boolean"},
                                     "withBaseContentSpacing": {"type": "boolean"},
                                     "withBaseInnerGap": {"type": "boolean"},
-                                    "actions": {},
-                                    "headerChildren": {},
-                                    "beforeHeader": {},
+                                    "actions": {"type": "object"},
+                                    "headerChildren": {"type": "object"},
+                                    "beforeHeader": {"type": "object"},
                                 },
                             },
                             "card": {
@@ -332,7 +332,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                                     "properties": {
                                         "id": {"type": "string"},
                                         "component": {"type": "string"},
-                                        "config": {},
+                                        "config": {"type": "object"},
                                         "composite": {
                                             "type": "object",
                                             "additionalProperties": False,

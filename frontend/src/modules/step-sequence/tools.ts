@@ -640,7 +640,7 @@ const compositeModuleSchema: JsonSchema = {
     id: { type: "string" },
     component: { type: "string" },
     slot: { type: "string" },
-    config: {},
+    config: { type: "object" },
   },
 };
 
@@ -744,9 +744,9 @@ const layoutSchema: JsonSchema = {
     withBasePadding: { type: "boolean" },
     withBaseContentSpacing: { type: "boolean" },
     withBaseInnerGap: { type: "boolean" },
-    actions: {},
-    headerChildren: {},
-    beforeHeader: {},
+    actions: { type: "object" },
+    headerChildren: { type: "object" },
+    beforeHeader: { type: "object" },
   },
 };
 
@@ -799,7 +799,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
             properties: {
               id: { type: "string" },
               component: { type: "string" },
-              config: {},
+              config: { type: "object" },
               composite: {
                 type: "object",
                 additionalProperties: false,
@@ -846,7 +846,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
                     properties: {
                       id: { type: "string" },
                       component: { type: "string" },
-                      config: {},
+                      config: { type: "object" },
                       composite: {
                         type: "object",
                         additionalProperties: false,
