@@ -7,11 +7,12 @@ import os
 import secrets
 from collections import deque
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any, Generator, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -107,6 +108,8 @@ def _resolve_activities_config_path() -> Path:
 
 
 ACTIVITIES_CONFIG_PATH = _resolve_activities_config_path()
+
+_ACTIVITY_CONFIG_LOCK = Lock()
 
 ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
 _ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
@@ -697,6 +700,50 @@ def _save_activities_config(config: dict[str, Any]) -> None:
         raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
 
 
+def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
+    """Enregistre une activité générée et retourne la version normalisée."""
+
+    prepared_activity = deepcopy(dict(activity))
+
+    step_sequence = prepared_activity.get("stepSequence")
+    if isinstance(step_sequence, list):
+        for index, step in enumerate(step_sequence):
+            if not isinstance(step, dict):
+                continue
+            if "type" not in step or not step.get("type"):
+                component = step.get("component")
+                if isinstance(component, str) and component.strip():
+                    step["type"] = component.strip()
+                elif step.get("composite") is not None:
+                    step["type"] = "composite"
+                else:
+                    step["type"] = f"step-{index + 1}"
+
+    normalized_list = _normalize_activities_payload([prepared_activity], error_status=500)
+    normalized_activity = normalized_list[0]
+
+    with _ACTIVITY_CONFIG_LOCK:
+        current_config = _load_activities_config()
+        existing = list(current_config.get("activities", []))
+        header = current_config.get("activitySelectorHeader")
+
+        filtered: list[dict[str, Any]] = []
+        target_id = normalized_activity.get("id")
+        for entry in existing:
+            if target_id is not None and entry.get("id") == target_id:
+                continue
+            filtered.append(entry)
+        filtered.append(normalized_activity)
+
+        payload: dict[str, Any] = {"activities": filtered}
+        if header is not None:
+            payload["activitySelectorHeader"] = header
+
+        _save_activities_config(payload)
+
+    return normalized_activity
+
+
 def _build_plan_messages(payload: PlanRequest, attempt: int) -> list[dict[str, str]]:
     instruction_repr = payload.instruction.strip()
     constraint_section = (
@@ -1231,21 +1278,109 @@ class ActivityGenerationRequest(BaseModel):
         return self
 
 
-class ActivityGenerationToolCall(BaseModel):
+@dataclass
+class _ActivityGenerationJobState:
+    id: str
+    status: Literal["pending", "running", "complete", "error"] = "pending"
+    message: str | None = None
+    reasoning_summary: str | None = None
+    activity_id: str | None = None
+    activity_title: str | None = None
+    activity_payload: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+
+class ActivityGenerationJobStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    name: str
-    arguments: dict[str, Any]
-    call_id: str | None = Field(default=None, alias="callId")
-    arguments_text: str | None = Field(default=None, alias="argumentsText")
-    definition: dict[str, Any] | None = None
-
-
-class ActivityGenerationResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    tool_call: ActivityGenerationToolCall = Field(alias="toolCall")
+    job_id: str = Field(alias="jobId")
+    status: Literal["pending", "running", "complete", "error"]
+    message: str | None = None
     reasoning_summary: str | None = Field(default=None, alias="reasoningSummary")
+    activity_id: str | None = Field(default=None, alias="activityId")
+    activity_title: str | None = Field(default=None, alias="activityTitle")
+    activity: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+_ACTIVITY_GENERATION_JOBS: dict[str, _ActivityGenerationJobState] = {}
+_ACTIVITY_GENERATION_LOCK = Lock()
+
+
+def _create_activity_generation_job() -> _ActivityGenerationJobState:
+    while True:
+        candidate = secrets.token_hex(8)
+        with _ACTIVITY_GENERATION_LOCK:
+            if candidate in _ACTIVITY_GENERATION_JOBS:
+                continue
+            job = _ActivityGenerationJobState(
+                id=candidate,
+                message="Tâche de génération en file d'attente.",
+            )
+            _ACTIVITY_GENERATION_JOBS[candidate] = job
+            return deepcopy(job)
+
+
+def _get_activity_generation_job(job_id: str) -> _ActivityGenerationJobState | None:
+    with _ACTIVITY_GENERATION_LOCK:
+        job = _ACTIVITY_GENERATION_JOBS.get(job_id)
+        return deepcopy(job) if job is not None else None
+
+
+def _update_activity_generation_job(
+    job_id: str,
+    *,
+    status: Literal["pending", "running", "complete", "error"] | None = None,
+    message: str | None = None,
+    reasoning_summary: str | None = None,
+    activity_id: str | None = None,
+    activity_title: str | None = None,
+    activity_payload: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> _ActivityGenerationJobState | None:
+    with _ACTIVITY_GENERATION_LOCK:
+        job = _ACTIVITY_GENERATION_JOBS.get(job_id)
+        if job is None:
+            return None
+
+        if status is not None:
+            job.status = status
+        if message is not None:
+            job.message = message
+        if reasoning_summary is not None:
+            job.reasoning_summary = reasoning_summary
+        if activity_id is not None:
+            job.activity_id = activity_id
+        if activity_title is not None:
+            job.activity_title = activity_title
+        if activity_payload is not None:
+            job.activity_payload = deepcopy(activity_payload)
+        if error is not None:
+            job.error = error
+
+        job.updated_at = datetime.utcnow()
+        return deepcopy(job)
+
+
+def _serialize_activity_generation_job(
+    job: _ActivityGenerationJobState,
+) -> ActivityGenerationJobStatus:
+    return ActivityGenerationJobStatus(
+        jobId=job.id,
+        status=job.status,
+        message=job.message,
+        reasoningSummary=job.reasoning_summary,
+        activityId=job.activity_id,
+        activityTitle=job.activity_title,
+        activity=deepcopy(job.activity_payload) if job.activity_payload is not None else None,
+        error=job.error,
+        createdAt=job.created_at,
+        updatedAt=job.updated_at,
+    )
 
 
 class PromptEvaluationScoreModel(BaseModel):
@@ -2520,71 +2655,70 @@ def admin_save_activities_config(
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
-@admin_router.post("/activities/generate")
-def admin_generate_activity(
-    payload: ActivityGenerationRequest,
-    _: LocalUser = Depends(_require_admin_user),
-) -> StreamingResponse:
-    """Génère une activité StepSequence via l'API Responses en flux continu."""
 
-    client = _ensure_client()
-    model = _validate_model(payload.model)
-    prompt = _build_activity_generation_prompt(
-        payload.details, payload.existing_activity_ids
+
+def _run_activity_generation_job(
+    job_id: str, payload: ActivityGenerationRequest
+) -> None:
+    job = _update_activity_generation_job(
+        job_id, status="running", message="Initialisation de la génération..."
     )
+    if job is None:
+        return
 
-    system_message = (
-        "Tu es un concepteur pédagogique francophone spécialisé en intelligence "
-        "artificielle générative. Tu proposes des activités engageantes et "
-        "structurées pour des professionnels en formation continue."
-    )
-    developer_message = (
-        "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente. "
-        "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées "
-        "pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète. "
-        "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header "
-        "avec des formulations concises, inclusives et professionnelles."
-    )
-
-    conversation: list[dict[str, Any]] = [
-        {"role": "system", "content": system_message},
-        {"role": "developer", "content": developer_message},
-        {"role": "user", "content": prompt},
-    ]
-    cached_steps: dict[str, StepDefinition] = {}
-    tools = [
-        *STEP_SEQUENCE_TOOL_DEFINITIONS,
-        {"type": "web_search"},
-    ]
-
-    def _remember_step(result: Any) -> None:
-        if not isinstance(result, dict):
-            return
-        component = result.get("component")
-        step_id = result.get("id")
-        if component is None or step_id is None:
-            return
-        cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
-
-    def event_stream() -> Generator[str, None, None]:
-        reasoning_summary: str | None = None
-        last_summary_sent: str | None = None
-
-        yield _format_sse_event(
-            "status", {"message": "Initialisation de la génération..."}
+    try:
+        client = _ensure_client()
+        model = _validate_model(payload.model)
+        prompt = _build_activity_generation_prompt(
+            payload.details, payload.existing_activity_ids
         )
 
+        system_message = (
+            "Tu es un concepteur pédagogique francophone spécialisé en intelligence "
+            "artificielle générative. Tu proposes des activités engageantes et "
+            "structurées pour des professionnels en formation continue."
+        )
+        developer_message = (
+            "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente. "
+            "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées "
+            "pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète. "
+            "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header "
+            "avec des formulations concises, inclusives et professionnelles."
+        )
+
+        conversation: list[dict[str, Any]] = [
+            {"role": "system", "content": system_message},
+            {"role": "developer", "content": developer_message},
+            {"role": "user", "content": prompt},
+        ]
+        cached_steps: dict[str, StepDefinition] = {}
+        tools = [
+            *STEP_SEQUENCE_TOOL_DEFINITIONS,
+            {"type": "web_search"},
+        ]
+
+        def _remember_step(result: Any) -> None:
+            if not isinstance(result, Mapping):
+                return
+            component = result.get("component")
+            step_id = result.get("id")
+            if component is None or step_id is None:
+                return
+            cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
+
+        reasoning_summary: str | None = None
         max_iterations = 12
+
         for iteration in range(max_iterations):
-            yield _format_sse_event(
-                "status",
-                {
-                    "message": (
-                        "Appel au modèle (itération "
-                        f"{iteration + 1}/{max_iterations})..."
-                    )
-                },
+            _update_activity_generation_job(
+                job_id,
+                status="running",
+                message=(
+                    "Appel au modèle (itération "
+                    f"{iteration + 1}/{max_iterations})..."
+                ),
             )
+
             try:
                 response = client.responses.create(
                     model=model,
@@ -2595,20 +2729,26 @@ def admin_generate_activity(
                     reasoning={"effort": payload.thinking, "summary": "auto"},
                 )
             except Exception as exc:  # pragma: no cover - defensive
-                logger.exception("Erreur lors de l'appel au modèle de génération", exc_info=exc)
+                logger.exception(
+                    "Erreur lors de l'appel au modèle de génération", exc_info=exc
+                )
                 detail = str(exc) or "Erreur du service de génération."
-                yield _format_sse_event("error", {"message": detail})
+                _update_activity_generation_job(
+                    job_id,
+                    status="error",
+                    message="La génération a échoué lors de l'appel au modèle.",
+                    error=detail,
+                )
                 return
 
-            yield _format_sse_event(
-                "status", {"message": "Analyse de la réponse du modèle..."}
+            _update_activity_generation_job(
+                job_id, status="running", message="Analyse de la réponse du modèle..."
             )
 
             reasoning_summary = _extract_reasoning_summary(response) or reasoning_summary
-            if reasoning_summary and reasoning_summary != last_summary_sent:
-                last_summary_sent = reasoning_summary
-                yield _format_sse_event(
-                    "reasoning_summary", {"summary": reasoning_summary}
+            if reasoning_summary:
+                _update_activity_generation_job(
+                    job_id, reasoning_summary=reasoning_summary
                 )
 
             output_items = getattr(response, "output", None)
@@ -2662,34 +2802,29 @@ def admin_generate_activity(
                         except TypeError:
                             arguments_text = None
 
-                yield _format_sse_event(
-                    "tool_call",
-                    {
-                        "name": name,
-                        "callId": call_id,
-                        "arguments": arguments_obj,
-                        "argumentsText": arguments_text,
-                    },
-                )
-
                 tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
                 if tool_callable is None:
-                    yield _format_sse_event(
-                        "error",
-                        {
-                            "message": (
-                                f"L'outil {name} n'est pas pris en charge par le backend."
-                            )
-                        },
+                    _update_activity_generation_job(
+                        job_id,
+                        status="error",
+                        message=f"L'outil {name} n'est pas pris en charge par le backend.",
+                        error=f"Outil inconnu: {name}",
                     )
                     return
 
                 try:
                     result = tool_callable(**python_arguments)
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.exception("Erreur lors de l'exécution de l'outil %s", name, exc_info=exc)
+                    logger.exception(
+                        "Erreur lors de l'exécution de l'outil %s", name, exc_info=exc
+                    )
                     detail = str(exc) or "Erreur lors de l'exécution d'un outil."
-                    yield _format_sse_event("error", {"message": detail})
+                    _update_activity_generation_job(
+                        job_id,
+                        status="error",
+                        message="La génération a échoué lors de l'exécution d'un outil.",
+                        error=detail,
+                    )
                     return
 
                 if name == "create_step_sequence_activity":
@@ -2698,34 +2833,32 @@ def admin_generate_activity(
                         or arguments_obj.get("activityId")
                         or arguments_obj.get("activity_id")
                     )
-                    yield _format_sse_event(
-                        "status",
-                        {
-                            "message": "Structure de l'activité initialisée.",
-                            "activityId": activity_identifier,
-                        },
-                    )
+                    if isinstance(activity_identifier, str):
+                        _update_activity_generation_job(
+                            job_id,
+                            activity_id=activity_identifier,
+                            message="Structure de l'activité initialisée.",
+                        )
+
                 if name.startswith("create_") and name != "create_step_sequence_activity":
                     _remember_step(result)
                     step_count = len(cached_steps)
                     highlight = _extract_step_highlight(result)
-                    yield _format_sse_event(
-                        "step",
-                        {
-                            "id": result.get("id"),
-                            "component": result.get("component"),
-                            "count": step_count,
-                            "highlight": highlight,
-                        },
+                    message = (
+                        f"Étape {step_count} générée"
+                        + (f" – {highlight}" if highlight else "")
                     )
+                    _update_activity_generation_job(job_id, message=message)
 
                 try:
                     serialized_output = json.dumps(result)
                 except TypeError as exc:  # pragma: no cover - defensive
                     logger.exception("Résultat d'outil non sérialisable", exc_info=exc)
-                    yield _format_sse_event(
-                        "error",
-                        {"message": "Résultat d'outil non sérialisable."},
+                    _update_activity_generation_job(
+                        job_id,
+                        status="error",
+                        message="Résultat d'outil non sérialisable.",
+                        error="Résultat d'outil non sérialisable",
                     )
                     return
 
@@ -2738,48 +2871,103 @@ def admin_generate_activity(
                 )
 
                 if name == "build_step_sequence_activity":
-                    yield _format_sse_event(
-                        "status", {"message": "Finalisation de l'activité..."}
+                    _update_activity_generation_job(
+                        job_id, message="Finalisation de l'activité..."
                     )
 
-                    response_payload = ActivityGenerationResponse(
-                        tool_call=ActivityGenerationToolCall(
-                            name=name,
-                            call_id=call_id,
-                            arguments=arguments_obj,
-                            arguments_text=arguments_text,
-                            definition=deepcopy(
-                                STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
-                            ),
-                        ),
-                        reasoning_summary=reasoning_summary or None,
-                    )
-
-                    final_summary = response_payload.reasoning_summary
-                    if final_summary and final_summary != last_summary_sent:
-                        last_summary_sent = final_summary
-                        yield _format_sse_event(
-                            "reasoning_summary", {"summary": final_summary}
+                    try:
+                        persisted = _persist_generated_activity(result)
+                    except HTTPException as exc:
+                        _update_activity_generation_job(
+                            job_id,
+                            status="error",
+                            message="Échec de la sauvegarde de l'activité générée.",
+                            error=str(exc.detail),
                         )
+                        return
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.exception(
+                            "Erreur lors de la sauvegarde de l'activité générée",
+                            exc_info=exc,
+                        )
+                        _update_activity_generation_job(
+                            job_id,
+                            status="error",
+                            message="Échec de la sauvegarde de l'activité générée.",
+                            error=str(exc) or "Erreur inconnue",
+                        )
+                        return
 
-                    yield _format_sse_event(
-                        "complete",
-                        response_payload.model_dump(
-                            by_alias=True, exclude_none=True
-                        ),
+                    activity_title = None
+                    card = persisted.get("card")
+                    if isinstance(card, Mapping):
+                        raw_title = card.get("title")
+                        if isinstance(raw_title, str):
+                            cleaned = raw_title.strip()
+                            activity_title = cleaned or None
+
+                    _update_activity_generation_job(
+                        job_id,
+                        status="complete",
+                        message="Activité générée et enregistrée.",
+                        reasoning_summary=reasoning_summary,
+                        activity_id=persisted.get("id"),
+                        activity_title=activity_title or persisted.get("id"),
+                        activity_payload=persisted,
                     )
                     return
 
-        yield _format_sse_event(
-            "error",
-            {
-                "message": "Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations.",
-            },
+        _update_activity_generation_job(
+            job_id,
+            status="error",
+            message="Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations.",
+            error="Complétion absente",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception(
+            "Erreur inattendue lors de la génération d'activité", exc_info=exc
+        )
+        detail = str(exc) or "Erreur interne lors de la génération."
+        _update_activity_generation_job(
+            job_id,
+            status="error",
+            message="La génération a échoué.",
+            error=detail,
         )
 
-    return StreamingResponse(
-        event_stream(), media_type="text/event-stream", headers=_sse_headers()
+
+def _launch_activity_generation_job(
+    job_id: str, payload: ActivityGenerationRequest
+) -> None:
+    worker = Thread(
+        target=_run_activity_generation_job,
+        args=(job_id, payload),
+        name=f"activity-generation-{job_id}",
+        daemon=True,
     )
+    worker.start()
+
+
+@admin_router.post("/activities/generate")
+def admin_generate_activity(
+    payload: ActivityGenerationRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> ActivityGenerationJobStatus:
+    """Démarre une génération d'activité StepSequence en tâche de fond."""
+
+    job = _create_activity_generation_job()
+    _launch_activity_generation_job(job.id, payload)
+    return _serialize_activity_generation_job(job)
+
+
+@admin_router.get("/activities/generate/{job_id}")
+def admin_get_activity_generation_job(
+    job_id: str, _: LocalUser = Depends(_require_admin_user)
+) -> ActivityGenerationJobStatus:
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+    return _serialize_activity_generation_job(job)
 
 
 app.include_router(admin_auth_router)

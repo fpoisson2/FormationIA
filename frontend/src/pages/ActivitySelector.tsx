@@ -16,10 +16,7 @@ import {
   activities as activitiesClient,
   type ActivitySelectorHeaderConfig,
   type ProgressResponse,
-  type ActivityGenerationResponse,
   type ActivityGenerationDetailsPayload,
-  type ActivityGenerationProgressEvent,
-  type ActivityGenerationToolCallEvent,
   type GenerateActivityPayload,
 } from "../api";
 import {
@@ -43,7 +40,6 @@ import {
   StepSequenceContext,
   isCompositeStepDefinition,
   resolveStepComponentKey,
-  STEP_SEQUENCE_TOOLS,
   type CompositeStepConfig,
   type StepDefinition,
 } from "../modules/step-sequence";
@@ -633,12 +629,10 @@ function ActivitySelector(): JSX.Element {
   const [generationReasoningSummary, setGenerationReasoningSummary] =
     useState<string | null>(null);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const loadConfigMutexRef = useRef(false);
   const [generationStatusMessage, setGenerationStatusMessage] =
     useState<string | null>(null);
-  const [generationStepCount, setGenerationStepCount] = useState(0);
-  const [generationStepLabel, setGenerationStepLabel] =
-    useState<string | null>(null);
-  const [liveReasoningSummary, setLiveReasoningSummary] =
+  const [activeGenerationJobId, setActiveGenerationJobId] =
     useState<string | null>(null);
   const [lastGeneratedActivityId, setLastGeneratedActivityId] =
     useState<string | null>(null);
@@ -822,9 +816,205 @@ function ActivitySelector(): JSX.Element {
     };
   }, []);
 
+  const loadSavedConfig = useCallback(async () => {
+    if (loadConfigMutexRef.current) {
+      return;
+    }
+
+    loadConfigMutexRef.current = true;
+    setIsLoading(true);
+    try {
+      const response = await activitiesClient.getConfig();
+      const rawActivities = Array.isArray(response.activities)
+        ? (response.activities as ActivityConfigEntry[])
+        : undefined;
+      const includeMissingDefaults = response.usesDefaultFallback !== false;
+      setEditableActivities(
+        buildEditableActivities(rawActivities, { includeMissingDefaults })
+      );
+      const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
+      setHeaderOverrides(savedHeader ?? {});
+    } catch (error) {
+      console.warn(
+        "Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut",
+        error
+      );
+      setEditableActivities(buildEditableActivities());
+      setHeaderOverrides({});
+    } finally {
+      setIsLoading(false);
+      loadConfigMutexRef.current = false;
+    }
+  }, [buildEditableActivities]);
+
   useEffect(() => {
     void loadSavedConfig();
-  }, []);
+  }, [loadSavedConfig]);
+
+  const refreshGeneratedActivity = useCallback(
+    async (activityId: string | null) => {
+      if (!activityId) {
+        return null;
+      }
+
+      try {
+        const response = await admin.activities.get(token);
+        const rawActivities = Array.isArray(response.activities)
+          ? (response.activities as ActivityConfigEntry[])
+          : [];
+        const target = rawActivities.find((activity) => activity.id === activityId);
+        if (!target) {
+          return null;
+        }
+
+        const resolved = resolveActivityDefinition(target);
+        setEditableActivities((previous) => {
+          const filtered = previous.filter(
+            (activity) => activity.id !== resolved.id
+          );
+          return [...filtered, resolved];
+        });
+
+        return resolved;
+      } catch (error) {
+        throw error;
+      }
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    if (!activeGenerationJobId) {
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    generationControllerRef.current?.abort();
+    generationControllerRef.current = controller;
+
+    const waitFor = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        if (controller.signal.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+
+        let timeoutId: number;
+
+        const onAbort = () => {
+          window.clearTimeout(timeoutId);
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+
+        timeoutId = window.setTimeout(() => {
+          controller.signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, ms);
+      });
+
+    const monitor = async () => {
+      try {
+        while (!cancelled) {
+          const status = await admin.activities.getGenerationJob(
+            activeGenerationJobId,
+            token,
+            { signal: controller.signal }
+          );
+
+          if (status.message) {
+            setGenerationStatusMessage(status.message);
+          }
+          if (status.reasoningSummary) {
+            setGenerationReasoningSummary(status.reasoningSummary.trim());
+          }
+
+          if (status.status === "complete") {
+            const reasoning = status.reasoningSummary?.trim() ?? null;
+            setGenerationReasoningSummary(reasoning);
+            setGenerationStatusMessage(null);
+            setGenerationError(null);
+
+            try {
+              const resolved = await refreshGeneratedActivity(
+                status.activityId ?? null
+              );
+              const titleCandidate =
+                (status.activityTitle && status.activityTitle.trim()) ||
+                resolved?.card?.title?.trim() ||
+                resolved?.id;
+
+              if (resolved?.id) {
+                setLastGeneratedActivityId(resolved.id);
+              }
+
+              setGenerationSuccessMessage(
+                titleCandidate
+                  ? `L’activité « ${titleCandidate} » a été générée et ajoutée à la configuration.`
+                  : "Une nouvelle activité a été générée et ajoutée à la configuration."
+              );
+            } catch (error) {
+              console.error("Erreur lors du chargement de l'activité générée:", error);
+              const detail =
+                extractErrorMessage(error) ||
+                (error instanceof Error ? error.message : null);
+              setGenerationError(
+                detail
+                  ?? "L’activité a été générée mais n’a pas pu être chargée automatiquement."
+              );
+            }
+
+            setActiveGenerationJobId(null);
+            return;
+          }
+
+          if (status.status === "error") {
+            const detail =
+              (status.error && status.error.trim()) ||
+              status.message?.trim() ||
+              null;
+            setGenerationError(
+              detail ?? "La génération de l'activité a échoué. Veuillez réessayer."
+            );
+            setGenerationReasoningSummary(null);
+            setGenerationStatusMessage(null);
+            setActiveGenerationJobId(null);
+            return;
+          }
+
+          await waitFor(1500);
+        }
+      } catch (error) {
+        if ((error as DOMException).name === "AbortError" || cancelled) {
+          return;
+        }
+        console.error("Erreur lors du suivi de la génération:", error);
+        const detail =
+          extractErrorMessage(error) ||
+          (error instanceof Error ? error.message : null);
+        setGenerationError(
+          detail ?? "La génération de l'activité a été interrompue."
+        );
+        setGenerationReasoningSummary(null);
+        setGenerationStatusMessage(null);
+        setActiveGenerationJobId(null);
+      } finally {
+        if (generationControllerRef.current === controller) {
+          generationControllerRef.current = null;
+        }
+      }
+    };
+
+    void monitor();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [activeGenerationJobId, refreshGeneratedActivity, token]);
 
   const handleMoveActivity = (fromIndex: number, toIndex: number) => {
     if (!isEditMode) return;
@@ -1259,9 +1449,6 @@ function ActivitySelector(): JSX.Element {
   const handleOpenGenerationModal = useCallback(() => {
     setGenerationError(null);
     setGenerationStatusMessage(null);
-    setGenerationStepCount(0);
-    setGenerationStepLabel(null);
-    setLiveReasoningSummary(null);
     setIsGenerateModalOpen(true);
   }, []);
 
@@ -1276,10 +1463,12 @@ function ActivitySelector(): JSX.Element {
     setGenerationSuccessMessage(null);
     setGenerationReasoningSummary(null);
     setLastGeneratedActivityId(null);
-    setLiveReasoningSummary(null);
     setGenerationStatusMessage(null);
-    setGenerationStepCount(0);
-    setGenerationStepLabel(null);
+  }, []);
+
+  const handleDismissGenerationError = useCallback(() => {
+    setGenerationError(null);
+    setGenerationStatusMessage(null);
   }, []);
 
   const handleSubmitGeneration = useCallback(async () => {
@@ -1291,9 +1480,8 @@ function ActivitySelector(): JSX.Element {
     setGenerationReasoningSummary(null);
     setGenerationSuccessMessage(null);
     setGenerationStatusMessage("Initialisation de la génération...");
-    setGenerationStepCount(0);
-    setGenerationStepLabel(null);
-    setLiveReasoningSummary(null);
+    setLastGeneratedActivityId(null);
+    setActiveGenerationJobId(null);
 
     generationControllerRef.current?.abort();
     const controller = new AbortController();
@@ -1325,93 +1513,25 @@ function ActivitySelector(): JSX.Element {
         existingActivityIds,
       };
 
-      const formatComponentLabel = (value: string | null | undefined) => {
-        if (!value) {
-          return null;
-        }
-        return value
-          .split(/[-_]/g)
-          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-          .join(" ");
-      };
+      const job = await admin.activities.generate(payload, token, {
+        signal: controller.signal,
+      });
 
-      const formatToolCallName = (value: string | null | undefined) => {
-        if (!value) {
-          return null;
-        }
-        const normalized = value.replace(/^(create|build)_/i, "");
-        const formatted = formatComponentLabel(normalized);
-        return formatted ?? value;
-      };
+      if (controller.signal.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
 
-      const response: ActivityGenerationResponse = await admin.activities.generate(
-        payload,
-        token,
-        {
-          signal: controller.signal,
-          onStatus: (message) => {
-            setGenerationStatusMessage(message);
-          },
-          onStep: (event: ActivityGenerationProgressEvent) => {
-            setGenerationStepCount(event.count ?? 0);
-            const label = event.highlight?.trim() || formatComponentLabel(event.component ?? null);
-            setGenerationStepLabel(label ?? null);
-          },
-          onReasoningSummary: (summary) => {
-            setLiveReasoningSummary(summary.trim());
-          },
-          onToolCall: (event: ActivityGenerationToolCallEvent) => {
-            const readable = formatToolCallName(event.name);
-            if (!readable) {
-              return;
-            }
-            let target: string | null = null;
-            if (event.arguments && typeof event.arguments === "object") {
-              const args = event.arguments as Record<string, unknown>;
-              const candidateKeys = [
-                "stepId",
-                "step_id",
-                "activityId",
-                "activity_id",
-              ];
-              for (const key of candidateKeys) {
-                const rawValue = args[key];
-                if (typeof rawValue === "string" && rawValue.trim().length > 0) {
-                  target = rawValue.trim();
-                  break;
-                }
-              }
-            }
-            const message = target
-              ? `Appel de l'outil ${readable} (${target})`
-              : `Appel de l'outil ${readable}`;
-            setGenerationStatusMessage(message);
-          },
-        }
-      );
-
-      if (
-        !response?.toolCall ||
-        response.toolCall.name !== "build_step_sequence_activity" ||
-        !response.toolCall.arguments ||
-        typeof response.toolCall.arguments !== "object"
-      ) {
+      if (!job?.jobId) {
         throw new Error("Réponse inattendue du service de génération.");
       }
 
-      const generatedEntry = await STEP_SEQUENCE_TOOLS.build_step_sequence_activity.handler(
-        response.toolCall.arguments as any
-      );
-      const resolvedGenerated = resolveActivityDefinition(generatedEntry);
+      if (job.status === "error") {
+        const detail =
+          (job.error && job.error.trim()) || job.message?.trim() || null;
+        throw new Error(detail ?? "La génération de l'activité a échoué.");
+      }
 
-      setEditableActivities((prev) => [...prev, resolvedGenerated]);
-      setLastGeneratedActivityId(resolvedGenerated.id);
-      setGenerationSuccessMessage(
-        `L’activité « ${
-          resolvedGenerated.card?.title ?? resolvedGenerated.id
-        } » a été ajoutée en mode édition.`
-      );
-      setGenerationReasoningSummary(response.reasoningSummary?.trim() ?? null);
+      setActiveGenerationJobId(job.jobId);
       setIsGenerateModalOpen(false);
       setGenerationForm({
         theme: "",
@@ -1420,26 +1540,33 @@ function ActivitySelector(): JSX.Element {
         deliverable: "",
         constraints: "",
       });
-      setLiveReasoningSummary(null);
-      setGenerationStatusMessage(null);
-      setGenerationStepCount(0);
-      setGenerationStepLabel(null);
+
+      if (job.message) {
+        setGenerationStatusMessage(job.message);
+      } else {
+        setGenerationStatusMessage("Tâche de génération enregistrée.");
+      }
+      if (job.reasoningSummary) {
+        setGenerationReasoningSummary(job.reasoningSummary.trim());
+      }
     } catch (error) {
       if ((error as DOMException).name === "AbortError") {
         return;
       }
       console.error("Erreur lors de la génération d'activité:", error);
-      const detail = extractErrorMessage(error);
+      const detail =
+        extractErrorMessage(error) ||
+        (error instanceof Error ? error.message : null);
       setGenerationError(
         detail ?? "La génération de l'activité a échoué. Veuillez réessayer."
       );
+      setGenerationStatusMessage(null);
+      setActiveGenerationJobId(null);
     } finally {
       setIsGeneratingActivity(false);
-      generationControllerRef.current = null;
-      setGenerationStatusMessage(null);
-      setGenerationStepCount(0);
-      setGenerationStepLabel(null);
-      setLiveReasoningSummary(null);
+      if (generationControllerRef.current === controller) {
+        generationControllerRef.current = null;
+      }
     }
   }, [
     existingActivityIds,
@@ -1450,30 +1577,6 @@ function ActivitySelector(): JSX.Element {
     trimmedGenerationForm,
     token,
   ]);
-
-  const loadSavedConfig = async () => {
-    if (isLoading) return;
-
-    setIsLoading(true);
-    try {
-      const response = await activitiesClient.getConfig();
-      const rawActivities = Array.isArray(response.activities)
-        ? (response.activities as ActivityConfigEntry[])
-        : undefined;
-      const includeMissingDefaults = response.usesDefaultFallback !== false;
-      setEditableActivities(
-        buildEditableActivities(rawActivities, { includeMissingDefaults })
-      );
-      const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
-      setHeaderOverrides(savedHeader ?? {});
-    } catch (error) {
-      console.warn('Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut');
-      setEditableActivities(buildEditableActivities());
-      setHeaderOverrides({});
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const activitiesToDisplay = isEditMode
     ? editableActivities
@@ -1611,6 +1714,40 @@ function ActivitySelector(): JSX.Element {
       contentClassName="animate-section-delayed"
       contentAs="div"
     >
+      {activeGenerationJobId ? (
+        <div className="animate-section mb-6 space-y-3 rounded-3xl border border-sky-200/60 bg-sky-50/80 p-6 text-sky-900 shadow-sm backdrop-blur">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-sky-700/80">
+              Génération d’activité en cours
+            </p>
+            <p className="text-sm leading-relaxed md:text-base">
+              Le backend crée actuellement l’activité. Vous recevrez une notification dès qu’elle sera prête.
+            </p>
+            {generationStatusMessage ? (
+              <p className="text-xs text-sky-800/80">{generationStatusMessage}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {generationError ? (
+        <div className="animate-section mb-6 space-y-3 rounded-3xl border border-red-200/80 bg-red-50/90 p-6 text-red-900 shadow-sm backdrop-blur">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-red-700/80">
+                Génération indisponible
+              </p>
+              <p className="text-sm leading-relaxed md:text-base">{generationError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissGenerationError}
+              className="inline-flex items-center justify-center self-start rounded-full border border-red-400/40 px-3 py-1 text-xs font-semibold text-red-700 transition hover:border-red-500/70 hover:text-red-900"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      ) : null}
       {generationSuccessMessage ? (
         <div className="animate-section mb-6 space-y-3 rounded-3xl border border-sky-200/70 bg-sky-50/90 p-6 text-sky-900 shadow-sm backdrop-blur">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -1956,17 +2093,6 @@ function ActivitySelector(): JSX.Element {
             <p className="text-sm font-semibold text-sky-900">Génération en cours…</p>
             {generationStatusMessage ? (
               <p className="text-xs text-sky-900/80">{generationStatusMessage}</p>
-            ) : null}
-            {generationStepCount > 0 ? (
-              <p className="text-xs text-sky-900/70">
-                {generationStepCount} étape
-                {generationStepCount > 1 ? "s" : ""} générée
-                {generationStepCount > 1 ? "s" : ""}
-                {generationStepLabel ? ` – ${generationStepLabel}` : ""}
-              </p>
-            ) : null}
-            {liveReasoningSummary ? (
-              <p className="text-xs text-sky-900/70">{liveReasoningSummary}</p>
             ) : null}
           </div>
         ) : null}

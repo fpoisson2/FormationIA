@@ -1,42 +1,15 @@
 import json
-from typing import Any
 
 from fastapi.testclient import TestClient
 
+import backend.app.main as main
 from backend.app.admin_store import LocalUser
 from backend.app.main import (
-    STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION,
     STEP_SEQUENCE_TOOL_DEFINITIONS,
     _require_admin_user,
+    _run_activity_generation_job,
     app,
 )
-
-
-def _parse_sse_events(raw: str) -> list[tuple[str, Any]]:
-    events: list[tuple[str, Any]] = []
-    if not raw:
-        return events
-
-    chunks = raw.split("\n\n")
-    for chunk in chunks:
-        content = chunk.strip()
-        if not content:
-            continue
-        event_name = "message"
-        data_lines: list[str] = []
-        for line in content.splitlines():
-            if line.startswith("event:"):
-                event_name = line.replace("event:", "", 1).strip()
-            elif line.startswith("data:"):
-                data_lines.append(line.replace("data:", "", 1).strip())
-
-        data: Any = None
-        if data_lines:
-            data_str = "".join(data_lines)
-            if data_str and data_str != "null":
-                data = json.loads(data_str)
-        events.append((event_name, data))
-    return events
 
 
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
@@ -161,9 +134,12 @@ def test_admin_can_remove_all_activities(tmp_path, monkeypatch) -> None:
     assert persisted["activities"] == []
 
 
-def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
+def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch) -> None:
     admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
     app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
 
     captured_requests: list[dict[str, object]] = []
 
@@ -251,6 +227,11 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
             self.responses = FakeResponsesClient()
 
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
 
     try:
         with TestClient(app) as client:
@@ -263,23 +244,29 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
             response = client.post("/api/admin/activities/generate", json=payload)
             assert response.status_code == 200, response.text
 
-            events = _parse_sse_events(response.text)
-            complete_payload = next(
-                (data for event, data in events if event == "complete"), None
-            )
-            assert complete_payload is not None, "L'événement de complétion est attendu"
+            job_payload = response.json()
+            job_id = job_payload.get("jobId")
+            assert isinstance(job_id, str) and job_id
 
-            tool_call_events = [
-                data for event, data in events if event == "tool_call"
-            ]
-            assert len(tool_call_events) == 3
-            assert tool_call_events[0]["name"] == "create_step_sequence_activity"
-            assert tool_call_events[-1]["name"] == "build_step_sequence_activity"
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200, status_response.text
+            status_payload = status_response.json()
 
-            assert (
-                complete_payload["toolCall"]["definition"]
-                == STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
-            )
+            assert status_payload["status"] == "complete"
+            assert status_payload["activityId"] == "atelier-intro"
+            assert status_payload["activityTitle"] == "atelier-intro"
+            assert status_payload["reasoningSummary"] == "Synthèse"
+
+            activity = status_payload["activity"]
+            step = activity["stepSequence"][0]
+            assert step["id"] == "intro"
+            assert step["component"] == "rich-content"
+            assert step["type"] == "rich-content"
+            assert step["config"]["title"] == "Introduction"
+            assert step["config"]["body"] == "Bienvenue"
+            assert step["config"]["media"] == []
+            assert step["config"]["sidebar"] is None
+
             assert len(captured_requests) == 3
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
@@ -287,13 +274,23 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
             ]
             for request in captured_requests:
                 assert request["tools"] == expected_tools
+
+            assert config_path.exists()
+            persisted = json.loads(config_path.read_text(encoding="utf-8"))
+            saved_activity = persisted["activities"][0]
+            assert saved_activity == activity
     finally:
         app.dependency_overrides.clear()
 
 
-def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
+def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch) -> None:
     admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
     app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    captured_requests: list[dict[str, object]] = []
 
     class DummyResponse:
         def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
@@ -366,6 +363,7 @@ def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
             self._index = 0
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
             response = self._responses[self._index]
             self._index += 1
             return response
@@ -375,6 +373,11 @@ def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
             self.responses = FakeResponsesClient()
 
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
 
     try:
         with TestClient(app) as client:
@@ -387,46 +390,45 @@ def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
             response = client.post("/api/admin/activities/generate", json=payload)
             assert response.status_code == 200, response.text
 
-            events = _parse_sse_events(response.text)
-            complete_payload = next(
-                (data for event, data in events if event == "complete"), None
-            )
-            assert complete_payload is not None
+            job_payload = response.json()
+            job_id = job_payload.get("jobId")
+            assert isinstance(job_id, str) and job_id
 
-            tool_call_events = [
-                data for event, data in events if event == "tool_call"
-            ]
-            assert len(tool_call_events) == 3
-            assert tool_call_events[-1]["name"] == "build_step_sequence_activity"
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["status"] == "complete"
 
-            steps = complete_payload["toolCall"]["arguments"]["steps"]
-            assert steps == [
-                {
-                    "id": "intro",
-                    "component": "rich-content",
-                    "config": {
-                        "title": "Introduction",
-                        "body": "Bienvenue",
-                        "media": [
-                            {
-                                "id": "intro-media-1",
-                                "url": "https://cdn.example.com/visuel.png",
-                                "alt": "Illustration",
-                                "caption": None,
-                            }
-                        ],
-                        "sidebar": None,
-                    },
-                    "composite": None,
-                }
+            activity = status_payload["activity"]
+            media_item = activity["stepSequence"][0]["config"]["media"][0]
+            assert media_item["url"] == "https://cdn.example.com/visuel.png"
+            assert media_item["alt"] == "Illustration"
+            assert media_item.get("caption") is None
+            assert isinstance(media_item.get("id"), str) and media_item["id"].startswith("intro-media")
+
+            assert len(captured_requests) == 3
+            expected_tools = [
+                *STEP_SEQUENCE_TOOL_DEFINITIONS,
+                {"type": "web_search"},
             ]
+            for request in captured_requests:
+                assert request["tools"] == expected_tools
+
+            assert config_path.exists()
+            persisted = json.loads(config_path.read_text(encoding="utf-8"))
+            saved_activity = persisted["activities"][0]
+            assert saved_activity == activity
     finally:
         app.dependency_overrides.clear()
 
-
-def test_admin_generate_activity_supports_snake_case_step_id(monkeypatch) -> None:
+def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypatch) -> None:
     admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
     app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    captured_requests: list[dict[str, object]] = []
 
     class DummyResponse:
         def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
@@ -483,6 +485,7 @@ def test_admin_generate_activity_supports_snake_case_step_id(monkeypatch) -> Non
             self._index = 0
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
             response = self._responses[self._index]
             self._index += 1
             return response
@@ -492,6 +495,11 @@ def test_admin_generate_activity_supports_snake_case_step_id(monkeypatch) -> Non
             self.responses = FakeResponsesClient()
 
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
 
     try:
         with TestClient(app) as client:
@@ -504,25 +512,39 @@ def test_admin_generate_activity_supports_snake_case_step_id(monkeypatch) -> Non
             response = client.post("/api/admin/activities/generate", json=payload)
             assert response.status_code == 200, response.text
 
-            events = _parse_sse_events(response.text)
-            complete_payload = next(
-                (data for event, data in events if event == "complete"), None
-            )
-            assert complete_payload is not None
+            job_payload = response.json()
+            job_id = job_payload.get("jobId")
+            assert isinstance(job_id, str) and job_id
 
-            steps = complete_payload["toolCall"]["arguments"]["steps"]
-            assert steps == [
-                {
-                    "id": "intro",
-                    "component": "rich-content",
-                    "config": {
-                        "title": "Introduction",
-                        "body": "Bienvenue",
-                        "media": [],
-                        "sidebar": None,
-                    },
-                    "composite": None,
-                }
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["status"] == "complete"
+
+            activity = status_payload["activity"]
+            step = activity["stepSequence"][0]
+            assert step["id"] == "intro"
+            assert step["component"] == "rich-content"
+            assert step["type"] == "rich-content"
+            assert step["config"] == {
+                "title": "Introduction",
+                "body": "Bienvenue",
+                "media": [],
+                "sidebar": None,
+            }
+            assert step.get("composite") is None
+
+            assert len(captured_requests) == 3
+            expected_tools = [
+                *STEP_SEQUENCE_TOOL_DEFINITIONS,
+                {"type": "web_search"},
             ]
+            for request in captured_requests:
+                assert request["tools"] == expected_tools
+
+            assert config_path.exists()
+            persisted = json.loads(config_path.read_text(encoding="utf-8"))
+            saved_activity = persisted["activities"][0]
+            assert saved_activity == activity
     finally:
         app.dependency_overrides.clear()
