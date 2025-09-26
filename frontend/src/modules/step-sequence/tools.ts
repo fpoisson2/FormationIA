@@ -81,6 +81,10 @@ const nullableConfigSchema = (): JsonSchema => ({
   anyOf: [configSchema(), { type: "null" }],
 });
 
+const nullableSchema = (schema: JsonSchema): JsonSchema => ({
+  anyOf: [JSON.parse(JSON.stringify(schema)), { type: "null" }],
+});
+
 function sanitizeId(value: string): string {
   return value
     .normalize("NFD")
@@ -796,35 +800,65 @@ interface BuildStepSequenceActivityInput {
 const headerSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["eyebrow", "title"],
+  required: ["eyebrow", "title", "subtitle", "badge", "titleAlign"],
   properties: {
-    eyebrow: { type: "string" },
-    title: { type: "string" },
-    subtitle: { type: "string" },
-    badge: { type: "string" },
-    titleAlign: { type: "string", enum: ["left", "center"] },
+    eyebrow: { type: ["string", "null"] },
+    title: { type: ["string", "null"] },
+    subtitle: { type: ["string", "null"] },
+    badge: { type: ["string", "null"] },
+    titleAlign: {
+      anyOf: [
+        { type: "string", enum: ["left", "center"] },
+        { type: "null" },
+      ],
+    },
   },
 };
 
 const layoutSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: [],
+  required: [
+    "activityId",
+    "outerClassName",
+    "innerClassName",
+    "headerClassName",
+    "contentClassName",
+    "contentAs",
+    "withLandingGradient",
+    "useDynamicViewportHeight",
+    "withBasePadding",
+    "withBaseContentSpacing",
+    "withBaseInnerGap",
+    "actions",
+    "headerChildren",
+    "beforeHeader",
+  ],
   properties: {
-    activityId: { type: "string" },
-    outerClassName: { type: "string" },
-    innerClassName: { type: "string" },
-    headerClassName: { type: "string" },
-    contentClassName: { type: "string" },
-    contentAs: { type: "string" },
-    withLandingGradient: { type: "boolean" },
-    useDynamicViewportHeight: { type: "boolean" },
-    withBasePadding: { type: "boolean" },
-    withBaseContentSpacing: { type: "boolean" },
-    withBaseInnerGap: { type: "boolean" },
-    actions: configSchema(),
-    headerChildren: configSchema(),
-    beforeHeader: configSchema(),
+    activityId: { type: ["string", "null"] },
+    outerClassName: { type: ["string", "null"] },
+    innerClassName: { type: ["string", "null"] },
+    headerClassName: { type: ["string", "null"] },
+    contentClassName: { type: ["string", "null"] },
+    contentAs: { type: ["string", "null"] },
+    withLandingGradient: { type: ["boolean", "null"] },
+    useDynamicViewportHeight: { type: ["boolean", "null"] },
+    withBasePadding: { type: ["boolean", "null"] },
+    withBaseContentSpacing: { type: ["boolean", "null"] },
+    withBaseInnerGap: { type: ["boolean", "null"] },
+    actions: nullableConfigSchema(),
+    headerChildren: nullableConfigSchema(),
+    beforeHeader: nullableConfigSchema(),
+  },
+};
+
+const ctaSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["label", "to"],
+  properties: {
+    label: { type: ["string", "null"] },
+    to: { type: ["string", "null"] },
   },
 };
 
@@ -833,21 +867,31 @@ const cardSchema: JsonSchema = {
   additionalProperties: false,
   required: ["title", "description", "highlights", "cta"],
   properties: {
-    title: { type: "string" },
-    description: { type: "string" },
+    title: { type: ["string", "null"] },
+    description: { type: ["string", "null"] },
     highlights: {
+      anyOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "null" },
+      ],
+    },
+    cta: nullableSchema(ctaSchema),
+  },
+};
+
+const overridesSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["header", "layout", "card", "completionId", "stepSequence"],
+  properties: {
+    header: nullableSchema(headerSchema),
+    layout: nullableSchema(layoutSchema),
+    card: nullableSchema(cardSchema),
+    completionId: { type: ["string", "null"] },
+    stepSequence: nullableSchema({
       type: "array",
-      items: { type: "string" },
-    },
-    cta: {
-      type: "object",
-      additionalProperties: false,
-      required: ["label", "to"],
-      properties: {
-        label: { type: "string" },
-        to: { type: "string" },
-      },
-    },
+      items: stepSchema,
+    }),
   },
 };
 
@@ -872,35 +916,30 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
           minItems: 1,
           items: stepSchema,
         },
-        metadata: {
+        metadata: nullableSchema({
           type: "object",
           additionalProperties: false,
-          required: [],
+          required: [
+            "componentKey",
+            "path",
+            "completionId",
+            "enabled",
+            "header",
+            "layout",
+            "card",
+            "overrides",
+          ],
           properties: {
-            componentKey: { type: "string" },
-            path: { type: "string" },
-            completionId: { type: "string" },
-            enabled: { type: "boolean" },
-            header: headerSchema,
-            layout: layoutSchema,
-            card: cardSchema,
-            overrides: {
-              type: "object",
-              additionalProperties: false,
-              required: [],
-              properties: {
-                header: headerSchema,
-                layout: layoutSchema,
-                card: cardSchema,
-                completionId: { type: "string" },
-                stepSequence: {
-                  type: "array",
-                  items: stepSchema,
-                },
-              },
-            },
+            componentKey: { type: ["string", "null"] },
+            path: { type: ["string", "null"] },
+            completionId: { type: ["string", "null"] },
+            enabled: { type: ["boolean", "null"] },
+            header: nullableSchema(headerSchema),
+            layout: nullableSchema(layoutSchema),
+            card: nullableSchema(cardSchema),
+            overrides: nullableSchema(overridesSchema),
           },
-        },
+        }),
       },
     },
   },

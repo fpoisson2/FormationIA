@@ -181,6 +181,96 @@ def _nullable_config_schema() -> dict[str, Any]:
     return {"anyOf": [_config_schema(), {"type": "null"}]}
 
 
+def _nullable_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [deepcopy(schema), {"type": "null"}]}
+
+
+HEADER_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["eyebrow", "title", "subtitle", "badge", "titleAlign"],
+    "properties": {
+        "eyebrow": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "subtitle": {"type": ["string", "null"]},
+        "badge": {"type": ["string", "null"]},
+        "titleAlign": {
+            "anyOf": [
+                {"type": "string", "enum": ["left", "center"]},
+                {"type": "null"},
+            ]
+        },
+    },
+}
+
+
+LAYOUT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "activityId",
+        "outerClassName",
+        "innerClassName",
+        "headerClassName",
+        "contentClassName",
+        "contentAs",
+        "withLandingGradient",
+        "useDynamicViewportHeight",
+        "withBasePadding",
+        "withBaseContentSpacing",
+        "withBaseInnerGap",
+        "actions",
+        "headerChildren",
+        "beforeHeader",
+    ],
+    "properties": {
+        "activityId": {"type": ["string", "null"]},
+        "outerClassName": {"type": ["string", "null"]},
+        "innerClassName": {"type": ["string", "null"]},
+        "headerClassName": {"type": ["string", "null"]},
+        "contentClassName": {"type": ["string", "null"]},
+        "contentAs": {"type": ["string", "null"]},
+        "withLandingGradient": {"type": ["boolean", "null"]},
+        "useDynamicViewportHeight": {"type": ["boolean", "null"]},
+        "withBasePadding": {"type": ["boolean", "null"]},
+        "withBaseContentSpacing": {"type": ["boolean", "null"]},
+        "withBaseInnerGap": {"type": ["boolean", "null"]},
+        "actions": _nullable_config_schema(),
+        "headerChildren": _nullable_config_schema(),
+        "beforeHeader": _nullable_config_schema(),
+    },
+}
+
+
+CTA_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["label", "to"],
+    "properties": {
+        "label": {"type": ["string", "null"]},
+        "to": {"type": ["string", "null"]},
+    },
+}
+
+
+CARD_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["title", "description", "highlights", "cta"],
+    "properties": {
+        "title": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]},
+        "highlights": {
+            "anyOf": [
+                {"type": "array", "items": {"type": "string"}},
+                {"type": "null"},
+            ]
+        },
+        "cta": _nullable_schema(CTA_JSON_SCHEMA),
+    },
+}
+
+
 COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -224,6 +314,25 @@ STEP_JSON_SCHEMA: dict[str, Any] = {
 }
 
 
+OVERRIDES_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["header", "layout", "card", "completionId", "stepSequence"],
+    "properties": {
+        "header": _nullable_schema(HEADER_JSON_SCHEMA),
+        "layout": _nullable_schema(LAYOUT_JSON_SCHEMA),
+        "card": _nullable_schema(CARD_JSON_SCHEMA),
+        "completionId": {"type": ["string", "null"]},
+        "stepSequence": {
+            "anyOf": [
+                {"type": "array", "items": STEP_JSON_SCHEMA},
+                {"type": "null"},
+            ]
+        },
+    },
+}
+
+
 STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
     "type": "function",
     "name": "build_step_sequence_activity",
@@ -240,145 +349,32 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                 "minItems": 1,
                 "items": STEP_JSON_SCHEMA,
             },
-            "metadata": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [],
-                "properties": {
-                    "componentKey": {"type": "string"},
-                    "path": {"type": "string"},
-                    "completionId": {"type": "string"},
-                    "enabled": {"type": "boolean"},
-                    "header": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [],
-                        "properties": {
-                            "eyebrow": {"type": "string"},
-                            "title": {"type": "string"},
-                            "subtitle": {"type": "string"},
-                            "badge": {"type": "string"},
-                            "titleAlign": {
-                                "type": "string",
-                                "enum": ["left", "center"],
-                            },
-                        },
+            "metadata": _nullable_schema(
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "componentKey",
+                        "path",
+                        "completionId",
+                        "enabled",
+                        "header",
+                        "layout",
+                        "card",
+                        "overrides",
+                    ],
+                    "properties": {
+                        "componentKey": {"type": ["string", "null"]},
+                        "path": {"type": ["string", "null"]},
+                        "completionId": {"type": ["string", "null"]},
+                        "enabled": {"type": ["boolean", "null"]},
+                        "header": _nullable_schema(HEADER_JSON_SCHEMA),
+                        "layout": _nullable_schema(LAYOUT_JSON_SCHEMA),
+                        "card": _nullable_schema(CARD_JSON_SCHEMA),
+                        "overrides": _nullable_schema(OVERRIDES_JSON_SCHEMA),
                     },
-                    "layout": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [],
-                        "properties": {
-                            "activityId": {"type": "string"},
-                            "outerClassName": {"type": "string"},
-                            "innerClassName": {"type": "string"},
-                            "headerClassName": {"type": "string"},
-                            "contentClassName": {"type": "string"},
-                            "contentAs": {"type": "string"},
-                            "withLandingGradient": {"type": "boolean"},
-                            "useDynamicViewportHeight": {"type": "boolean"},
-                            "withBasePadding": {"type": "boolean"},
-                            "withBaseContentSpacing": {"type": "boolean"},
-                            "withBaseInnerGap": {"type": "boolean"},
-                            "actions": _config_schema(),
-                            "headerChildren": _config_schema(),
-                            "beforeHeader": _config_schema(),
-                        },
-                    },
-                    "card": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["title", "description", "highlights", "cta"],
-                        "properties": {
-                            "title": {"type": "string"},
-                            "description": {"type": "string"},
-                            "highlights": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "cta": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": ["label", "to"],
-                                "properties": {
-                                    "label": {"type": "string"},
-                                    "to": {"type": "string"},
-                                },
-                            },
-                        },
-                    },
-                    "overrides": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [],
-                        "properties": {
-                            "header": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": [],
-                                "properties": {
-                                    "eyebrow": {"type": "string"},
-                                    "title": {"type": "string"},
-                                    "subtitle": {"type": "string"},
-                                    "badge": {"type": "string"},
-                                    "titleAlign": {
-                                        "type": "string",
-                                        "enum": ["left", "center"],
-                                    },
-                                },
-                            },
-                            "layout": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": [],
-                                "properties": {
-                                    "activityId": {"type": "string"},
-                                    "outerClassName": {"type": "string"},
-                                    "innerClassName": {"type": "string"},
-                                    "headerClassName": {"type": "string"},
-                                    "contentClassName": {"type": "string"},
-                                    "contentAs": {"type": "string"},
-                                    "withLandingGradient": {"type": "boolean"},
-                                    "useDynamicViewportHeight": {"type": "boolean"},
-                                    "withBasePadding": {"type": "boolean"},
-                                    "withBaseContentSpacing": {"type": "boolean"},
-                                    "withBaseInnerGap": {"type": "boolean"},
-                                    "actions": _config_schema(),
-                                    "headerChildren": _config_schema(),
-                                    "beforeHeader": _config_schema(),
-                                },
-                            },
-                            "card": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": ["title", "description", "highlights", "cta"],
-                                "properties": {
-                                    "title": {"type": "string"},
-                                    "description": {"type": "string"},
-                                    "highlights": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                    },
-                                    "cta": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "required": ["label", "to"],
-                                        "properties": {
-                                            "label": {"type": "string"},
-                                            "to": {"type": "string"},
-                                        },
-                                    },
-                                },
-                            },
-                            "completionId": {"type": "string"},
-                            "stepSequence": {
-                                "type": "array",
-                                "items": STEP_JSON_SCHEMA,
-                            },
-                        },
-                    },
-                },
-            },
+                }
+            ),
         },
     },
 }
