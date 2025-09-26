@@ -129,8 +129,8 @@ describe("STEP_SEQUENCE_TOOLS", () => {
     const step = tool.handler({
       idHint: "recapitulatif",
       modules: [
-        { component: "rich-content" },
-        { component: "form", slot: "sidebar" },
+        { component: "rich-content", slot: "main", config: null },
+        { component: "form", slot: "sidebar", config: null },
       ],
       autoAdvance: true,
       continueLabel: "Continuer",
@@ -181,8 +181,8 @@ describe("STEP_SEQUENCE_TOOLS", () => {
       title: "Atelier test",
     });
     expect(entry.overrides?.stepSequence).toMatchObject([
-      { id: richStep.id, component: "rich-content" },
-      { id: formStep.id, component: "form" },
+      { id: richStep.id, component: "rich-content", config: expect.anything() },
+      { id: formStep.id, component: "form", config: expect.anything() },
     ]);
   });
 

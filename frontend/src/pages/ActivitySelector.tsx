@@ -943,7 +943,11 @@ function ActivitySelector(): JSX.Element {
               ? {
                   id: stepId,
                   component,
-                  composite: { modules: [] },
+                  composite: {
+                    modules: [],
+                    autoAdvance: null,
+                    continueLabel: null,
+                  },
                 }
               : {
                   id: stepId,
@@ -1044,7 +1048,12 @@ function ActivitySelector(): JSX.Element {
               return {
                 id: step.id,
                 component,
-                composite: existingComposite ?? { modules: [] },
+                composite:
+                  existingComposite ?? {
+                    modules: [],
+                    autoAdvance: null,
+                    continueLabel: null,
+                  },
               };
             }
             return {
@@ -1085,7 +1094,12 @@ function ActivitySelector(): JSX.Element {
             if (isCompositeStepDefinition(step)) {
               return {
                 ...step,
-                composite: (config as CompositeStepConfig) ?? { modules: [] },
+                composite:
+                  (config as CompositeStepConfig) ?? {
+                    modules: [],
+                    autoAdvance: null,
+                    continueLabel: null,
+                  },
               };
             }
             return {

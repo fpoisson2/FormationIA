@@ -4,14 +4,14 @@ import type { ComponentType } from "react";
 export interface CompositeStepModuleDefinition {
   id: string;
   component: string;
-  slot?: string;
-  config?: unknown;
+  slot: string;
+  config: unknown | null;
 }
 
 export interface CompositeStepConfig {
   modules: CompositeStepModuleDefinition[];
-  autoAdvance?: boolean;
-  continueLabel?: string;
+  autoAdvance: boolean | null;
+  continueLabel: string | null;
 }
 
 export interface ComponentStepDefinition {

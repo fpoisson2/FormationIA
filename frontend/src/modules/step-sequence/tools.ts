@@ -77,6 +77,10 @@ const GENERIC_CONFIG_SCHEMA: JsonSchema = {
 const configSchema = (): JsonSchema =>
   JSON.parse(JSON.stringify(GENERIC_CONFIG_SCHEMA));
 
+const nullableConfigSchema = (): JsonSchema => ({
+  anyOf: [configSchema(), { type: "null" }],
+});
+
 function sanitizeId(value: string): string {
   return value
     .normalize("NFD")
@@ -668,12 +672,45 @@ interface CreateCompositeStepInput extends ToolBaseInput {
 const compositeModuleSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "component", "slot"],
+  required: ["id", "component", "slot", "config"],
   properties: {
     id: { type: "string" },
     component: { type: "string" },
     slot: { type: "string" },
-    config: configSchema(),
+    config: nullableConfigSchema(),
+  },
+};
+
+const componentStepSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "component", "config"],
+  properties: {
+    id: { type: "string" },
+    component: { type: "string" },
+    config: nullableConfigSchema(),
+  },
+};
+
+const compositeStepSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "composite"],
+  properties: {
+    id: { type: "string" },
+    composite: {
+      type: "object",
+      additionalProperties: false,
+      required: ["modules", "autoAdvance", "continueLabel"],
+      properties: {
+        modules: {
+          type: "array",
+          items: compositeModuleSchema,
+        },
+        autoAdvance: { type: ["boolean", "null"] },
+        continueLabel: { type: ["string", "null"] },
+      },
+    },
   },
 };
 
@@ -702,8 +739,8 @@ const createCompositeStep: StepSequenceFunctionTool<
           minItems: 1,
           items: compositeModuleSchema,
         },
-        autoAdvance: { type: "boolean" },
-        continueLabel: { type: "string" },
+        autoAdvance: { type: ["boolean", "null"] },
+        continueLabel: { type: ["string", "null"] },
       },
     },
   },
@@ -716,15 +753,15 @@ const createCompositeStep: StepSequenceFunctionTool<
             ? module.id.trim()
             : `${id}-module-${index + 1}`,
         component: module.component,
-        slot: module.slot,
-        config: module.config,
+        slot: module.slot ?? "main",
+        config: module.config ?? null,
       })
     );
 
     const composite: CompositeStepConfig = {
       modules,
-      autoAdvance: input.autoAdvance,
-      continueLabel: input.continueLabel,
+      autoAdvance: input.autoAdvance ?? null,
+      continueLabel: input.continueLabel ?? null,
     };
 
     return {
@@ -825,29 +862,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
         steps: {
           type: "array",
           minItems: 1,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["id"],
-            properties: {
-              id: { type: "string" },
-              component: { type: "string" },
-              config: configSchema(),
-              composite: {
-                type: "object",
-                additionalProperties: false,
-                required: ["modules"],
-                properties: {
-                  modules: {
-                    type: "array",
-                    items: compositeModuleSchema,
-                  },
-                  autoAdvance: { type: "boolean" },
-                  continueLabel: { type: "string" },
-                },
-              },
-            },
-          },
+          items: { oneOf: [componentStepSchema, compositeStepSchema] },
         },
         metadata: {
           type: "object",
@@ -872,29 +887,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
                 completionId: { type: "string" },
                 stepSequence: {
                   type: "array",
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    required: ["id"],
-                    properties: {
-                      id: { type: "string" },
-                      component: { type: "string" },
-                      config: configSchema(),
-                      composite: {
-                        type: "object",
-                        additionalProperties: false,
-                        required: ["modules"],
-                        properties: {
-                          modules: {
-                            type: "array",
-                            items: compositeModuleSchema,
-                          },
-                          autoAdvance: { type: "boolean" },
-                          continueLabel: { type: "string" },
-                        },
-                      },
-                    },
-                  },
+                  items: { oneOf: [componentStepSchema, compositeStepSchema] },
                 },
               },
             },

@@ -64,8 +64,8 @@ import type { CompositeStepConfig } from "@/modules/step-sequence";
 
 const recapConfig: CompositeStepConfig = {
   modules: [
-    { id: "context", component: "rich-content" },
-    { id: "feedback", component: "form", slot: "sidebar" },
+    { id: "context", component: "rich-content", slot: "main", config: null },
+    { id: "feedback", component: "form", slot: "sidebar", config: null },
   ],
 };
 
@@ -74,10 +74,7 @@ const steps = [
 ];
 ```
 
-Chaque entrée de `modules[]` doit fournir un `id` unique et la clé `component` enregistrée dans le registre. Les propriétés optionnelles sont :
-
-- `slot`: positionne le module dans la mise en page (`"main"` par défaut, `"sidebar"` pour la colonne latérale, `"footer"` pour un bloc plein largeur sous le contenu principal).
-- `config`: configuration spécifique transmise au sous-module concerné.
+Chaque entrée de `modules[]` doit fournir un `id` unique, la clé `component` enregistrée dans le registre ainsi que un `slot` (`"main"` pour la zone centrale, `"sidebar"` pour la colonne latérale, `"footer"` pour un bloc pleine largeur). Les configurations spécifiques sont transmises via la propriété `config` (utiliser `null` lorsqu'aucun réglage n'est nécessaire).
 
 Le composite expose aux sous-modules un contexte StepSequence complet, mais intercepte leurs appels `onAdvance` afin de stocker les `payloads` localement (sous la forme `{ [moduleId]: payload }`).
 

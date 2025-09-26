@@ -177,15 +177,54 @@ def _config_schema() -> dict[str, Any]:
     return deepcopy(_GENERIC_CONFIG_JSON_SCHEMA_TEMPLATE)
 
 
+def _nullable_config_schema() -> dict[str, Any]:
+    return {"anyOf": [_config_schema(), {"type": "null"}]}
+
+
 COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["id", "component", "slot"],
+    "required": ["id", "component", "slot", "config"],
     "properties": {
         "id": {"type": "string"},
         "component": {"type": "string"},
         "slot": {"type": "string"},
-        "config": _config_schema(),
+        "config": _nullable_config_schema(),
+    },
+}
+
+
+COMPONENT_STEP_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["id", "component", "config"],
+    "properties": {
+        "id": {"type": "string"},
+        "component": {"type": "string"},
+        "config": _nullable_config_schema(),
+    },
+}
+
+
+COMPOSITE_STEP_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["id", "composite"],
+    "properties": {
+        "id": {"type": "string"},
+        "composite": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["modules", "autoAdvance", "continueLabel"],
+            "properties": {
+                "modules": {
+                    "type": "array",
+                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
+                },
+                "autoAdvance": {"type": ["boolean", "null"]},
+                "continueLabel": {"type": ["string", "null"]},
+            },
+        },
     },
 }
 
@@ -204,29 +243,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
             "steps": {
                 "type": "array",
                 "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["id"],
-                    "properties": {
-                        "id": {"type": "string"},
-                        "component": {"type": "string"},
-                        "config": _config_schema(),
-                        "composite": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["modules"],
-                            "properties": {
-                                "modules": {
-                                    "type": "array",
-                                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
-                                },
-                                "autoAdvance": {"type": "boolean"},
-                                "continueLabel": {"type": "string"},
-                            },
-                        },
-                    },
-                },
+                "items": {"oneOf": [COMPONENT_STEP_JSON_SCHEMA, COMPOSITE_STEP_JSON_SCHEMA]},
             },
             "metadata": {
                 "type": "object",
@@ -362,27 +379,10 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                             "stepSequence": {
                                 "type": "array",
                                 "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "required": ["id"],
-                                    "properties": {
-                                        "id": {"type": "string"},
-                                        "component": {"type": "string"},
-                                        "config": _config_schema(),
-                                        "composite": {
-                                            "type": "object",
-                                            "additionalProperties": False,
-                                            "required": ["modules"],
-                                            "properties": {
-                                                "modules": {
-                                                    "type": "array",
-                                                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
-                                                },
-                                                "autoAdvance": {"type": "boolean"},
-                                                "continueLabel": {"type": "string"},
-                                            },
-                                        },
-                                    },
+                                    "oneOf": [
+                                        COMPONENT_STEP_JSON_SCHEMA,
+                                        COMPOSITE_STEP_JSON_SCHEMA,
+                                    ],
                                 },
                             },
                         },
