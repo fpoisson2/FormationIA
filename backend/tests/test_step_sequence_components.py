@@ -88,9 +88,13 @@ def test_create_form_step_includes_all_fields() -> None:
         "options",
         "minSelections",
         "maxSelections",
+        "correctAnswer",
+        "correctAnswers",
     }
     assert field["options"][0]["description"] is None
     assert field["minBullets"] is None
+    assert field["correctAnswer"] == "a"
+    assert field["correctAnswers"] is None
 
 
 def test_create_form_step_accepts_id_alias() -> None:
@@ -104,6 +108,8 @@ def test_create_form_step_accepts_id_alias() -> None:
     assert field["type"] == "single_choice"
     assert field["options"] is None
     assert field["minSelections"] is None
+    assert field["correctAnswer"] is None
+    assert field["correctAnswers"] is None
 
 
 def test_create_video_step_preserves_sources_and_captions() -> None:

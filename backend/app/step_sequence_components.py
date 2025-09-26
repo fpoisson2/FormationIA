@@ -358,6 +358,11 @@ GUIDED_FIELD_SCHEMA: dict[str, Any] = _strict_object_schema(
         }),
         "minSelections": _nullable_schema({"type": "number"}),
         "maxSelections": _nullable_schema({"type": "number"}),
+        "correctAnswer": _nullable_schema({"type": "string"}),
+        "correctAnswers": _nullable_schema({
+            "type": "array",
+            "items": {"type": "string"},
+        }),
     }
 )
 
@@ -433,8 +438,11 @@ def create_form_step(
         normalized_field.setdefault("tone", None)
         normalized_field.setdefault("minSelections", None)
         normalized_field.setdefault("maxSelections", None)
+        normalized_field.setdefault("correctAnswer", None)
+        normalized_field.setdefault("correctAnswers", None)
 
         options = normalized_field.get("options")
+        option_values: list[str] = []
         if isinstance(options, Sequence):
             normalized_options: list[dict[str, Any]] = []
             for option in options:
@@ -444,8 +452,38 @@ def create_form_step(
                 normalized_option.setdefault("description", None)
                 normalized_options.append(normalized_option)
             normalized_field["options"] = normalized_options
+            option_values = [
+                str(item.get("value"))
+                for item in normalized_options
+                if isinstance(item, Mapping) and item.get("value") is not None
+            ]
         else:
             normalized_field["options"] = None
+            option_values = []
+
+        field_type = normalized_field.get("type")
+        if field_type == "single_choice":
+            correct_answer = normalized_field.get("correctAnswer")
+            if not isinstance(correct_answer, str) or correct_answer not in option_values:
+                normalized_field["correctAnswer"] = option_values[0] if option_values else None
+            normalized_field["correctAnswers"] = None
+        elif field_type == "multiple_choice":
+            raw_answers = normalized_field.get("correctAnswers")
+            filtered: list[str] = []
+            if isinstance(raw_answers, Sequence):
+                seen: set[str] = set()
+                for value in raw_answers:
+                    if not isinstance(value, str):
+                        continue
+                    if value not in option_values or value in seen:
+                        continue
+                    seen.add(value)
+                    filtered.append(value)
+            normalized_field["correctAnswers"] = filtered or None
+            normalized_field["correctAnswer"] = None
+        else:
+            normalized_field["correctAnswer"] = None
+            normalized_field["correctAnswers"] = None
 
         normalized_fields.append(normalized_field)
 
@@ -1146,7 +1184,10 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "create_form_step",
-        "description": "Crée une étape formulaire interactive avec validations GuidedFields.",
+        "description": (
+            "Crée une étape formulaire interactive avec validations GuidedFields, "
+            "en précisant correctAnswer ou correctAnswers pour les QCM."
+        ),
         "strict": True,
         "parameters": _strict_object_schema(
             {

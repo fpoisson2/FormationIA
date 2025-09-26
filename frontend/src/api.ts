@@ -62,6 +62,7 @@ export interface ChoiceFieldOption {
 export interface SingleChoiceFieldSpec extends BaseFieldSpec {
   type: "single_choice";
   options: ChoiceFieldOption[];
+  correctAnswer?: string;
 }
 
 export interface MultipleChoiceFieldSpec extends BaseFieldSpec {
@@ -69,6 +70,7 @@ export interface MultipleChoiceFieldSpec extends BaseFieldSpec {
   options: ChoiceFieldOption[];
   minSelections?: number;
   maxSelections?: number;
+  correctAnswers?: string[];
 }
 
 export type FieldSpec =
