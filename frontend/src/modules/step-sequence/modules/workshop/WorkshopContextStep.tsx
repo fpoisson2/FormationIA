@@ -3,7 +3,7 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import InfoCard from "../../../../components/InfoCard";
 import type { StepComponentProps } from "../../types";
 
-interface WorkshopContextStepConfig {
+export interface WorkshopContextStepConfig {
   defaultText?: string;
 }
 

@@ -8,7 +8,13 @@ registerStepComponent("workshop-context", WorkshopContextStep);
 registerStepComponent("workshop-comparison", WorkshopComparisonStep);
 registerStepComponent("workshop-synthesis", WorkshopSynthesisStep);
 
-export type { WorkshopContextStepState } from "./WorkshopContextStep";
-export type { WorkshopComparisonStepState } from "./WorkshopComparisonStep";
-export type { WorkshopSynthesisStepState } from "./WorkshopSynthesisStep";
+export type { WorkshopContextStepConfig, WorkshopContextStepState } from "./WorkshopContextStep";
+export type {
+  WorkshopComparisonStepConfig,
+  WorkshopComparisonStepState,
+} from "./WorkshopComparisonStep";
+export type {
+  WorkshopSynthesisStepConfig,
+  WorkshopSynthesisStepState,
+} from "./WorkshopSynthesisStep";
 

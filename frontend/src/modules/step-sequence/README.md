@@ -97,3 +97,23 @@ type StepSequenceActivityConfig = {
 ```
 
 Les étapes peuvent provenir directement des props ou de la clé `steps` de ces métadonnées. Lorsque la dernière étape appelle `onAdvance`, le callback `onComplete` fourni à l’activité est déclenché avec les `payloads` agrégés par identifiant d’étape.
+
+## Tools pour la génération assistée
+
+Le fichier `tools.ts` expose une série de tools au format `Responses` pour générer dynamiquement des étapes et des activités complètes. Chaque entrée de `STEP_SEQUENCE_TOOLS` regroupe un schéma JSON (clé `definition`) et un handler TypeScript (`handler`).
+
+```ts
+import { STEP_SEQUENCE_TOOLS } from "@/modules/step-sequence";
+
+const richContentStep = STEP_SEQUENCE_TOOLS.create_rich_content_step.handler({
+  title: "Introduction",
+  body: "Définissons la mission et les objectifs.",
+});
+
+const activityPayload = STEP_SEQUENCE_TOOLS.build_step_sequence_activity.handler({
+  activityId: "atelier",
+  steps: [richContentStep],
+});
+```
+
+L’utilitaire `generateStepId` est également disponible pour dériver des identifiants compatibles avec les conventions existantes (`workshop-…`, `step-…`, etc.).
