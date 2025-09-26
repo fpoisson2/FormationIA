@@ -934,6 +934,11 @@ def _sse_event(event: str, data: Any | None = None) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+def _sse_comment(comment: str) -> str:
+    sanitized = " ".join(str(comment).split()) if comment else ""
+    return f": {sanitized}\n\n"
+
+
 def _sse_headers() -> dict[str, str]:
     return {
         "Cache-Control": "no-cache",
@@ -2539,6 +2544,9 @@ def _validate_model(model_name: str) -> str:
 def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: SummaryRequest) -> StreamingResponse:
 
     def summary_generator() -> Generator[str, None, None]:
+        # Envoie un petit morceau immédiatement pour éviter que les proxys n'interrompent
+        # la connexion en attendant les premiers tokens du modèle.
+        yield " "
         try:
             with client.responses.stream(
                 model=model,
@@ -2699,38 +2707,38 @@ def generate_flashcards_legacy(payload: FlashcardRequest, _: None = Depends(_req
 
 def _handle_plan(payload: PlanRequest) -> StreamingResponse:
     client = _ensure_client()
-    try:
-        plan_payload = _request_plan_from_llm(client, payload)
-    except PlanGenerationError as exc:
-        error_message = str(exc)
-        def error_stream() -> Generator[str, None, None]:
-            yield _sse_event("error", {"message": error_message})
-
-        return StreamingResponse(error_stream(), media_type="text/event-stream", headers=_sse_headers())
-
-    attempts = _RUN_ATTEMPTS.get(payload.run_id, 0) + 1
-    _RUN_ATTEMPTS[payload.run_id] = attempts
-
-    simulation = _simulate_plan(payload, plan_payload.plan)
-    optimal_length = _compute_optimal_path_length(payload.start, payload.goal, payload.blocked)
-    steps_executed = len(simulation["steps"])
-    surcout = None
-    if optimal_length is not None:
-        surcout = steps_executed - optimal_length
-
-    stats_payload: dict[str, Any] = {
-        "runId": payload.run_id,
-        "attempts": attempts,
-        "stepsExecuted": steps_executed,
-        "optimalPathLength": optimal_length,
-        "surcout": surcout,
-        "success": simulation["success"],
-        "finalPosition": simulation["final_position"],
-    }
-    if plan_payload.notes:
-        stats_payload["ambiguity"] = plan_payload.notes
 
     def plan_stream() -> Generator[str, None, None]:
+        yield _sse_comment("keep-alive")
+
+        try:
+            plan_payload = _request_plan_from_llm(client, payload)
+        except PlanGenerationError as exc:
+            yield _sse_event("error", {"message": str(exc)})
+            return
+
+        attempts = _RUN_ATTEMPTS.get(payload.run_id, 0) + 1
+        _RUN_ATTEMPTS[payload.run_id] = attempts
+
+        simulation = _simulate_plan(payload, plan_payload.plan)
+        optimal_length = _compute_optimal_path_length(payload.start, payload.goal, payload.blocked)
+        steps_executed = len(simulation["steps"])
+        surcout = None
+        if optimal_length is not None:
+            surcout = steps_executed - optimal_length
+
+        stats_payload: dict[str, Any] = {
+            "runId": payload.run_id,
+            "attempts": attempts,
+            "stepsExecuted": steps_executed,
+            "optimalPathLength": optimal_length,
+            "surcout": surcout,
+            "success": simulation["success"],
+            "finalPosition": simulation["final_position"],
+        }
+        if plan_payload.notes:
+            stats_payload["ambiguity"] = plan_payload.notes
+
         plan_dump = plan_payload.model_dump(exclude_none=True)
         plan_dump["plan"] = [action.model_dump() for action in plan_payload.plan]
         yield _sse_event("plan", plan_dump)
@@ -2749,7 +2757,6 @@ def _handle_plan(payload: PlanRequest) -> StreamingResponse:
         yield _sse_event("stats", stats_payload)
 
     return StreamingResponse(plan_stream(), media_type="text/event-stream", headers=_sse_headers())
-
 
 @app.post("/api/plan")
 def generate_plan(payload: PlanRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
