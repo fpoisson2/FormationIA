@@ -851,6 +851,38 @@ function ActivitySelector(): JSX.Element {
     void loadSavedConfig();
   }, [loadSavedConfig]);
 
+  const refreshGeneratedActivity = useCallback(
+    async (activityId: string | null) => {
+      if (!activityId) {
+        return null;
+      }
+
+      try {
+        const response = await admin.activities.get(token);
+        const rawActivities = Array.isArray(response.activities)
+          ? (response.activities as ActivityConfigEntry[])
+          : [];
+        const target = rawActivities.find((activity) => activity.id === activityId);
+        if (!target) {
+          return null;
+        }
+
+        const resolved = resolveActivityDefinition(target);
+        setEditableActivities((previous) => {
+          const filtered = previous.filter(
+            (activity) => activity.id !== resolved.id
+          );
+          return [...filtered, resolved];
+        });
+
+        return resolved;
+      } catch (error) {
+        throw error;
+      }
+    },
+    [token]
+  );
+
   useEffect(() => {
     if (!activeGenerationJobId) {
       return;
@@ -1545,38 +1577,6 @@ function ActivitySelector(): JSX.Element {
     trimmedGenerationForm,
     token,
   ]);
-
-  const refreshGeneratedActivity = useCallback(
-    async (activityId: string | null) => {
-      if (!activityId) {
-        return null;
-      }
-
-      try {
-        const response = await admin.activities.get(token);
-        const rawActivities = Array.isArray(response.activities)
-          ? (response.activities as ActivityConfigEntry[])
-          : [];
-        const target = rawActivities.find((activity) => activity.id === activityId);
-        if (!target) {
-          return null;
-        }
-
-        const resolved = resolveActivityDefinition(target);
-        setEditableActivities((previous) => {
-          const filtered = previous.filter(
-            (activity) => activity.id !== resolved.id
-          );
-          return [...filtered, resolved];
-        });
-
-        return resolved;
-      } catch (error) {
-        throw error;
-      }
-    },
-    [token]
-  );
 
   const activitiesToDisplay = isEditMode
     ? editableActivities
