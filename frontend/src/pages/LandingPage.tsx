@@ -82,7 +82,7 @@ function LandingPage(): JSX.Element {
   }, [isLTISession, ltiLoading, navigate]);
 
   return (
-    <div className="landing-gradient min-h-screen px-6 pb-24 pt-10 text-[color:var(--brand-black)]">
+    <div className="landing-gradient min-h-screen px-4 pb-24 pt-10 text-[color:var(--brand-black)] sm:px-6">
       <div className="mx-auto flex max-w-6xl flex-col gap-16">
         <header className="flex flex-col gap-6 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm backdrop-blur md:flex-row md:items-center md:justify-between">
           <Link to="/" className="flex items-center gap-3">

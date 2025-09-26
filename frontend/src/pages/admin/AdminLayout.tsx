@@ -25,7 +25,7 @@ export function AdminLayout(): JSX.Element {
   }, [expiresAt]);
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-10 px-6 py-10 text-[color:var(--brand-black)]">
+    <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-10 px-4 py-10 text-[color:var(--brand-black)] sm:px-6">
       <header className="space-y-6 rounded-3xl border border-white/60 bg-white/95 p-8 shadow-lg backdrop-blur">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-4 text-sm text-[color:var(--brand-charcoal)]/90 sm:text-base">

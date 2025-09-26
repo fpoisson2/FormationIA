@@ -89,7 +89,7 @@ function ActivityLayout({
     <div
       className={combineClasses(
         useDynamicViewportHeight ? "min-h-[100dvh]" : "min-h-screen",
-        withBasePadding ? "px-6 pb-16 pt-10" : "",
+        withBasePadding ? "px-4 pb-16 pt-10 sm:px-6" : "",
         "text-[color:var(--brand-black)]",
         withLandingGradient ? "landing-gradient" : "",
         outerClassName
