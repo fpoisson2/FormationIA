@@ -1062,6 +1062,13 @@ def _merge_step_definition(
     for key in ("id", "component", "config", "composite"):
         merged.setdefault(key, None)
 
+    step_id = merged.get("id")
+    if step_id is not None:
+        merged["id"] = str(step_id)
+
+    merged.pop("stepId", None)
+    merged.pop("step_id", None)
+
     return merged
 
 
@@ -1078,12 +1085,21 @@ def _enrich_steps_argument(
         if not isinstance(step, dict):
             continue
 
-        step_id = step.get("id") or step.get("stepId")
+        normalized_step = dict(step)
+
+        step_id = (
+            normalized_step.get("id")
+            or normalized_step.get("stepId")
+            or normalized_step.get("step_id")
+        )
+        if step_id is not None and normalized_step.get("id") in {None, ""}:
+            normalized_step["id"] = step_id
+
         cached = None
         if step_id is not None:
             cached = cached_steps.get(str(step_id))
 
-        enriched.append(_merge_step_definition(step, cached))
+        enriched.append(_merge_step_definition(normalized_step, cached))
 
     return enriched
 
