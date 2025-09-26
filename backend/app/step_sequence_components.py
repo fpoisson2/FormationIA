@@ -327,8 +327,7 @@ GUIDED_FIELD_SCHEMA: dict[str, Any] = _strict_object_schema(
         }),
         "minSelections": _nullable_schema({"type": "number"}),
         "maxSelections": _nullable_schema({"type": "number"}),
-    },
-    required=("id", "label", "type"),
+    }
 )
 
 
@@ -377,6 +376,18 @@ def create_form_step(
             continue
 
         normalized_field = deepcopy(field)
+        normalized_field.setdefault("minBullets", None)
+        normalized_field.setdefault("maxBullets", None)
+        normalized_field.setdefault("maxWordsPerBullet", None)
+        normalized_field.setdefault("mustContainAny", None)
+        normalized_field.setdefault("meals", None)
+        normalized_field.setdefault("minWords", None)
+        normalized_field.setdefault("maxWords", None)
+        normalized_field.setdefault("forbidWords", None)
+        normalized_field.setdefault("tone", None)
+        normalized_field.setdefault("minSelections", None)
+        normalized_field.setdefault("maxSelections", None)
+
         options = normalized_field.get("options")
         if isinstance(options, Sequence):
             normalized_options: list[dict[str, Any]] = []
@@ -387,6 +398,8 @@ def create_form_step(
                 normalized_option.setdefault("description", None)
                 normalized_options.append(normalized_option)
             normalized_field["options"] = normalized_options
+        else:
+            normalized_field["options"] = None
 
         normalized_fields.append(normalized_field)
 

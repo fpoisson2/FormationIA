@@ -70,7 +70,26 @@ def test_create_form_step_includes_all_fields() -> None:
     assert step["component"] == "form"
     config = step["config"]
     assert set(config) == {"fields", "submitLabel", "allowEmpty", "initialValues"}
-    assert config["fields"][0]["options"][0]["description"] is None
+    field = config["fields"][0]
+    assert set(field) == {
+        "id",
+        "label",
+        "type",
+        "minBullets",
+        "maxBullets",
+        "maxWordsPerBullet",
+        "mustContainAny",
+        "meals",
+        "minWords",
+        "maxWords",
+        "forbidWords",
+        "tone",
+        "options",
+        "minSelections",
+        "maxSelections",
+    }
+    assert field["options"][0]["description"] is None
+    assert field["minBullets"] is None
 
 
 def test_create_form_step_accepts_id_alias() -> None:
@@ -80,7 +99,10 @@ def test_create_form_step_accepts_id_alias() -> None:
     )
 
     assert step["id"] == "alias"
-    assert step["config"]["fields"][0]["type"] == "single_choice"
+    field = step["config"]["fields"][0]
+    assert field["type"] == "single_choice"
+    assert field["options"] is None
+    assert field["minSelections"] is None
 
 
 def test_create_video_step_preserves_sources_and_captions() -> None:
