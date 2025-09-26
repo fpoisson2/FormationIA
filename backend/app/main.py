@@ -975,13 +975,31 @@ def _build_activity_generation_prompt(
 ) -> str:
     sections: list[str] = [
         "Conçois une activité pédagogique StepSequence en français pour la plateforme Formation IA.",
-        f"Thématique principale : {details.theme}.",
-        f"Public cible : {details.audience}.",
-        f"Objectifs pédagogiques prioritaires : {details.objectives}.",
-        f"Livrable ou production attendue : {details.deliverable}.",
     ]
+    provided_context = False
+
+    if details.theme:
+        sections.append(f"Thématique principale : {details.theme}.")
+        provided_context = True
+    if details.audience:
+        sections.append(f"Public cible : {details.audience}.")
+        provided_context = True
+    if details.objectives:
+        sections.append(
+            f"Objectifs pédagogiques prioritaires : {details.objectives}."
+        )
+        provided_context = True
+    if details.deliverable:
+        sections.append(
+            f"Livrable ou production attendue : {details.deliverable}."
+        )
+        provided_context = True
     if details.constraints:
         sections.append(f"Contraintes ou ressources à intégrer : {details.constraints}.")
+    if not provided_context:
+        sections.append(
+            "Aucune information spécifique n'a été fournie : propose un scénario d'initiation cohérent pour des professionnels en formation continue."
+        )
     if existing_ids:
         ordered = ", ".join(sorted(existing_ids))
         sections.append(
@@ -1052,11 +1070,23 @@ class FlashcardRequest(SummaryRequest):
 class ActivityGenerationDetails(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    theme: str = Field(..., min_length=5, max_length=240)
-    audience: str = Field(..., min_length=3, max_length=240)
-    objectives: str = Field(..., min_length=10, max_length=600)
-    deliverable: str = Field(..., min_length=5, max_length=360)
+    theme: str | None = Field(default=None, max_length=240)
+    audience: str | None = Field(default=None, max_length=240)
+    objectives: str | None = Field(default=None, max_length=600)
+    deliverable: str | None = Field(default=None, max_length=360)
     constraints: str | None = Field(default=None, max_length=600)
+
+    @model_validator(mode="after")
+    def _normalise_empty_strings(self) -> "ActivityGenerationDetails":
+        for field_name in ("theme", "audience", "objectives", "deliverable", "constraints"):
+            value = getattr(self, field_name)
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if not trimmed:
+                    setattr(self, field_name, None)
+                else:
+                    setattr(self, field_name, trimmed)
+        return self
 
 
 class ActivityGenerationRequest(BaseModel):

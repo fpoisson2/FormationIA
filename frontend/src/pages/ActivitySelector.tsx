@@ -16,6 +16,7 @@ import {
   type ActivitySelectorHeaderConfig,
   type ProgressResponse,
   type ActivityGenerationResponse,
+  type ActivityGenerationDetailsPayload,
   type GenerateActivityPayload,
 } from "../api";
 import {
@@ -64,6 +65,30 @@ const STEP_TYPE_LABELS: Record<string, string> = {
 const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
 
 const NOOP = () => {};
+
+function extractErrorMessage(error: unknown): string | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+  const trimmed = error.message?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { detail?: unknown };
+      const detail = parsed?.detail;
+      if (typeof detail === "string" && detail.trim().length > 0) {
+        return detail.trim();
+      }
+    } catch {
+      // ignore malformed JSON payloads
+    }
+  }
+
+  return trimmed;
+}
 
 interface ActivityGenerationFormState {
   theme: string;
@@ -639,12 +664,6 @@ function ActivitySelector(): JSX.Element {
     }),
     [generationForm]
   );
-
-  const isGenerationFormValid =
-    trimmedGenerationForm.theme.length >= 5 &&
-    trimmedGenerationForm.audience.length >= 3 &&
-    trimmedGenerationForm.objectives.length >= 10 &&
-    trimmedGenerationForm.deliverable.length >= 5;
 
   const generationModelHelper = useMemo(
     () =>
@@ -1228,32 +1247,32 @@ function ActivitySelector(): JSX.Element {
     if (isGeneratingActivity) {
       return;
     }
-    if (!isGenerationFormValid) {
-      setGenerationError("Complétez les informations requises avant de lancer la génération.");
-      return;
-    }
-    if (!token) {
-      setGenerationError("Authentification administrateur requise pour générer une activité.");
-      return;
-    }
-
     setIsGeneratingActivity(true);
     setGenerationError(null);
 
     try {
+      const details: ActivityGenerationDetailsPayload = {};
+      if (trimmedGenerationForm.theme) {
+        details.theme = trimmedGenerationForm.theme;
+      }
+      if (trimmedGenerationForm.audience) {
+        details.audience = trimmedGenerationForm.audience;
+      }
+      if (trimmedGenerationForm.objectives) {
+        details.objectives = trimmedGenerationForm.objectives;
+      }
+      if (trimmedGenerationForm.deliverable) {
+        details.deliverable = trimmedGenerationForm.deliverable;
+      }
+      if (trimmedGenerationForm.constraints) {
+        details.constraints = trimmedGenerationForm.constraints;
+      }
+
       const payload: GenerateActivityPayload = {
         model: generationModel,
         verbosity: generationVerbosity,
         thinking: generationThinking,
-        details: {
-          theme: trimmedGenerationForm.theme,
-          audience: trimmedGenerationForm.audience,
-          objectives: trimmedGenerationForm.objectives,
-          deliverable: trimmedGenerationForm.deliverable,
-          ...(trimmedGenerationForm.constraints
-            ? { constraints: trimmedGenerationForm.constraints }
-            : {}),
-        },
+        details,
         existingActivityIds,
       };
 
@@ -1294,10 +1313,9 @@ function ActivitySelector(): JSX.Element {
       });
     } catch (error) {
       console.error("Erreur lors de la génération d'activité:", error);
+      const detail = extractErrorMessage(error);
       setGenerationError(
-        error instanceof Error
-          ? error.message
-          : "La génération de l'activité a échoué. Veuillez réessayer."
+        detail ?? "La génération de l'activité a échoué. Veuillez réessayer."
       );
     } finally {
       setIsGeneratingActivity(false);
@@ -1307,7 +1325,6 @@ function ActivitySelector(): JSX.Element {
     generationModel,
     generationThinking,
     generationVerbosity,
-    isGenerationFormValid,
     isGeneratingActivity,
     trimmedGenerationForm,
     token,
@@ -1793,7 +1810,7 @@ function ActivitySelector(): JSX.Element {
             <button
               type="button"
               onClick={handleSubmitGeneration}
-              disabled={!isGenerationFormValid || isGeneratingActivity}
+              disabled={isGeneratingActivity}
               className="inline-flex items-center justify-center rounded-full border border-sky-500/50 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700 disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-200"
             >
               {isGeneratingActivity ? "Génération en cours..." : "Générer l'activité"}
@@ -1804,6 +1821,9 @@ function ActivitySelector(): JSX.Element {
         <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
           L’IA propose une base structurée (carte d’activité, header et étapes). Vous pourrez ensuite modifier chaque élément
           avant d’enregistrer la configuration.
+        </p>
+        <p className="text-xs text-[color:var(--brand-charcoal)]/70">
+          Tous les champs ci-dessous sont optionnels&nbsp;: indique seulement les éléments qui apportent du contexte à la génération.
         </p>
         {generationError ? (
           <div className="rounded-xl border border-red-200/80 bg-red-50/80 p-3 text-sm text-red-700">
@@ -1827,7 +1847,6 @@ function ActivitySelector(): JSX.Element {
                 }
                 rows={field.rows ?? 3}
                 placeholder={field.placeholder}
-                required={field.key !== "constraints"}
                 className="resize-none rounded-xl border border-[color:var(--brand-charcoal)]/15 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none focus:ring-0"
               />
             </label>
