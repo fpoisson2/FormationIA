@@ -4,27 +4,27 @@ import type { ComponentType } from "react";
 export interface CompositeStepModuleDefinition {
   id: string;
   component: string;
-  slot?: string;
-  config?: unknown;
+  slot: string;
+  config: unknown | null;
 }
 
 export interface CompositeStepConfig {
   modules: CompositeStepModuleDefinition[];
-  autoAdvance?: boolean;
-  continueLabel?: string;
+  autoAdvance: boolean | null;
+  continueLabel: string | null;
 }
 
 export interface ComponentStepDefinition {
   id: string;
   component: string;
-  config?: unknown;
-  composite?: never;
+  config?: unknown | null;
+  composite?: null;
 }
 
 export interface CompositeStepDefinition {
   id: string;
   component?: string;
-  config?: unknown;
+  config?: unknown | null;
   composite: CompositeStepConfig;
 }
 
@@ -39,6 +39,7 @@ export function isCompositeStepDefinition(
     typeof step === "object" &&
     step !== null &&
     "composite" in step &&
+    step.composite !== null &&
     typeof step.composite !== "undefined"
   );
 }

@@ -120,18 +120,18 @@ export function ensureDesignerStepId(
     typeof step.component === "string" && step.component.trim().length > 0
       ? step.component
       : "custom";
-  if (step.composite !== undefined) {
+  if (step.composite != null) {
     return {
       id,
       component,
       config:
-        step.config === undefined ? undefined : cloneStepConfig(step.config),
+        step.config == null ? step.config : cloneStepConfig(step.config),
       composite: cloneStepConfig(step.composite),
     } satisfies StepDefinition;
   }
   const config =
-    step.config === undefined ? undefined : cloneStepConfig(step.config);
-  return { id, component, config } satisfies StepDefinition;
+    step.config == null ? step.config : cloneStepConfig(step.config);
+  return { id, component, config, composite: null } satisfies StepDefinition;
 }
 
 export function createPlaceholderQuarterSteps(
@@ -339,12 +339,12 @@ export function ensureQuarterSequenceStep(
       ? step.component
       : "custom";
 
-  if (step.composite !== undefined) {
+  if (step.composite != null) {
     return {
       id,
       component,
       config:
-        step.config === undefined ? undefined : cloneStepConfig(step.config),
+        step.config == null ? step.config : cloneStepConfig(step.config),
       composite: cloneStepConfig(step.composite),
     } satisfies StepDefinition;
   }
@@ -353,7 +353,8 @@ export function ensureQuarterSequenceStep(
     id,
     component,
     config:
-      step.config === undefined ? undefined : cloneStepConfig(step.config),
+      step.config == null ? step.config : cloneStepConfig(step.config),
+    composite: null,
   } satisfies StepDefinition;
 }
 

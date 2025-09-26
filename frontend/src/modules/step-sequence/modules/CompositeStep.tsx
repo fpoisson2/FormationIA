@@ -95,7 +95,15 @@ export function CompositeStep({
     return null;
   }
 
-  const modules = compositeConfig.modules ?? [];
+  const modules = useMemo(
+    () =>
+      (compositeConfig.modules ?? []).map((module) => ({
+        ...module,
+        slot: module.slot ?? "main",
+        config: module.config ?? null,
+      })),
+    [compositeConfig.modules]
+  );
   const [modulePayloads, setModulePayloads] = useState<Record<string, unknown>>(
     () => pickInitialPayloads(modules, payload)
   );
@@ -138,13 +146,13 @@ export function CompositeStep({
       }
       const nextConfig: CompositeStepConfig = {
         ...compositeConfig,
-        modules: compositeConfig.modules.map((module) =>
+        modules: modules.map((module) =>
           module.id === moduleId ? { ...module, config: nextModuleConfig } : module
         ),
       };
       onUpdateConfig(nextConfig);
     },
-    [compositeConfig, onUpdateConfig]
+    [compositeConfig, modules, onUpdateConfig]
   );
 
   const allModulesCompleted = useMemo(
@@ -188,6 +196,8 @@ export function CompositeStep({
     const nextModule: CompositeStepModuleDefinition = {
       id: generateModuleId("module"),
       component: nextModuleType,
+      slot: "main",
+      config: null,
     };
     onUpdateConfig({
       ...compositeConfig,
@@ -256,10 +266,9 @@ export function CompositeStep({
         const nextModule: CompositeStepModuleDefinition = {
           id: module.id,
           component: nextType,
+          slot: module.slot ?? "main",
+          config: null,
         };
-        if (module.slot) {
-          nextModule.slot = module.slot;
-        }
         return nextModule;
       });
       onUpdateConfig({

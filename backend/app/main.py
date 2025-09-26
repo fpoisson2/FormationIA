@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 from collections import deque
+from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -141,15 +142,193 @@ PROMPT_EVALUATION_FORMAT = {
 }
 
 
+_GENERIC_CONFIG_JSON_SCHEMA_TEMPLATE: dict[str, Any] = {
+    "$defs": {
+        "configValue": {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "number"},
+                {"type": "integer"},
+                {"type": "boolean"},
+                {"type": "null"},
+                {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/configValue"},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "patternProperties": {
+                        r".+": {"$ref": "#/$defs/configValue"},
+                    },
+                },
+            ]
+        }
+    },
+    "type": "object",
+    "additionalProperties": False,
+    "patternProperties": {
+        r".+": {"$ref": "#/$defs/configValue"},
+    },
+}
+
+
+def _config_schema() -> dict[str, Any]:
+    return deepcopy(_GENERIC_CONFIG_JSON_SCHEMA_TEMPLATE)
+
+
+def _nullable_config_schema() -> dict[str, Any]:
+    return {"anyOf": [_config_schema(), {"type": "null"}]}
+
+
+def _nullable_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [deepcopy(schema), {"type": "null"}]}
+
+
+HEADER_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["eyebrow", "title", "subtitle", "badge", "titleAlign"],
+    "properties": {
+        "eyebrow": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "subtitle": {"type": ["string", "null"]},
+        "badge": {"type": ["string", "null"]},
+        "titleAlign": {
+            "anyOf": [
+                {"type": "string", "enum": ["left", "center"]},
+                {"type": "null"},
+            ]
+        },
+    },
+}
+
+
+LAYOUT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "activityId",
+        "outerClassName",
+        "innerClassName",
+        "headerClassName",
+        "contentClassName",
+        "contentAs",
+        "withLandingGradient",
+        "useDynamicViewportHeight",
+        "withBasePadding",
+        "withBaseContentSpacing",
+        "withBaseInnerGap",
+        "actions",
+        "headerChildren",
+        "beforeHeader",
+    ],
+    "properties": {
+        "activityId": {"type": ["string", "null"]},
+        "outerClassName": {"type": ["string", "null"]},
+        "innerClassName": {"type": ["string", "null"]},
+        "headerClassName": {"type": ["string", "null"]},
+        "contentClassName": {"type": ["string", "null"]},
+        "contentAs": {"type": ["string", "null"]},
+        "withLandingGradient": {"type": ["boolean", "null"]},
+        "useDynamicViewportHeight": {"type": ["boolean", "null"]},
+        "withBasePadding": {"type": ["boolean", "null"]},
+        "withBaseContentSpacing": {"type": ["boolean", "null"]},
+        "withBaseInnerGap": {"type": ["boolean", "null"]},
+        "actions": _nullable_config_schema(),
+        "headerChildren": _nullable_config_schema(),
+        "beforeHeader": _nullable_config_schema(),
+    },
+}
+
+
+CTA_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["label", "to"],
+    "properties": {
+        "label": {"type": ["string", "null"]},
+        "to": {"type": ["string", "null"]},
+    },
+}
+
+
+CARD_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["title", "description", "highlights", "cta"],
+    "properties": {
+        "title": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]},
+        "highlights": {
+            "anyOf": [
+                {"type": "array", "items": {"type": "string"}},
+                {"type": "null"},
+            ]
+        },
+        "cta": _nullable_schema(CTA_JSON_SCHEMA),
+    },
+}
+
+
 COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["component"],
+    "required": ["id", "component", "slot", "config"],
     "properties": {
         "id": {"type": "string"},
         "component": {"type": "string"},
         "slot": {"type": "string"},
-        "config": {},
+        "config": _nullable_config_schema(),
+    },
+}
+
+
+COMPOSITE_STEP_CONFIG_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["modules", "autoAdvance", "continueLabel"],
+    "properties": {
+        "modules": {
+            "type": "array",
+            "items": COMPOSITE_MODULE_JSON_SCHEMA,
+        },
+        "autoAdvance": {"type": ["boolean", "null"]},
+        "continueLabel": {"type": ["string", "null"]},
+    },
+}
+
+
+STEP_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["id", "component", "config", "composite"],
+    "properties": {
+        "id": {"type": "string"},
+        "component": {"type": ["string", "null"]},
+        "config": _nullable_config_schema(),
+        "composite": {
+            "anyOf": [COMPOSITE_STEP_CONFIG_JSON_SCHEMA, {"type": "null"}]
+        },
+    },
+}
+
+
+OVERRIDES_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["header", "layout", "card", "completionId", "stepSequence"],
+    "properties": {
+        "header": _nullable_schema(HEADER_JSON_SCHEMA),
+        "layout": _nullable_schema(LAYOUT_JSON_SCHEMA),
+        "card": _nullable_schema(CARD_JSON_SCHEMA),
+        "completionId": {"type": ["string", "null"]},
+        "stepSequence": {
+            "anyOf": [
+                {"type": "array", "items": STEP_JSON_SCHEMA},
+                {"type": "null"},
+            ]
+        },
     },
 }
 
@@ -162,197 +341,40 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
     "parameters": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["activityId", "steps"],
+        "required": ["activityId", "steps", "metadata"],
         "properties": {
             "activityId": {"type": "string"},
             "steps": {
                 "type": "array",
                 "minItems": 1,
-                "items": {
+                "items": STEP_JSON_SCHEMA,
+            },
+            "metadata": _nullable_schema(
+                {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["id"],
+                    "required": [
+                        "componentKey",
+                        "path",
+                        "completionId",
+                        "enabled",
+                        "header",
+                        "layout",
+                        "card",
+                        "overrides",
+                    ],
                     "properties": {
-                        "id": {"type": "string"},
-                        "component": {"type": "string"},
-                        "config": {},
-                        "composite": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["modules"],
-                            "properties": {
-                                "modules": {
-                                    "type": "array",
-                                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
-                                },
-                                "autoAdvance": {"type": "boolean"},
-                                "continueLabel": {"type": "string"},
-                            },
-                        },
+                        "componentKey": {"type": ["string", "null"]},
+                        "path": {"type": ["string", "null"]},
+                        "completionId": {"type": ["string", "null"]},
+                        "enabled": {"type": ["boolean", "null"]},
+                        "header": _nullable_schema(HEADER_JSON_SCHEMA),
+                        "layout": _nullable_schema(LAYOUT_JSON_SCHEMA),
+                        "card": _nullable_schema(CARD_JSON_SCHEMA),
+                        "overrides": _nullable_schema(OVERRIDES_JSON_SCHEMA),
                     },
-                },
-            },
-            "metadata": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [],
-                "properties": {
-                    "componentKey": {"type": "string"},
-                    "path": {"type": "string"},
-                    "completionId": {"type": "string"},
-                    "enabled": {"type": "boolean"},
-                    "header": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [],
-                        "properties": {
-                            "eyebrow": {"type": "string"},
-                            "title": {"type": "string"},
-                            "subtitle": {"type": "string"},
-                            "badge": {"type": "string"},
-                            "titleAlign": {
-                                "type": "string",
-                                "enum": ["left", "center"],
-                            },
-                        },
-                    },
-                    "layout": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [],
-                        "properties": {
-                            "activityId": {"type": "string"},
-                            "outerClassName": {"type": "string"},
-                            "innerClassName": {"type": "string"},
-                            "headerClassName": {"type": "string"},
-                            "contentClassName": {"type": "string"},
-                            "contentAs": {"type": "string"},
-                            "withLandingGradient": {"type": "boolean"},
-                            "useDynamicViewportHeight": {"type": "boolean"},
-                            "withBasePadding": {"type": "boolean"},
-                            "withBaseContentSpacing": {"type": "boolean"},
-                            "withBaseInnerGap": {"type": "boolean"},
-                            "actions": {},
-                            "headerChildren": {},
-                            "beforeHeader": {},
-                        },
-                    },
-                    "card": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["title", "description", "highlights", "cta"],
-                        "properties": {
-                            "title": {"type": "string"},
-                            "description": {"type": "string"},
-                            "highlights": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "cta": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": ["label", "to"],
-                                "properties": {
-                                    "label": {"type": "string"},
-                                    "to": {"type": "string"},
-                                },
-                            },
-                        },
-                    },
-                    "overrides": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": [],
-                        "properties": {
-                            "header": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": [],
-                                "properties": {
-                                    "eyebrow": {"type": "string"},
-                                    "title": {"type": "string"},
-                                    "subtitle": {"type": "string"},
-                                    "badge": {"type": "string"},
-                                    "titleAlign": {
-                                        "type": "string",
-                                        "enum": ["left", "center"],
-                                    },
-                                },
-                            },
-                            "layout": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": [],
-                                "properties": {
-                                    "activityId": {"type": "string"},
-                                    "outerClassName": {"type": "string"},
-                                    "innerClassName": {"type": "string"},
-                                    "headerClassName": {"type": "string"},
-                                    "contentClassName": {"type": "string"},
-                                    "contentAs": {"type": "string"},
-                                    "withLandingGradient": {"type": "boolean"},
-                                    "useDynamicViewportHeight": {"type": "boolean"},
-                                    "withBasePadding": {"type": "boolean"},
-                                    "withBaseContentSpacing": {"type": "boolean"},
-                                    "withBaseInnerGap": {"type": "boolean"},
-                                    "actions": {},
-                                    "headerChildren": {},
-                                    "beforeHeader": {},
-                                },
-                            },
-                            "card": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": ["title", "description", "highlights", "cta"],
-                                "properties": {
-                                    "title": {"type": "string"},
-                                    "description": {"type": "string"},
-                                    "highlights": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                    },
-                                    "cta": {
-                                        "type": "object",
-                                        "additionalProperties": False,
-                                        "required": ["label", "to"],
-                                        "properties": {
-                                            "label": {"type": "string"},
-                                            "to": {"type": "string"},
-                                        },
-                                    },
-                                },
-                            },
-                            "completionId": {"type": "string"},
-                            "stepSequence": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "required": ["id"],
-                                    "properties": {
-                                        "id": {"type": "string"},
-                                        "component": {"type": "string"},
-                                        "config": {},
-                                        "composite": {
-                                            "type": "object",
-                                            "additionalProperties": False,
-                                            "required": ["modules"],
-                                            "properties": {
-                                                "modules": {
-                                                    "type": "array",
-                                                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
-                                                },
-                                                "autoAdvance": {"type": "boolean"},
-                                                "continueLabel": {"type": "string"},
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
+                }
+            ),
         },
     },
 }

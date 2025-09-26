@@ -28,7 +28,7 @@ export function cloneStepDefinition(step: StepDefinition): StepDefinition {
       id: step.id,
       component: step.component,
       config:
-        step.config === undefined ? undefined : cloneStepConfig(step.config),
+        step.config == null ? step.config : cloneStepConfig(step.config),
       composite: cloneStepConfig(step.composite),
     } satisfies StepDefinition;
   }
@@ -36,7 +36,8 @@ export function cloneStepDefinition(step: StepDefinition): StepDefinition {
     id: step.id,
     component: step.component,
     config:
-      step.config === undefined ? undefined : cloneStepConfig(step.config),
+      step.config == null ? step.config : cloneStepConfig(step.config),
+    composite: null,
   } satisfies StepDefinition;
 }
 
@@ -98,9 +99,10 @@ export function sanitizeSteps(
       id: candidate.id,
       component: candidate.component,
       config:
-        candidate.config === undefined
-          ? undefined
+        candidate.config == null
+          ? candidate.config
           : cloneStepConfig(candidate.config),
+      composite: null,
     });
   }
   return steps;
