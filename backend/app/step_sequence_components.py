@@ -294,7 +294,7 @@ FIELD_OPTION_SCHEMA: dict[str, Any] = _strict_object_schema(
         "label": {"type": "string"},
         "description": _nullable_schema({"type": "string"}),
     },
-    required=("value", "label"),
+    required=("value", "label", "description"),
 )
 
 
@@ -371,9 +371,24 @@ def create_form_step(
     if not resolved_step_id:
         raise ValueError("Un identifiant d'étape est requis pour create_form_step.")
 
-    normalized_fields = [
-        deepcopy(field) for field in fields if isinstance(field, Mapping)
-    ]
+    normalized_fields: list[dict[str, Any]] = []
+    for field in fields:
+        if not isinstance(field, Mapping):
+            continue
+
+        normalized_field = deepcopy(field)
+        options = normalized_field.get("options")
+        if isinstance(options, Sequence):
+            normalized_options: list[dict[str, Any]] = []
+            for option in options:
+                if not isinstance(option, Mapping):
+                    continue
+                normalized_option = deepcopy(option)
+                normalized_option.setdefault("description", None)
+                normalized_options.append(normalized_option)
+            normalized_field["options"] = normalized_options
+
+        normalized_fields.append(normalized_field)
 
     if not normalized_fields:
         raise ValueError("Au moins un champ est requis pour configurer create_form_step.")

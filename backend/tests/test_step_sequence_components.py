@@ -49,7 +49,19 @@ def test_create_rich_content_step_exposes_expected_config() -> None:
 def test_create_form_step_includes_all_fields() -> None:
     step = create_form_step(
         step_id="formulaire",
-        fields=[{"id": "field", "label": "Label", "type": "textarea"}],
+        fields=[
+            {
+                "id": "field",
+                "label": "Label",
+                "type": "single_choice",
+                "options": [
+                    {
+                        "value": "a",
+                        "label": "Option A",
+                    }
+                ],
+            }
+        ],
         submit_label="Envoyer",
         allow_empty=True,
         initial_values={"field": ""},
@@ -58,6 +70,7 @@ def test_create_form_step_includes_all_fields() -> None:
     assert step["component"] == "form"
     config = step["config"]
     assert set(config) == {"fields", "submitLabel", "allowEmpty", "initialValues"}
+    assert config["fields"][0]["options"][0]["description"] is None
 
 
 def test_create_form_step_accepts_id_alias() -> None:
