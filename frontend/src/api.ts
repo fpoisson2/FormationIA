@@ -376,10 +376,10 @@ export interface SaveActivityConfigResponse {
 }
 
 export interface ActivityGenerationDetailsPayload {
-  theme: string;
-  audience: string;
-  objectives: string;
-  deliverable: string;
+  theme?: string;
+  audience?: string;
+  objectives?: string;
+  deliverable?: string;
   constraints?: string;
 }
 
