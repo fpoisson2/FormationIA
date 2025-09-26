@@ -843,11 +843,8 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
     "name": "build_step_sequence_activity",
     "description": "Assemble une configuration d'activité basée sur une suite d'étapes générées.",
     "strict": True,
-    "parameters": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["activityId", "steps", "metadata"],
-        "properties": {
+    "parameters": _strict_object_schema(
+        {
             "activityId": {"type": "string"},
             "steps": {
                 "type": "array",
@@ -862,20 +859,8 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                 ),
             },
             "metadata": _nullable_schema(
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "componentKey",
-                        "path",
-                        "completionId",
-                        "enabled",
-                        "header",
-                        "layout",
-                        "card",
-                        "overrides",
-                    ],
-                    "properties": {
+                _strict_object_schema(
+                    {
                         "componentKey": {"type": ["string", "null"]},
                         "path": {"type": ["string", "null"]},
                         "completionId": {"type": ["string", "null"]},
@@ -884,11 +869,11 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                         "layout": _nullable_schema(_any_object_schema()),
                         "card": _nullable_schema(_any_object_schema()),
                         "overrides": _nullable_schema(_any_object_schema()),
-                    },
-                }
+                    }
+                )
             ),
-        },
-    },
+        }
+    ),
 }
 
 
@@ -898,11 +883,8 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "name": "create_step_sequence_activity",
         "description": "Initialise un objet activité StepSequence prêt à être complété.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["activityId", "steps", "metadata"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "activityId": {
                     "type": "string",
                     "description": "Identifiant unique de l'activité dans le catalogue.",
@@ -920,36 +902,35 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     ),
                 },
                 "metadata": _nullable_schema(_any_object_schema()),
-            },
-        },
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_rich_content_step",
         "description": "Crée une étape riche en contenu (texte, médias, barre latérale).",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "title"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {
                     "type": "string",
                     "description": "Identifiant unique de l'étape dans la séquence.",
                 },
                 "title": {"type": "string"},
-                "body": {"type": "string"},
-                "media": {
-                    "type": "array",
-                    "items": _strict_object_schema(
-                        {
-                            "id": _nullable_schema({"type": "string"}),
-                            "url": {"type": "string"},
-                            "alt": _nullable_schema({"type": "string"}),
-                            "caption": _nullable_schema({"type": "string"}),
-                        }
-                    ),
-                },
+                "body": _nullable_schema({"type": "string"}),
+                "media": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _strict_object_schema(
+                            {
+                                "id": _nullable_schema({"type": "string"}),
+                                "url": {"type": "string"},
+                                "alt": _nullable_schema({"type": "string"}),
+                                "caption": _nullable_schema({"type": "string"}),
+                            }
+                        ),
+                    }
+                ),
                 "sidebar": _nullable_schema(
                     _strict_object_schema(
                         {
@@ -972,229 +953,211 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         }
                     )
                 ),
-            },
-        },
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_form_step",
         "description": "Crée une étape formulaire interactive avec validations GuidedFields.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "fields"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
                 "fields": {
                     "type": "array",
                     "minItems": 1,
                     "items": _any_object_schema(),
                 },
-                "submitLabel": {"type": "string"},
-                "allowEmpty": {"type": "boolean"},
+                "submitLabel": _nullable_schema({"type": "string"}),
+                "allowEmpty": _nullable_schema({"type": "boolean"}),
                 "initialValues": _nullable_schema(_any_object_schema()),
-            },
-        },
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_video_step",
         "description": "Définit une étape vidéo avec sources, sous-titres et options de lecture.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "sources"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
                 "sources": {
                     "type": "array",
                     "minItems": 1,
                     "items": _any_object_schema(),
                 },
-                "poster": {"type": "string"},
-                "captions": {
-                    "type": "array",
-                    "items": _any_object_schema(),
-                },
-                "autoAdvanceOnEnd": {"type": "boolean"},
-                "expectedDuration": {"type": ["number", "integer"]},
-            },
-        },
+                "poster": _nullable_schema({"type": "string"}),
+                "captions": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _any_object_schema(),
+                    }
+                ),
+                "autoAdvanceOnEnd": _nullable_schema({"type": "boolean"}),
+                "expectedDuration": _nullable_schema({"type": "number"}),
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_simulation_chat_step",
         "description": "Configure une simulation de chat guidée par étapes.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "title", "helpText"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
                 "title": {"type": "string"},
                 "helpText": {"type": "string"},
-                "missionId": {"type": "string"},
+                "missionId": _nullable_schema({"type": "string"}),
                 "roles": _nullable_schema(_any_object_schema()),
-                "stages": {
-                    "type": "array",
-                    "items": _any_object_schema(),
-                },
-            },
-        },
+                "stages": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _any_object_schema(),
+                    }
+                ),
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_info_cards_step",
         "description": "Construit une étape d'informations synthétiques sous forme de cartes.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "title"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
-                "eyebrow": {"type": "string"},
-                "title": {"type": "string"},
-                "description": {"type": "string"},
-                "columns": {"type": "integer"},
-                "cards": {
-                    "type": "array",
-                    "items": _any_object_schema(),
-                },
-            },
-        },
+                "eyebrow": _nullable_schema({"type": "string"}),
+                "title": _nullable_schema({"type": "string"}),
+                "description": _nullable_schema({"type": "string"}),
+                "columns": _nullable_schema({"type": "integer"}),
+                "cards": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _any_object_schema(),
+                    }
+                ),
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_prompt_evaluation_step",
         "description": "Évalue un prompt en configurant modèle, verbosité et effort de pensée.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "defaultText", "developerMessage", "model"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
                 "defaultText": {"type": "string"},
                 "developerMessage": {"type": "string"},
                 "model": {"type": "string"},
                 "verbosity": {"type": "string"},
                 "thinking": {"type": "string"},
-            },
-        },
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_ai_comparison_step",
         "description": "Compare deux configurations IA à partir d'un même contexte utilisateur.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "contextStepId", "contextField", "variants"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
-                "contextStepId": {"type": "string"},
-                "contextField": {"type": "string"},
+                "contextStepId": _nullable_schema({"type": "string"}),
+                "contextField": _nullable_schema({"type": "string"}),
                 "copy": _nullable_schema(_any_object_schema()),
                 "request": _nullable_schema(_any_object_schema()),
-                "variants": _any_object_schema(),
+                "variants": _nullable_schema(_any_object_schema()),
                 "defaultConfigA": _nullable_schema(_any_object_schema()),
                 "defaultConfigB": _nullable_schema(_any_object_schema()),
-            },
-        },
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_clarity_map_step",
         "description": "Configure une carte Clarté d'abord (grille, obstacles, objectif).",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
-                "obstacleCount": {"type": "integer"},
+                "obstacleCount": _nullable_schema({"type": "integer"}),
                 "initialTarget": _nullable_schema(_any_object_schema()),
-                "promptStepId": {"type": "string"},
-                "allowInstructionInput": {"type": "boolean"},
-                "instructionLabel": {"type": "string"},
-                "instructionPlaceholder": {"type": "string"},
-            },
-        },
+                "promptStepId": _nullable_schema({"type": "string"}),
+                "allowInstructionInput": _nullable_schema({"type": "boolean"}),
+                "instructionLabel": _nullable_schema({"type": "string"}),
+                "instructionPlaceholder": _nullable_schema({"type": "string"}),
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_clarity_prompt_step",
         "description": "Crée la consigne d'entrée pour une activité Clarté d'abord.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "promptLabel"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
-                "promptLabel": {"type": "string"},
-                "promptPlaceholder": {"type": "string"},
-                "model": {"type": "string"},
-                "verbosity": {"type": "string"},
-                "thinking": {"type": "string"},
-                "developerPrompt": {"type": "string"},
-                "settingsMode": {"type": "string"},
-            },
-        },
+                "promptLabel": _nullable_schema({"type": "string"}),
+                "promptPlaceholder": _nullable_schema({"type": "string"}),
+                "model": _nullable_schema({"type": "string"}),
+                "verbosity": _nullable_schema({"type": "string"}),
+                "thinking": _nullable_schema({"type": "string"}),
+                "developerPrompt": _nullable_schema({"type": "string"}),
+                "settingsMode": _nullable_schema({"type": "string"}),
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_explorateur_world_step",
         "description": "Initialise une étape Explorateur IA (monde, quartiers, étapes).",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
                 "terrain": _nullable_schema(_any_object_schema()),
-                "steps": {
-                    "type": "array",
-                    "items": _any_object_schema(),
-                },
-                "quarterDesignerSteps": {
-                    "type": "array",
-                    "items": _any_object_schema(),
-                },
-                "quarters": {
-                    "type": "array",
-                    "items": _any_object_schema(),
-                },
-            },
-        },
+                "steps": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _any_object_schema(),
+                    }
+                ),
+                "quarterDesignerSteps": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _any_object_schema(),
+                    }
+                ),
+                "quarters": _nullable_schema(
+                    {
+                        "type": "array",
+                        "items": _any_object_schema(),
+                    }
+                ),
+            }
+        ),
     },
     {
         "type": "function",
         "name": "create_composite_step",
         "description": "Assemble une étape composite regroupant plusieurs modules.",
         "strict": True,
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["stepId", "modules"],
-            "properties": {
+        "parameters": _strict_object_schema(
+            {
                 "stepId": {"type": "string"},
                 "modules": {
                     "type": "array",
                     "minItems": 1,
                     "items": _any_object_schema(),
                 },
-                "autoAdvance": {"type": "boolean"},
-                "continueLabel": {"type": "string"},
-            },
-        },
+                "autoAdvance": _nullable_schema({"type": "boolean"}),
+                "continueLabel": _nullable_schema({"type": "string"}),
+            }
+        ),
     },
     STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION,
 ]
