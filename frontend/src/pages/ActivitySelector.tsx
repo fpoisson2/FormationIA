@@ -1792,7 +1792,7 @@ function ActivitySelector(): JSX.Element {
           </p>
         </div>
       ) : null}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-4 sm:gap-6">
         {activitiesToDisplay.map((activity: ActivityDefinition, index: number) => {
           const isDisabled = activity.enabled === false;
           const isCompleted = completedMap[activity.id];
@@ -1830,7 +1830,7 @@ function ActivitySelector(): JSX.Element {
               onDragStart={() => handleDragStart(index)}
               onDragOver={(e) => handleDragOver(e, index)}
               onDragEnd={handleDragEnd}
-              className={`group relative flex h-full flex-col gap-6 rounded-3xl border p-8 shadow-sm backdrop-blur transition ${hoverClasses} ${statusClasses} ${editClasses} ${generatedClasses} ${dragClasses}`.trim()}
+              className={`group relative flex h-full flex-col gap-6 rounded-3xl border p-6 shadow-sm backdrop-blur transition ${hoverClasses} ${statusClasses} ${editClasses} ${generatedClasses} ${dragClasses} ${isEditMode ? "items-stretch text-left sm:p-8" : "items-center text-center"}`.trim()}
             >
               {isEditMode && (
                 <div className="absolute left-4 top-4 flex flex-col gap-1">
@@ -1897,11 +1897,13 @@ function ActivitySelector(): JSX.Element {
                 Désactivée
               </span>
             )}
-              <div className="space-y-3">
-                {isEditMode ? (
-                  <>
-                    <input
-                      type="text"
+            <div
+              className={`space-y-3${isEditMode ? "" : " hidden sm:block"}`}
+            >
+              {isEditMode ? (
+                <>
+                  <input
+                    type="text"
                     value={activity.card.title}
                     onChange={(e) => handleUpdateActivityText(activity.id, 'title', e.target.value)}
                     className="w-full border-b border-gray-200 bg-transparent text-2xl font-semibold text-[color:var(--brand-black)] focus:border-orange-400 focus:outline-none"
@@ -1910,7 +1912,7 @@ function ActivitySelector(): JSX.Element {
                     value={activity.card.description}
                     onChange={(e) => handleUpdateActivityText(activity.id, 'description', e.target.value)}
                     rows={3}
-                    className="w-full resize-none border border-gray-200 rounded-lg p-2 text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90 focus:border-orange-400 focus:outline-none"
+                    className="w-full resize-none rounded-lg border border-gray-200 p-2 text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90 focus:border-orange-400 focus:outline-none"
                   />
                 </>
               ) : (
@@ -1924,9 +1926,30 @@ function ActivitySelector(): JSX.Element {
                 </>
               )}
             </div>
-            <ul className="flex flex-col gap-2 text-sm text-[color:var(--brand-charcoal)]">
+            {!isEditMode ? (
+              <Link
+                to={activity.card.cta.to}
+                aria-label={`${activity.card.cta.label} – ${activity.card.title}`}
+                className="flex h-full w-full flex-1 flex-col items-center justify-center gap-3 text-center sm:hidden"
+              >
+                <h2 className="text-lg font-semibold text-[color:var(--brand-black)]">
+                  {activity.card.title}
+                </h2>
+                <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]/90">
+                  {activity.card.description}
+                </p>
+              </Link>
+            ) : null}
+            <ul
+              className={`flex-col gap-2 text-sm text-[color:var(--brand-charcoal)] ${
+                isEditMode ? "flex" : "hidden sm:flex"
+              }`}
+            >
               {activity.card.highlights.map((item, highlightIndex) => (
-                <li key={`${activity.id}-highlight-${highlightIndex}`} className="flex items-center gap-3">
+                <li
+                  key={`${activity.id}-highlight-${highlightIndex}`}
+                  className="flex items-center gap-3"
+                >
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
                     +
                   </span>
@@ -1950,7 +1973,7 @@ function ActivitySelector(): JSX.Element {
                   )}
                 </li>
               ))}
-              {isEditMode && (
+              {isEditMode ? (
                 <li className="flex items-center gap-3">
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400">
                     +
@@ -1962,7 +1985,7 @@ function ActivitySelector(): JSX.Element {
                     Ajouter un point
                   </button>
                 </li>
-              )}
+              ) : null}
             </ul>
             {isEditMode && activity.componentKey === STEP_SEQUENCE_COMPONENT_KEY ? (
               <StepSequenceEditor
@@ -1986,9 +2009,15 @@ function ActivitySelector(): JSX.Element {
                 }
               />
             ) : null}
-            <div className="mt-auto">
+            <div
+              className={
+                isEditMode
+                  ? "mt-auto space-y-4"
+                  : "mt-auto hidden sm:block"
+              }
+            >
               {isEditMode ? (
-                <div className="space-y-4">
+                <>
                   <label className="flex items-center gap-2 text-xs text-gray-600">
                     <input
                       type="checkbox"
@@ -2005,9 +2034,9 @@ function ActivitySelector(): JSX.Element {
                     type="text"
                     value={activity.card.cta.label}
                     onChange={(e) => handleUpdateActivityText(activity.id, 'cta.label', e.target.value)}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-orange-400 focus:outline-none"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-orange-400 focus:outline-none"
                   />
-                </div>
+                </>
               ) : (
                 <Link
                   to={activity.card.cta.to}
