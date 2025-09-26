@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -225,7 +225,7 @@ describe("FormStep", () => {
     expect(multiField.correctAnswers).toContain("y");
   });
 
-  it("displays correction feedback after submission", () => {
+  it("displays correction feedback and blocks progression until confirmation", () => {
     const config: FormStepConfig = {
       fields: [
         {
@@ -245,22 +245,31 @@ describe("FormStep", () => {
     const { onAdvance } = renderFormStep({ config });
 
     fireEvent.click(screen.getByRole("radio", { name: "Réponse 1" }));
-    const firstForm = screen.getAllByRole("form", { name: "Formulaire guidé" }).at(-1);
-    expect(firstForm).toBeTruthy();
-    fireEvent.submit(firstForm!);
+    const form = screen.getAllByRole("form", { name: "Formulaire guidé" }).at(-1);
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
 
-    expect(onAdvance).toHaveBeenCalledWith({ quiz: "r1" });
+    expect(onAdvance).not.toHaveBeenCalled();
     expect(
-      screen.getByText(/Correction : Réponse 2 · Ta réponse : Réponse 1/)
+      within(form!).getByText("Ce n'est pas encore la bonne réponse. Réessaie !")
+    ).not.toBeNull();
+    expect(
+      within(form!).getByText(/Correction : Réponse 2 · Ta réponse : Réponse 1/)
     ).not.toBeNull();
 
     fireEvent.click(screen.getByRole("radio", { name: "Réponse 2" }));
-    const secondForm = screen.getAllByRole("form", { name: "Formulaire guidé" }).at(-1);
-    expect(secondForm).toBeTruthy();
-    fireEvent.submit(secondForm!);
+    fireEvent.submit(form!);
 
-    expect(onAdvance).toHaveBeenCalledWith({ quiz: "r2" });
-    expect(screen.getByText(/Bonne réponse ! Réponse 2/)).not.toBeNull();
+    expect(onAdvance).not.toHaveBeenCalled();
+    expect(
+      within(form!).getByText(
+        "Bonne réponse ! Clique sur « Valider » pour passer à l'étape suivante."
+      )
+    ).not.toBeNull();
+
+    fireEvent.submit(form!);
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    expect(onAdvance).toHaveBeenLastCalledWith({ quiz: "r2" });
   });
 });
 

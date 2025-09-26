@@ -517,6 +517,7 @@ interface CreateFormStepInput extends ToolBaseInput {
   submitLabel?: string;
   allowEmpty?: boolean;
   initialValues?: FormStepConfig["initialValues"];
+  failureMessage?: string;
 }
 
 const fieldOptionSchema: JsonSchema = {
@@ -602,6 +603,7 @@ const createFormStep: StepSequenceFunctionTool<CreateFormStepInput> = {
         },
         submitLabel: { type: "string" },
         allowEmpty: { type: "boolean" },
+        failureMessage: { type: "string" },
         initialValues: {
           type: "object",
           additionalProperties: {
@@ -644,6 +646,7 @@ const createFormStep: StepSequenceFunctionTool<CreateFormStepInput> = {
       submitLabel: input.submitLabel,
       allowEmpty: input.allowEmpty,
       initialValues: input.initialValues,
+      failureMessage: input.failureMessage,
     };
 
     return {

@@ -29,6 +29,8 @@ import { StepSequenceContext } from "../types";
 import type { StepComponentProps } from "../types";
 
 const DEFAULT_SUBMIT_LABEL = "Continuer";
+const DEFAULT_FAILURE_MESSAGE =
+  "Ce n'est pas encore la bonne réponse. Réessaie !";
 
 const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   bulleted_list: "Liste à puces",
@@ -79,9 +81,15 @@ export interface FormStepConfig {
   submitLabel?: string;
   allowEmpty?: boolean;
   initialValues?: StageAnswer;
+  failureMessage?: string;
   validate?: FormStepValidationFn;
   onChange?: (config: FormStepConfig) => void;
 }
+
+type FormStepFeedback = {
+  type: "success" | "error";
+  message: string;
+};
 
 function generateId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -752,13 +760,18 @@ function normalizeConfig(config: unknown): FormStepConfig {
   );
   const submitLabel =
     typeof base.submitLabel === "string" && base.submitLabel.trim().length > 0
-      ? base.submitLabel
+      ? base.submitLabel.trim()
       : DEFAULT_SUBMIT_LABEL;
+  const failureMessage =
+    typeof base.failureMessage === "string" && base.failureMessage.trim().length > 0
+      ? base.failureMessage.trim()
+      : DEFAULT_FAILURE_MESSAGE;
 
   return {
     fields: normalizedFields,
     submitLabel,
     allowEmpty: Boolean(base.allowEmpty),
+    failureMessage,
     initialValues: isStageAnswerLike(base.initialValues)
       ? (base.initialValues as StageAnswer)
       : undefined,
@@ -1045,6 +1058,10 @@ export function FormStep({
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [corrections, setCorrections] = useState<FormStepCorrections>({});
+  const [feedback, setFeedback] = useState<FormStepFeedback | null>(null);
+  const [pendingAdvanceValues, setPendingAdvanceValues] = useState<StageAnswer | null>(
+    null
+  );
   const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -1065,11 +1082,15 @@ export function FormStep({
     });
     setErrors({});
     setCorrections({});
+    setFeedback(null);
+    setPendingAdvanceValues(null);
   }, [activeConfig.fields, activeConfig.initialValues, payloadAnswer]);
 
   const handleValueChange = useCallback(
     (fieldId: string, value: FieldValue) => {
       setValues((prev) => ({ ...prev, [fieldId]: value }));
+      setFeedback(null);
+      setPendingAdvanceValues(null);
       setCorrections((prev) => {
         if (!prev[fieldId]) {
           return prev;
@@ -1086,6 +1107,14 @@ export function FormStep({
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (isDesignerMode) {
+        return;
+      }
+      if (pendingAdvanceValues) {
+        setFeedback(null);
+        setCorrections({});
+        const next = pendingAdvanceValues;
+        setPendingAdvanceValues(null);
+        effectiveOnAdvance(next);
         return;
       }
       const sanitized = sanitizeFormValues(activeConfig.fields, values);
@@ -1109,6 +1138,8 @@ export function FormStep({
       if (Object.keys(filteredErrors).length > 0) {
         setErrors(filteredErrors);
         setCorrections({});
+        setFeedback(null);
+        setPendingAdvanceValues(null);
         return;
       }
       setErrors({});
@@ -1166,14 +1197,41 @@ export function FormStep({
       });
       setCorrections(nextCorrections);
       setValues(createInitialFormValues(activeConfig.fields, finalValues));
+      const hasCorrections = Object.keys(nextCorrections).length > 0;
+      const hasIncorrect = Object.values(nextCorrections).some(
+        (correction) => !correction.isCorrect
+      );
+      if (hasCorrections) {
+        if (hasIncorrect) {
+          setPendingAdvanceValues(null);
+          setFeedback({
+            type: "error",
+            message: activeConfig.failureMessage ?? DEFAULT_FAILURE_MESSAGE,
+          });
+          return;
+        }
+        setPendingAdvanceValues(finalValues);
+        setFeedback({
+          type: "success",
+          message: `Bonne réponse ! Clique sur « ${
+            activeConfig.submitLabel ?? DEFAULT_SUBMIT_LABEL
+          } » pour passer à l'étape suivante.`,
+        });
+        return;
+      }
+      setPendingAdvanceValues(null);
+      setFeedback(null);
       effectiveOnAdvance(finalValues);
     },
     [
       activeConfig.allowEmpty,
       activeConfig.fields,
+      activeConfig.failureMessage,
+      activeConfig.submitLabel,
       activeConfig.validate,
       effectiveOnAdvance,
       isDesignerMode,
+      pendingAdvanceValues,
       values,
     ]
   );
@@ -1723,10 +1781,25 @@ export function FormStep({
     [pushConfigChange]
   );
 
+  const handleFailureMessageChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      pushConfigChange((prev) => ({
+        ...prev,
+        failureMessage: value.length > 0 ? value : DEFAULT_FAILURE_MESSAGE,
+      }));
+    },
+    [pushConfigChange]
+  );
+
   const currentSubmitLabel =
     activeConfig.submitLabel && activeConfig.submitLabel.length > 0
       ? activeConfig.submitLabel
       : DEFAULT_SUBMIT_LABEL;
+  const currentFailureMessage =
+    activeConfig.failureMessage && activeConfig.failureMessage.length > 0
+      ? activeConfig.failureMessage
+      : DEFAULT_FAILURE_MESSAGE;
 
   const selectedField =
     selectedFieldIndex !== null ? activeConfig.fields[selectedFieldIndex] : null;
@@ -1745,6 +1818,18 @@ export function FormStep({
           errors={errors}
           corrections={isDesignerMode ? undefined : corrections}
         />
+        {feedback ? (
+          <p
+            role="status"
+            className={`text-sm font-semibold ${
+              feedback.type === "success"
+                ? "text-emerald-600"
+                : "text-[color:var(--brand-red)]"
+            }`}
+          >
+            {feedback.message}
+          </p>
+        ) : null}
         <button
           type="submit"
           className="cta-button"
@@ -1770,6 +1855,15 @@ export function FormStep({
                 onChange={handleSubmitLabelChange}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 placeholder="Libellé du bouton"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+              Message affiché en cas de mauvaise réponse
+              <textarea
+                value={currentFailureMessage}
+                onChange={handleFailureMessageChange}
+                className="min-h-[72px] rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                placeholder="Texte de rétroaction lorsque la réponse est incorrecte"
               />
             </label>
           </div>

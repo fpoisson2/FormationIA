@@ -66,11 +66,18 @@ def test_create_form_step_includes_all_fields() -> None:
         submit_label="Envoyer",
         allow_empty=True,
         initial_values={"field": ""},
+        failure_message="  Mauvaise réponse, réessaie.  ",
     )
 
     assert step["component"] == "form"
     config = step["config"]
-    assert set(config) == {"fields", "submitLabel", "allowEmpty", "initialValues"}
+    assert set(config) == {
+        "fields",
+        "submitLabel",
+        "allowEmpty",
+        "initialValues",
+        "failureMessage",
+    }
     field = config["fields"][0]
     assert set(field) == {
         "id",
@@ -95,6 +102,7 @@ def test_create_form_step_includes_all_fields() -> None:
     assert field["minBullets"] is None
     assert field["correctAnswer"] == "a"
     assert field["correctAnswers"] is None
+    assert config["failureMessage"] == "Mauvaise réponse, réessaie."
 
 
 def test_create_form_step_accepts_id_alias() -> None:
