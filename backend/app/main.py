@@ -1031,7 +1031,7 @@ def _build_activity_generation_prompt(
         [
             "Exigences de conception :",
             "- Génère 3 à 5 étapes maximum en privilégiant la progression pédagogique (accroche, exploration guidée, consolidation).",
-            "- Utilise uniquement les composants disponibles : rich-content, form, video, composite, workshop-context, workshop-comparison, workshop-synthesis.",
+            "- Utilise uniquement les composants disponibles : rich-content, form, video, simulation-chat, info-cards, prompt-evaluation, ai-comparison, clarity-map, clarity-prompt, explorateur-world ou composite.",
             "- Propose des identifiants d'étape courts en minuscules séparés par des tirets.",
             "- Les formulaires doivent comporter des consignes explicites et des contraintes adaptées (nombre de mots, choix, etc.).",
             "- Complète la carte d'activité (titre, description, highlights, CTA) et le header avec des textes synthétiques.",

@@ -1,3 +1,11 @@
+import {
+  MODEL_OPTIONS,
+  THINKING_OPTIONS,
+  VERBOSITY_OPTIONS,
+  type ModelConfig,
+  type ThinkingChoice,
+  type VerbosityChoice,
+} from "../../config";
 import type {
   ActivityCardDefinition,
   ActivityConfigEntry,
@@ -5,24 +13,39 @@ import type {
   ActivityHeaderConfig,
   ActivityLayoutOptions,
 } from "../../config/activities";
-import type { ModelConfig } from "../../config";
 import type {
   CompositeStepConfig,
   CompositeStepModuleDefinition,
   StepDefinition,
 } from "./types";
 import type {
+  ClarityMapStepConfig,
+  ClarityPromptStepConfig,
+  DualModelComparisonConfig,
+  DualModelComparisonCopyConfig,
+  DualModelComparisonInfoCardConfig,
+  DualModelComparisonRequestConfig,
+  DualModelComparisonVariant,
+  DualModelComparisonVariantConfig,
+  ExplorateurWorldConfig,
+  InfoCardTone,
+  InfoCardsStepCardConfig,
+  InfoCardsStepConfig,
+  PromptEvaluationStepConfig,
   RichContentMediaItem,
   RichContentSidebar,
   RichContentStepConfig,
+  SimulationChatConfig,
+  SimulationChatStageConfig,
+} from "./modules";
+import {
+  createDefaultExplorateurWorldConfig,
+  sanitizeExplorateurWorldConfig,
+  validateFieldSpec,
 } from "./modules";
 import type { FormStepConfig } from "./modules";
 import type { VideoCaption, VideoSource, VideoStepConfig } from "./modules";
-import type {
-  WorkshopComparisonStepConfig,
-  WorkshopContextStepConfig,
-  WorkshopSynthesisStepConfig,
-} from "./modules";
+import type { FieldSpec } from "../../api";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -84,6 +107,207 @@ const nullableConfigSchema = (): JsonSchema => ({
 const nullableSchema = (schema: JsonSchema): JsonSchema => ({
   anyOf: [JSON.parse(JSON.stringify(schema)), { type: "null" }],
 });
+
+const MODEL_CHOICES = new Set<string>(MODEL_OPTIONS.map((option) => option.value));
+const VERBOSITY_CHOICES = new Set<VerbosityChoice>(
+  VERBOSITY_OPTIONS.map((option) => option.value)
+);
+const THINKING_CHOICES = new Set<ThinkingChoice>(
+  THINKING_OPTIONS.map((option) => option.value)
+);
+
+const DEFAULT_MODEL = MODEL_OPTIONS[0]?.value ?? "gpt-5-nano";
+const DEFAULT_VERBOSITY = VERBOSITY_OPTIONS[0]?.value ?? "low";
+const DEFAULT_THINKING = THINKING_OPTIONS[0]?.value ?? "minimal";
+
+const INFO_CARD_TONES: InfoCardTone[] = ["red", "black", "sand", "white"];
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function sanitizeString(
+  value: unknown,
+  fallback = "",
+  { trim = true, allowEmpty = false }: { trim?: boolean; allowEmpty?: boolean } = {}
+): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const normalized = trim ? value.trim() : value;
+  if (!allowEmpty && normalized.length === 0) {
+    return fallback;
+  }
+  return normalized;
+}
+
+function sanitizeStringArray(values: unknown, { min = 0, max }: { min?: number; max?: number } = {}): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const sanitized = values
+    .map((item) => sanitizeString(item, "", { allowEmpty: false }))
+    .filter((item) => item.length > 0);
+  if (typeof max === "number" && max >= 0) {
+    sanitized.length = Math.min(sanitized.length, max);
+  }
+  if (min > 0 && sanitized.length < min) {
+    return [];
+  }
+  return sanitized;
+}
+
+function cloneFieldSpec(spec: FieldSpec): FieldSpec {
+  return JSON.parse(JSON.stringify(spec)) as FieldSpec;
+}
+
+function sanitizeInteger(
+  value: unknown,
+  { fallback, min, max }: { fallback: number; min?: number; max?: number }
+): number {
+  const numeric =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.trunc(value)
+      : Math.trunc(fallback);
+  let result = numeric;
+  if (typeof min === "number" && result < min) {
+    result = min;
+  }
+  if (typeof max === "number" && result > max) {
+    result = max;
+  }
+  return result;
+}
+
+function sanitizeBoolean(value: unknown, fallback = false): boolean {
+  if (value === true) {
+    return true;
+  }
+  if (value === false) {
+    return false;
+  }
+  return fallback;
+}
+
+function sanitizeInfoCardTone(value: unknown): InfoCardTone {
+  if (typeof value === "string") {
+    const normalized = value.trim() as InfoCardTone;
+    if ((INFO_CARD_TONES as string[]).includes(normalized)) {
+      return normalized;
+    }
+  }
+  return "sand";
+}
+
+function sanitizeComparisonInfoCards(
+  value: unknown
+): DualModelComparisonInfoCardConfig[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const source = item as Partial<DualModelComparisonInfoCardConfig>;
+      const title = sanitizeString(source.title, "", { allowEmpty: false });
+      const description = sanitizeString(source.description, "", { allowEmpty: false });
+      if (!title || !description) {
+        return null;
+      }
+      return {
+        title,
+        description,
+        tone: sanitizeInfoCardTone(source.tone),
+      } satisfies DualModelComparisonInfoCardConfig;
+    })
+    .filter((card): card is DualModelComparisonInfoCardConfig => Boolean(card));
+}
+
+function sanitizePresetRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!isPlainObject(value)) {
+    return undefined;
+  }
+  return { ...value };
+}
+
+function sanitizeVariantConfigInput(
+  value: unknown,
+  fallbackTitle: string,
+  fallbackConfig: ModelConfig
+): DualModelComparisonVariantConfig {
+  if (!value || typeof value !== "object") {
+    return {
+      title: fallbackTitle,
+      defaultConfig: fallbackConfig,
+    } satisfies DualModelComparisonVariantConfig;
+  }
+  const source = value as Partial<DualModelComparisonVariantConfig>;
+  const title = sanitizeString(source.title, fallbackTitle, { allowEmpty: false });
+  const defaultConfig = source.defaultConfig
+    ? sanitizeModelConfig(source.defaultConfig)
+    : fallbackConfig;
+  const requestPreset = sanitizePresetRecord(source.requestPreset);
+  return {
+    title,
+    defaultConfig,
+    ...(requestPreset ? { requestPreset } : {}),
+  } satisfies DualModelComparisonVariantConfig;
+}
+
+type GridCoord = { x: number; y: number };
+
+function sanitizeClarityCoord(value: unknown): GridCoord | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const source = value as { x?: unknown; y?: unknown };
+  if (typeof source.x !== "number" || typeof source.y !== "number") {
+    return null;
+  }
+  return {
+    x: sanitizeInteger(source.x, {
+      fallback: CLARITY_START_POSITION.x,
+      min: 0,
+      max: CLARITY_GRID_SIZE - 1,
+    }),
+    y: sanitizeInteger(source.y, {
+      fallback: CLARITY_START_POSITION.y,
+      min: 0,
+      max: CLARITY_GRID_SIZE - 1,
+    }),
+  };
+}
+
+
+function sanitizeModelConfig(value: unknown): ModelConfig {
+  if (!value || typeof value !== "object") {
+    return {
+      model: DEFAULT_MODEL,
+      verbosity: DEFAULT_VERBOSITY as VerbosityChoice,
+      thinking: DEFAULT_THINKING as ThinkingChoice,
+    } satisfies ModelConfig;
+  }
+  const source = value as Partial<ModelConfig>;
+  const model =
+    typeof source.model === "string" && MODEL_CHOICES.has(source.model)
+      ? source.model
+      : DEFAULT_MODEL;
+  const verbosity =
+    typeof source.verbosity === "string" && VERBOSITY_CHOICES.has(source.verbosity as VerbosityChoice)
+      ? (source.verbosity as VerbosityChoice)
+      : (DEFAULT_VERBOSITY as VerbosityChoice);
+  const thinking =
+    typeof source.thinking === "string" && THINKING_CHOICES.has(source.thinking as ThinkingChoice)
+      ? (source.thinking as ThinkingChoice)
+      : (DEFAULT_THINKING as ThinkingChoice);
+  return { model, verbosity, thinking } satisfies ModelConfig;
+}
 
 function sanitizeId(value: string): string {
   return value
@@ -306,6 +530,53 @@ const fieldOptionSchema: JsonSchema = {
   },
 };
 
+const guidedFieldSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "label", "type"],
+  properties: {
+    id: { type: "string" },
+    label: { type: "string" },
+    type: {
+      type: "string",
+      enum: [
+        "bulleted_list",
+        "table_menu_day",
+        "table_menu_full",
+        "textarea_with_counter",
+        "two_bullets",
+        "reference_line",
+        "single_choice",
+        "multiple_choice",
+      ],
+    },
+    minBullets: { type: "number" },
+    maxBullets: { type: "number" },
+    maxWordsPerBullet: { type: "number" },
+    mustContainAny: {
+      type: "array",
+      items: { type: "string" },
+    },
+    meals: {
+      type: "array",
+      items: { type: "string" },
+    },
+    minWords: { type: "number" },
+    maxWords: { type: "number" },
+    forbidWords: {
+      type: "array",
+      items: { type: "string" },
+    },
+    tone: { type: "string" },
+    options: {
+      type: "array",
+      items: fieldOptionSchema,
+    },
+    minSelections: { type: "number" },
+    maxSelections: { type: "number" },
+  },
+};
+
 const createFormStep: StepSequenceFunctionTool<CreateFormStepInput> = {
   definition: {
     type: "function",
@@ -327,52 +598,7 @@ const createFormStep: StepSequenceFunctionTool<CreateFormStepInput> = {
         fields: {
           type: "array",
           minItems: 1,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["id", "label", "type"],
-            properties: {
-              id: { type: "string" },
-              label: { type: "string" },
-              type: {
-                type: "string",
-                enum: [
-                  "bulleted_list",
-                  "table_menu_day",
-                  "table_menu_full",
-                  "textarea_with_counter",
-                  "two_bullets",
-                  "reference_line",
-                  "single_choice",
-                  "multiple_choice",
-                ],
-              },
-              minBullets: { type: "number" },
-              maxBullets: { type: "number" },
-              maxWordsPerBullet: { type: "number" },
-              mustContainAny: {
-                type: "array",
-                items: { type: "string" },
-              },
-              meals: {
-                type: "array",
-                items: { type: "string" },
-              },
-              minWords: { type: "number" },
-              maxWords: { type: "number" },
-              forbidWords: {
-                type: "array",
-                items: { type: "string" },
-              },
-              tone: { type: "string" },
-              options: {
-                type: "array",
-                items: fieldOptionSchema,
-              },
-              minSelections: { type: "number" },
-              maxSelections: { type: "number" },
-            },
-          },
+          items: guidedFieldSchema,
         },
         submitLabel: { type: "string" },
         allowEmpty: { type: "boolean" },
@@ -511,18 +737,352 @@ const createVideoStep: StepSequenceFunctionTool<CreateVideoStepInput> = {
   },
 };
 
-interface CreateWorkshopContextStepInput extends ToolBaseInput {
-  defaultText?: string;
+interface SimulationChatStageInput
+  extends Partial<Omit<SimulationChatStageConfig, "fields" | "prompt" | "id">> {
+  id?: string;
+  prompt?: string;
+  fields?: unknown[];
 }
 
-const createWorkshopContextStep: StepSequenceFunctionTool<
-  CreateWorkshopContextStepInput
+interface CreateSimulationChatStepInput extends ToolBaseInput {
+  title: string;
+  help?: string;
+  missionId?: string;
+  roles?: { ai?: string; user?: string };
+  stages: SimulationChatStageInput[];
+}
+
+const DEFAULT_SIMULATION_TITLE = "Simulation conversation";
+const DEFAULT_SIMULATION_HELP =
+  "Réponds aux consignes et observe comment la demande évolue.";
+const DEFAULT_SIMULATION_ROLE_AI = "IA";
+const DEFAULT_SIMULATION_ROLE_USER = "Participant";
+
+const simulationChatStageSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["prompt", "fields"],
+  properties: {
+    id: { type: "string" },
+    prompt: { type: "string" },
+    fields: {
+      type: "array",
+      minItems: 1,
+      items: guidedFieldSchema,
+    },
+    allowEmpty: { type: "boolean" },
+    submitLabel: { type: "string" },
+  },
+};
+
+const createSimulationChatStep: StepSequenceFunctionTool<
+  CreateSimulationChatStepInput
 > = {
   definition: {
     type: "function",
-    name: "create_workshop_context_step",
+    name: "create_simulation_chat_step",
     description:
-      "Prépare l'étape d'ouverture de l'atelier comparatif (collecte du texte source).",
+      "Construit une simulation conversationnelle en plusieurs étapes guidées.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "stages"],
+      properties: {
+        id: { type: "string" },
+        idHint: { type: "string" },
+        existingStepIds: {
+          type: "array",
+          items: { type: "string" },
+        },
+        title: { type: "string" },
+        help: { type: "string" },
+        missionId: { type: "string" },
+        roles: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            ai: { type: "string" },
+            user: { type: "string" },
+          },
+        },
+        stages: {
+          type: "array",
+          minItems: 1,
+          items: simulationChatStageSchema,
+        },
+      },
+    },
+  },
+  handler: (input) => {
+    const id = resolveId(input, input.title);
+    const title = sanitizeString(input.title, DEFAULT_SIMULATION_TITLE, {
+      allowEmpty: false,
+    });
+    const help = sanitizeString(input.help, DEFAULT_SIMULATION_HELP, {
+      allowEmpty: false,
+    });
+    const missionId = sanitizeString(input.missionId, "", { allowEmpty: false });
+    const roles = {
+      ai: sanitizeString(input.roles?.ai, DEFAULT_SIMULATION_ROLE_AI, {
+        allowEmpty: false,
+      }),
+      user: sanitizeString(input.roles?.user, DEFAULT_SIMULATION_ROLE_USER, {
+        allowEmpty: false,
+      }),
+    } satisfies SimulationChatConfig["roles"];
+
+    const stages: SimulationChatStageConfig[] = (input.stages ?? [])
+      .map((stage, index) => {
+        if (!stage || typeof stage !== "object") {
+          return null;
+        }
+        const fallbackStageId = `${id}-stage-${index + 1}`;
+        const stageId = sanitizeString(stage.id, fallbackStageId, {
+          allowEmpty: false,
+        });
+        const prompt = sanitizeString(stage.prompt, "", {
+          allowEmpty: true,
+        });
+        const submitLabel = sanitizeString(stage.submitLabel, "", {
+          allowEmpty: false,
+        });
+        const fields: FieldSpec[] = Array.isArray(stage.fields)
+          ? stage.fields
+              .filter((candidate): candidate is FieldSpec =>
+                validateFieldSpec(candidate)
+              )
+              .map((field) => cloneFieldSpec(field))
+          : [];
+
+        return {
+          id: stageId,
+          prompt,
+          fields,
+          allowEmpty: Boolean(stage.allowEmpty),
+          ...(submitLabel ? { submitLabel } : {}),
+        } satisfies SimulationChatStageConfig;
+      })
+      .filter((stage): stage is SimulationChatStageConfig => Boolean(stage));
+
+    const config: SimulationChatConfig = {
+      title,
+      help,
+      roles,
+      stages,
+      ...(missionId ? { missionId } : {}),
+    };
+
+    return {
+      id,
+      component: "simulation-chat",
+      config,
+      composite: null,
+    } satisfies StepDefinition;
+  },
+};
+
+interface InfoCardInput extends Partial<InfoCardsStepCardConfig> {
+  title: string;
+  description: string;
+  items?: unknown[];
+}
+
+interface CreateInfoCardsStepInput extends ToolBaseInput {
+  eyebrow?: string;
+  title?: string;
+  description?: string;
+  columns?: number;
+  cards: InfoCardInput[];
+}
+
+const infoCardSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "description"],
+  properties: {
+    title: { type: "string" },
+    description: { type: "string" },
+    tone: { type: "string", enum: INFO_CARD_TONES },
+    items: {
+      type: "array",
+      items: { type: "string" },
+    },
+  },
+};
+
+const modelConfigSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["model", "verbosity", "thinking"],
+  properties: {
+    model: { type: "string" },
+    verbosity: { type: "string", enum: Array.from(VERBOSITY_CHOICES) },
+    thinking: { type: "string", enum: Array.from(THINKING_CHOICES) },
+  },
+};
+
+const comparisonInfoCardSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "description"],
+  properties: {
+    title: { type: "string" },
+    description: { type: "string" },
+    tone: { type: "string", enum: INFO_CARD_TONES },
+  },
+};
+
+const comparisonVariantSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    title: { type: "string" },
+    defaultConfig: modelConfigSchema,
+    requestPreset: {
+      type: "object",
+      additionalProperties: true,
+    },
+  },
+};
+
+const createInfoCardsStep: StepSequenceFunctionTool<
+  CreateInfoCardsStepInput
+> = {
+  definition: {
+    type: "function",
+    name: "create_info_cards_step",
+    description:
+      "Affiche des cartes d'information synthétiques pour mettre en avant des points clés.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["cards"],
+      properties: {
+        id: { type: "string" },
+        idHint: { type: "string" },
+        existingStepIds: {
+          type: "array",
+          items: { type: "string" },
+        },
+        eyebrow: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+        columns: { type: "number" },
+        cards: {
+          type: "array",
+          minItems: 1,
+          items: infoCardSchema,
+        },
+      },
+    },
+  },
+  handler: (input) => {
+    const id = resolveId(input, input.title ?? "info-cards");
+    const cards: InfoCardsStepCardConfig[] = (input.cards ?? [])
+      .map((card) => {
+        if (!card) {
+          return null;
+        }
+        const items = sanitizeStringArray(card.items, { max: 8 });
+        return {
+          title: sanitizeString(card.title, "", { allowEmpty: false }),
+          description: sanitizeString(card.description, "", { allowEmpty: false }),
+          tone: sanitizeInfoCardTone(card.tone),
+          ...(items.length > 0 ? { items } : {}),
+        } satisfies InfoCardsStepCardConfig;
+      })
+      .filter((card): card is InfoCardsStepCardConfig => Boolean(card?.title));
+
+    const fallbackColumns = cards.length > 0 ? Math.min(Math.max(cards.length, 1), 3) : 1;
+    const columns = sanitizeInteger(input.columns, {
+      fallback: fallbackColumns,
+      min: 1,
+      max: 4,
+    });
+
+    const config: InfoCardsStepConfig = {
+      eyebrow: sanitizeString(input.eyebrow, "", { allowEmpty: true }),
+      title: sanitizeString(input.title, "", { allowEmpty: true }),
+      description: sanitizeString(input.description, "", { allowEmpty: true }),
+      columns,
+      cards,
+    };
+
+    return {
+      id,
+      component: "info-cards",
+      config,
+      composite: null,
+    } satisfies StepDefinition;
+  },
+};
+
+const DEFAULT_PROMPT_EVALUATION_TEXT = `Rôle: Tu es un tuteur pair qui anime un atelier dynamique.
+Tâche: Proposer un plan d’atelier de 60 minutes pour revoir les structures de données avant l’intra.
+Public: Étudiantes et étudiants de première année au cégep.
+Contraintes: Prévoir trois segments (accroche, pratique guidée, conclusion). Mentionner un outil collaboratif utilisé.
+Format attendu: Liste numérotée avec durées estimées.
+Réponds uniquement avec le plan.`;
+
+const DEFAULT_PROMPT_EVALUATION_DEVELOPER =
+  "Tu es un évaluateur pédagogique spécialisé dans la rédaction de prompts. Analyse le prompt suivant et attribue un score global ainsi que quatre sous-scores (0-100). Réponds uniquement avec un JSON strict, sans commentaire supplémentaire.\n\nFormat attendu (JSON strict): {\\\"total\\\":int,\\\"clarity\\\":int,\\\"specificity\\\":int,\\\"structure\\\":int,\\\"length\\\":int,\\\"comments\\\":\\\"string\\\",\\\"advice\\\":[\\\"string\\\",...]}.\n- \\\"comments\\\" : synthèse en 2 phrases max.\n- \\\"advice\\\" : pistes concrètes (3 max).\n- Utilise des entiers pour les scores.\n- Pas d’autre texte hors du JSON.";
+
+const DEFAULT_COMPARISON_VARIANT_TITLES: Record<DualModelComparisonVariant, string> = {
+  A: "Profil A",
+  B: "Profil B",
+};
+
+const DEFAULT_COMPARISON_LAUNCH_CTA: Required<DualModelComparisonCopyConfig["launchCta"]> = {
+  idle: "Lancer les deux requêtes",
+  loading: "Réponses en cours…",
+  missingContext: "Ajoutez un prompt avant de lancer la génération.",
+};
+
+const DEFAULT_COMPARISON_STATUS: Required<DualModelComparisonCopyConfig["variantStatus"]> = {
+  idle: "En attente",
+  loading: "Réponse en cours…",
+  success: "Réponse générée",
+};
+
+const DEFAULT_COMPARISON_SELECT_LABELS: Required<DualModelComparisonCopyConfig["selectLabels"]> = {
+  model: "Profil IA",
+  verbosity: "Verbosité attendue",
+  thinking: "Effort de raisonnement",
+};
+
+const DEFAULT_COMPARISON_SUMMARY: Required<DualModelComparisonCopyConfig["summary"]> = {
+  empty: "Résultat en attente.",
+  loading: "Initialisation du flux…",
+  resetLabel: "Réinitialiser l’aperçu",
+};
+
+const DEFAULT_COMPARISON_TITLE = "Comparez deux configurations IA";
+const DEFAULT_COMPARISON_PROMPT_LABEL = "Décrivez la consigne à soumettre";
+const DEFAULT_COMPARISON_PROMPT_PLACEHOLDER =
+  "Décrivez le besoin ou la tâche attendue pour vos deux variantes.";
+const DEFAULT_COMPARISON_PROCEED_CTA = "Passer à l’étape suivante";
+
+const CLARITY_GRID_SIZE = 10;
+const CLARITY_START_POSITION = { x: 0, y: 0 } as const;
+
+interface CreatePromptEvaluationStepInput extends ToolBaseInput {
+  defaultText?: string;
+  developerMessage?: string;
+  model?: string;
+  verbosity?: VerbosityChoice;
+  thinking?: ThinkingChoice;
+}
+
+const createPromptEvaluationStep: StepSequenceFunctionTool<
+  CreatePromptEvaluationStepInput
+> = {
+  definition: {
+    type: "function",
+    name: "create_prompt_evaluation_step",
+    description:
+      "Ajoute un atelier d’évaluation de prompt avec notation automatique et recommandations.",
     strict: true,
     parameters: {
       type: "object",
@@ -535,58 +1095,138 @@ const createWorkshopContextStep: StepSequenceFunctionTool<
           type: "array",
           items: { type: "string" },
         },
-        defaultText: {
-          type: "string",
-          description: "Texte prérempli suggéré aux utilisateurs.",
-        },
+        defaultText: { type: "string" },
+        developerMessage: { type: "string" },
+        model: { type: "string" },
+        verbosity: { type: "string", enum: Array.from(VERBOSITY_CHOICES) },
+        thinking: { type: "string", enum: Array.from(THINKING_CHOICES) },
       },
     },
   },
   handler: (input) => {
-    const id = resolveId(input, "workshop-context");
-    const config: WorkshopContextStepConfig = {
-      defaultText: input.defaultText,
+    const id = resolveId(input, input.idHint ?? "prompt-evaluation");
+    const defaultText = sanitizeString(input.defaultText, DEFAULT_PROMPT_EVALUATION_TEXT, {
+      allowEmpty: false,
+    });
+    const developerMessage = sanitizeString(
+      input.developerMessage,
+      DEFAULT_PROMPT_EVALUATION_DEVELOPER,
+      { allowEmpty: false }
+    );
+    const model = sanitizeString(input.model, DEFAULT_MODEL, { allowEmpty: false });
+    const verbosity =
+      typeof input.verbosity === "string" && VERBOSITY_CHOICES.has(input.verbosity)
+        ? (input.verbosity as VerbosityChoice)
+        : (DEFAULT_VERBOSITY as VerbosityChoice);
+    const thinking =
+      typeof input.thinking === "string" && THINKING_CHOICES.has(input.thinking)
+        ? (input.thinking as ThinkingChoice)
+        : (DEFAULT_THINKING as ThinkingChoice);
+
+    const config: PromptEvaluationStepConfig = {
+      defaultText,
+      developerMessage,
+      model,
+      verbosity,
+      thinking,
     };
 
     return {
       id,
-      component: "workshop-context",
+      component: "prompt-evaluation",
       config,
       composite: null,
     } satisfies StepDefinition;
   },
 };
 
-interface CreateWorkshopComparisonStepInput extends ToolBaseInput {
-  contextStepId: string;
+interface CreateDualModelComparisonStepInput extends ToolBaseInput {
+  contextStepId?: string;
+  contextField?: string;
+  copy?: DualModelComparisonCopyConfig;
+  request?: DualModelComparisonRequestConfig;
+  variants?: Partial<Record<DualModelComparisonVariant, DualModelComparisonVariantConfig>>;
   defaultConfigA?: ModelConfig;
   defaultConfigB?: ModelConfig;
 }
 
-const modelConfigSchema: JsonSchema = {
+const comparisonCopySchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["model", "verbosity", "thinking"],
   properties: {
-    model: { type: "string" },
-    verbosity: { type: "string" },
-    thinking: { type: "string" },
+    badge: { type: "string" },
+    title: { type: "string" },
+    description: { type: "string" },
+    backCtaLabel: { type: "string" },
+    promptLabel: { type: "string" },
+    promptPlaceholder: { type: "string" },
+    promptHelper: { type: "string" },
+    launchCta: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        idle: { type: "string" },
+        loading: { type: "string" },
+        missingContext: { type: "string" },
+      },
+    },
+    variantTitles: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        A: { type: "string" },
+        B: { type: "string" },
+      },
+    },
+    variantTitlePattern: { type: "string" },
+    variantStatus: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        idle: { type: "string" },
+        loading: { type: "string" },
+        success: { type: "string" },
+      },
+    },
+    selectLabels: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        model: { type: "string" },
+        verbosity: { type: "string" },
+        thinking: { type: "string" },
+      },
+    },
+    summary: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        empty: { type: "string" },
+        loading: { type: "string" },
+        resetLabel: { type: "string" },
+      },
+    },
+    proceedCtaLabel: { type: "string" },
+    infoCards: {
+      type: "array",
+      items: comparisonInfoCardSchema,
+    },
   },
 };
 
-const createWorkshopComparisonStep: StepSequenceFunctionTool<
-  CreateWorkshopComparisonStepInput
+const createDualModelComparisonStep: StepSequenceFunctionTool<
+  CreateDualModelComparisonStepInput
 > = {
   definition: {
     type: "function",
-    name: "create_workshop_comparison_step",
+    name: "create_ai_comparison_step",
     description:
-      "Génère l'étape de comparaison de modèles de l'atelier (paramétrage des variantes).",
+      "Met en scène deux variantes de modèles IA pour comparer leurs réponses à un même prompt.",
     strict: true,
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["contextStepId"],
+      required: [],
       properties: {
         id: { type: "string" },
         idHint: { type: "string" },
@@ -594,9 +1234,24 @@ const createWorkshopComparisonStep: StepSequenceFunctionTool<
           type: "array",
           items: { type: "string" },
         },
-        contextStepId: {
-          type: "string",
-          description: "Identifiant de l'étape de contexte qui fournit le texte source.",
+        contextStepId: { type: "string" },
+        contextField: { type: "string" },
+        copy: comparisonCopySchema,
+        request: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            endpoint: { type: "string" },
+            systemPrompt: { type: "string" },
+          },
+        },
+        variants: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            A: comparisonVariantSchema,
+            B: comparisonVariantSchema,
+          },
         },
         defaultConfigA: modelConfigSchema,
         defaultConfigB: modelConfigSchema,
@@ -604,40 +1259,227 @@ const createWorkshopComparisonStep: StepSequenceFunctionTool<
     },
   },
   handler: (input) => {
-    const id = resolveId(input, "workshop-comparison");
-    const config: WorkshopComparisonStepConfig = {
-      contextStepId: input.contextStepId,
-      defaultConfigA: input.defaultConfigA,
-      defaultConfigB: input.defaultConfigB,
+    const id = resolveId(input, input.idHint ?? "ai-comparison");
+    const contextStepId = sanitizeString(input.contextStepId, "", { allowEmpty: true });
+    const contextField = sanitizeString(input.contextField, "sourceText", {
+      allowEmpty: false,
+    });
+
+    const requestEndpoint = sanitizeString(input.request?.endpoint, "/summary", {
+      allowEmpty: false,
+    });
+    const request: DualModelComparisonRequestConfig = {
+      endpoint: requestEndpoint,
+    };
+    const systemPrompt = sanitizeString(input.request?.systemPrompt, "", {
+      allowEmpty: false,
+    });
+    if (systemPrompt) {
+      request.systemPrompt = systemPrompt;
+    }
+
+    const copySource = isPlainObject(input.copy)
+      ? (input.copy as DualModelComparisonCopyConfig)
+      : {};
+    const badge = sanitizeString(copySource.badge, "", { allowEmpty: false });
+    const description = sanitizeString(copySource.description, "", { allowEmpty: false });
+    const backCtaLabel = sanitizeString(copySource.backCtaLabel, "", { allowEmpty: false });
+    const promptHelper = sanitizeString(copySource.promptHelper, "", { allowEmpty: false });
+    const variantTitlePattern = sanitizeString(copySource.variantTitlePattern, "", {
+      allowEmpty: false,
+    });
+
+    const launchCta = {
+      idle: sanitizeString(
+        copySource.launchCta?.idle,
+        DEFAULT_COMPARISON_LAUNCH_CTA.idle,
+        { allowEmpty: false }
+      ),
+      loading: sanitizeString(
+        copySource.launchCta?.loading,
+        DEFAULT_COMPARISON_LAUNCH_CTA.loading,
+        { allowEmpty: false }
+      ),
+      missingContext: sanitizeString(
+        copySource.launchCta?.missingContext,
+        DEFAULT_COMPARISON_LAUNCH_CTA.missingContext,
+        { allowEmpty: false }
+      ),
+    } satisfies Required<DualModelComparisonCopyConfig["launchCta"]>;
+
+    const variantTitles: Record<DualModelComparisonVariant, string> = {
+      ...DEFAULT_COMPARISON_VARIANT_TITLES,
+    };
+    if (isPlainObject(copySource.variantTitles)) {
+      const titles = copySource.variantTitles as Partial<
+        Record<DualModelComparisonVariant, string>
+      >;
+      for (const variant of Object.keys(variantTitles) as DualModelComparisonVariant[]) {
+        const value = titles?.[variant];
+        if (typeof value === "string" && value.trim()) {
+          variantTitles[variant] = value.trim();
+        }
+      }
+    }
+    if (variantTitlePattern && variantTitlePattern.includes("{variant}")) {
+      for (const variant of Object.keys(variantTitles) as DualModelComparisonVariant[]) {
+        variantTitles[variant] = variantTitlePattern.replace(/\{variant\}/g, variant);
+      }
+    }
+
+    const variantStatus = {
+      idle: sanitizeString(
+        copySource.variantStatus?.idle,
+        DEFAULT_COMPARISON_STATUS.idle,
+        { allowEmpty: false }
+      ),
+      loading: sanitizeString(
+        copySource.variantStatus?.loading,
+        DEFAULT_COMPARISON_STATUS.loading,
+        { allowEmpty: false }
+      ),
+      success: sanitizeString(
+        copySource.variantStatus?.success,
+        DEFAULT_COMPARISON_STATUS.success,
+        { allowEmpty: false }
+      ),
+    } satisfies Required<DualModelComparisonCopyConfig["variantStatus"]>;
+
+    const selectLabels = {
+      model: sanitizeString(
+        copySource.selectLabels?.model,
+        DEFAULT_COMPARISON_SELECT_LABELS.model,
+        { allowEmpty: false }
+      ),
+      verbosity: sanitizeString(
+        copySource.selectLabels?.verbosity,
+        DEFAULT_COMPARISON_SELECT_LABELS.verbosity,
+        { allowEmpty: false }
+      ),
+      thinking: sanitizeString(
+        copySource.selectLabels?.thinking,
+        DEFAULT_COMPARISON_SELECT_LABELS.thinking,
+        { allowEmpty: false }
+      ),
+    } satisfies Required<DualModelComparisonCopyConfig["selectLabels"]>;
+
+    const summary = {
+      empty: sanitizeString(
+        copySource.summary?.empty,
+        DEFAULT_COMPARISON_SUMMARY.empty,
+        { allowEmpty: false }
+      ),
+      loading: sanitizeString(
+        copySource.summary?.loading,
+        DEFAULT_COMPARISON_SUMMARY.loading,
+        { allowEmpty: false }
+      ),
+      resetLabel: sanitizeString(
+        copySource.summary?.resetLabel,
+        DEFAULT_COMPARISON_SUMMARY.resetLabel,
+        { allowEmpty: false }
+      ),
+    } satisfies Required<DualModelComparisonCopyConfig["summary"]>;
+
+    const proceedCtaLabel = sanitizeString(
+      copySource.proceedCtaLabel,
+      DEFAULT_COMPARISON_PROCEED_CTA,
+      { allowEmpty: false }
+    );
+
+    const infoCards = sanitizeComparisonInfoCards(copySource.infoCards);
+
+    const copy: DualModelComparisonCopyConfig = {
+      title: sanitizeString(copySource.title, DEFAULT_COMPARISON_TITLE, {
+        allowEmpty: false,
+      }),
+      promptLabel: sanitizeString(
+        copySource.promptLabel,
+        DEFAULT_COMPARISON_PROMPT_LABEL,
+        { allowEmpty: false }
+      ),
+      promptPlaceholder: sanitizeString(
+        copySource.promptPlaceholder,
+        DEFAULT_COMPARISON_PROMPT_PLACEHOLDER,
+        { allowEmpty: false }
+      ),
+      launchCta,
+      variantTitles,
+      variantStatus,
+      selectLabels,
+      summary,
+      proceedCtaLabel,
+      infoCards,
+      ...(badge ? { badge } : {}),
+      ...(description ? { description } : {}),
+      ...(backCtaLabel ? { backCtaLabel } : {}),
+      ...(promptHelper ? { promptHelper } : {}),
+    };
+
+    const variantsInput = input.variants ?? {};
+    const variantAConfig = sanitizeVariantConfigInput(
+      variantsInput?.A,
+      variantTitles.A,
+      sanitizeModelConfig(input.defaultConfigA ?? variantsInput?.A?.defaultConfig)
+    );
+    const variantBConfig = sanitizeVariantConfigInput(
+      variantsInput?.B,
+      variantTitles.B,
+      sanitizeModelConfig(input.defaultConfigB ?? variantsInput?.B?.defaultConfig)
+    );
+
+    const config: DualModelComparisonConfig = {
+      contextStepId,
+      contextField,
+      copy,
+      request,
+      variants: {
+        A: variantAConfig,
+        B: variantBConfig,
+      },
+      defaultConfigA: { ...variantAConfig.defaultConfig },
+      defaultConfigB: { ...variantBConfig.defaultConfig },
     };
 
     return {
       id,
-      component: "workshop-comparison",
+      component: "ai-comparison",
       config,
       composite: null,
     } satisfies StepDefinition;
   },
 };
 
-interface CreateWorkshopSynthesisStepInput extends ToolBaseInput {
-  contextStepId: string;
-  comparisonStepId: string;
+interface CreateClarityMapStepInput extends ToolBaseInput {
+  obstacleCount?: number;
+  initialTarget?: unknown;
+  promptStepId?: string;
+  allowInstructionInput?: boolean;
+  instructionLabel?: string;
+  instructionPlaceholder?: string;
 }
 
-const createWorkshopSynthesisStep: StepSequenceFunctionTool<
-  CreateWorkshopSynthesisStepInput
-> = {
+const clarityCoordSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["x", "y"],
+  properties: {
+    x: { type: "number" },
+    y: { type: "number" },
+  },
+};
+
+const createClarityMapStep: StepSequenceFunctionTool<CreateClarityMapStepInput> = {
   definition: {
     type: "function",
-    name: "create_workshop_synthesis_step",
+    name: "create_clarity_map_step",
     description:
-      "Assemble l'étape finale de l'atelier en s'appuyant sur les réponses générées.",
+      "Crée une étape de navigation Clarity où l’IA propose un plan d’action sur une grille 10×10.",
     strict: true,
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["contextStepId", "comparisonStepId"],
+      required: [],
       properties: {
         id: { type: "string" },
         idHint: { type: "string" },
@@ -645,22 +1487,185 @@ const createWorkshopSynthesisStep: StepSequenceFunctionTool<
           type: "array",
           items: { type: "string" },
         },
-        contextStepId: {
-          type: "string" },
-        comparisonStepId: { type: "string" },
+        obstacleCount: { type: "number" },
+        initialTarget: {
+          anyOf: [clarityCoordSchema, { type: "null" }],
+        },
+        promptStepId: { type: "string" },
+        allowInstructionInput: { type: "boolean" },
+        instructionLabel: { type: "string" },
+        instructionPlaceholder: { type: "string" },
       },
     },
   },
   handler: (input) => {
-    const id = resolveId(input, "workshop-synthesis");
-    const config: WorkshopSynthesisStepConfig = {
-      contextStepId: input.contextStepId,
-      comparisonStepId: input.comparisonStepId,
+    const id = resolveId(input, input.idHint ?? "clarity-map");
+    const obstacleCount = sanitizeInteger(input.obstacleCount, {
+      fallback: 6,
+      min: 0,
+      max: 24,
+    });
+    const target = sanitizeClarityCoord(input.initialTarget);
+    const promptStepId = sanitizeString(input.promptStepId, "", { allowEmpty: true });
+    const allowInstructionInput = sanitizeBoolean(input.allowInstructionInput, true);
+    const instructionLabel = sanitizeString(
+      input.instructionLabel,
+      "Commande transmise",
+      { allowEmpty: false }
+    );
+    const instructionPlaceholder = sanitizeString(
+      input.instructionPlaceholder,
+      "La consigne reçue s'affichera ici…",
+      { allowEmpty: false }
+    );
+
+    const config: ClarityMapStepConfig = {
+      obstacleCount,
+      initialTarget: target,
+      promptStepId,
+      allowInstructionInput,
+      instructionLabel,
+      instructionPlaceholder,
     };
 
     return {
       id,
-      component: "workshop-synthesis",
+      component: "clarity-map",
+      config,
+      composite: null,
+    } satisfies StepDefinition;
+  },
+};
+
+interface CreateClarityPromptStepInput extends ToolBaseInput {
+  promptLabel?: string;
+  promptPlaceholder?: string;
+  model?: string;
+  verbosity?: VerbosityChoice;
+  thinking?: ThinkingChoice;
+  developerPrompt?: string;
+  settingsMode?: "hidden" | "read-only" | "editable";
+}
+
+const createClarityPromptStep: StepSequenceFunctionTool<CreateClarityPromptStepInput> = {
+  definition: {
+    type: "function",
+    name: "create_clarity_prompt_step",
+    description:
+      "Prépare la consigne de pilotage Clarity avec choix du modèle, verbosité et effort de raisonnement.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: [],
+      properties: {
+        id: { type: "string" },
+        idHint: { type: "string" },
+        existingStepIds: {
+          type: "array",
+          items: { type: "string" },
+        },
+        promptLabel: { type: "string" },
+        promptPlaceholder: { type: "string" },
+        model: { type: "string" },
+        verbosity: { type: "string", enum: Array.from(VERBOSITY_CHOICES) },
+        thinking: { type: "string", enum: Array.from(THINKING_CHOICES) },
+        developerPrompt: { type: "string" },
+        settingsMode: {
+          type: "string",
+          enum: ["hidden", "read-only", "editable"],
+        },
+      },
+    },
+  },
+  handler: (input) => {
+    const id = resolveId(input, input.idHint ?? "clarity-prompt");
+    const promptLabel = sanitizeString(input.promptLabel, "Consigne à transmettre", {
+      allowEmpty: false,
+    });
+    const promptPlaceholder = sanitizeString(
+      input.promptPlaceholder,
+      "Décris l'action à effectuer…",
+      { allowEmpty: false }
+    );
+    const model = sanitizeString(input.model, "gpt-5-mini", { allowEmpty: false });
+    const verbosity =
+      typeof input.verbosity === "string" && VERBOSITY_CHOICES.has(input.verbosity)
+        ? (input.verbosity as VerbosityChoice)
+        : ("medium" as VerbosityChoice);
+    const thinking =
+      typeof input.thinking === "string" && THINKING_CHOICES.has(input.thinking)
+        ? (input.thinking as ThinkingChoice)
+        : ("medium" as ThinkingChoice);
+    const developerPrompt = sanitizeString(input.developerPrompt, "", {
+      allowEmpty: true,
+    });
+    const settingsMode =
+      input.settingsMode === "hidden" ||
+      input.settingsMode === "read-only" ||
+      input.settingsMode === "editable"
+        ? input.settingsMode
+        : "hidden";
+
+    const config: ClarityPromptStepConfig = {
+      promptLabel,
+      promptPlaceholder,
+      model,
+      verbosity,
+      thinking,
+      developerPrompt,
+      settingsMode,
+    };
+
+    return {
+      id,
+      component: "clarity-prompt",
+      config,
+      composite: null,
+    } satisfies StepDefinition;
+  },
+};
+
+interface CreateExplorateurWorldStepInput extends ToolBaseInput {
+  config?: unknown;
+}
+
+const createExplorateurWorldStep: StepSequenceFunctionTool<
+  CreateExplorateurWorldStepInput
+> = {
+  definition: {
+    type: "function",
+    name: "create_explorateur_world_step",
+    description:
+      "Instancie le mini-monde Explorateur IA complet avec sa configuration (terrains, quartiers, missions).",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: [],
+      properties: {
+        id: { type: "string" },
+        idHint: { type: "string" },
+        existingStepIds: {
+          type: "array",
+          items: { type: "string" },
+        },
+        config: {
+          type: "object",
+          additionalProperties: true,
+        },
+      },
+    },
+  },
+  handler: (input) => {
+    const id = resolveId(input, input.idHint ?? "explorateur-world");
+    const config: ExplorateurWorldConfig = input.config
+      ? sanitizeExplorateurWorldConfig(input.config)
+      : createDefaultExplorateurWorldConfig();
+
+    return {
+      id,
+      component: "explorateur-world",
       config,
       composite: null,
     } satisfies StepDefinition;
@@ -974,9 +1979,13 @@ export const STEP_SEQUENCE_TOOLS = {
   create_rich_content_step: createRichContentStep,
   create_form_step: createFormStep,
   create_video_step: createVideoStep,
-  create_workshop_context_step: createWorkshopContextStep,
-  create_workshop_comparison_step: createWorkshopComparisonStep,
-  create_workshop_synthesis_step: createWorkshopSynthesisStep,
+  create_simulation_chat_step: createSimulationChatStep,
+  create_info_cards_step: createInfoCardsStep,
+  create_prompt_evaluation_step: createPromptEvaluationStep,
+  create_ai_comparison_step: createDualModelComparisonStep,
+  create_clarity_map_step: createClarityMapStep,
+  create_clarity_prompt_step: createClarityPromptStep,
+  create_explorateur_world_step: createExplorateurWorldStep,
   create_composite_step: createCompositeStep,
   build_step_sequence_activity: buildStepSequenceActivity,
 } as const;
