@@ -58,6 +58,29 @@ def _any_object_schema() -> dict[str, Any]:
     }
 
 
+def _strict_object_schema(
+    properties: Mapping[str, Any],
+    *,
+    required: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Return a strict schema requiring every declared property."""
+
+    property_keys = tuple(properties.keys())
+    required_fields = tuple(required) if required is not None else property_keys
+    if set(required_fields) != set(property_keys):
+        raise ValueError(
+            "Strict schema must require the same keys as properties: "
+            f"expected {property_keys}, got {required_fields}"
+        )
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": dict(properties),
+        "required": list(required_fields),
+    }
+
+
 def create_step_sequence_activity(
     *,
     activity_id: str,
@@ -178,12 +201,14 @@ def create_rich_content_step(
             url = item.get("url")
             if not url:
                 continue
+            alt = item.get("alt")
+            caption = item.get("caption")
             normalized_media.append(
                 {
                     "id": str(item.get("id") or f"{step_id}-media-{index}"),
                     "url": str(url),
-                    "alt": item.get("alt"),
-                    "caption": item.get("caption"),
+                    "alt": str(alt) if alt is not None else None,
+                    "caption": str(caption) if caption is not None else None,
                 }
             )
 
@@ -196,6 +221,7 @@ def create_rich_content_step(
                 "type": "tips",
                 "title": sidebar.get("title"),
                 "tips": [str(item) for item in tips] if isinstance(tips, Sequence) else [],
+                "items": [],
             }
         elif sidebar_type == "checklist":
             items: list[dict[str, Any]] = []
@@ -209,8 +235,9 @@ def create_rich_content_step(
                         continue
                     items.append(
                         {
-                            "id": raw_item.get("id")
-                            or f"{step_id}-item-{index}",
+                            "id": str(
+                                raw_item.get("id") or f"{step_id}-item-{index}"
+                            ),
                             "label": str(label),
                             "checked": bool(raw_item.get("checked", False)),
                         }
@@ -218,6 +245,7 @@ def create_rich_content_step(
             normalized_sidebar = {
                 "type": "checklist",
                 "title": sidebar.get("title"),
+                "tips": [],
                 "items": items,
             }
 
@@ -824,17 +852,14 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
             "steps": {
                 "type": "array",
                 "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["id", "component", "config", "composite"],
-                    "properties": {
+                "items": _strict_object_schema(
+                    {
                         "id": {"type": "string"},
                         "component": {"type": ["string", "null"]},
                         "config": _nullable_schema(_any_object_schema()),
                         "composite": _nullable_schema(_any_object_schema()),
-                    },
-                },
+                    }
+                ),
             },
             "metadata": _nullable_schema(
                 {
@@ -885,17 +910,14 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "steps": {
                     "type": "array",
                     "minItems": 0,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["id", "component", "config", "composite"],
-                        "properties": {
+                    "items": _strict_object_schema(
+                        {
                             "id": {"type": "string"},
                             "component": {"type": ["string", "null"]},
                             "config": _nullable_schema(_any_object_schema()),
                             "composite": _nullable_schema(_any_object_schema()),
-                        },
-                    },
+                        }
+                    ),
                 },
                 "metadata": _nullable_schema(_any_object_schema()),
             },
@@ -919,45 +941,36 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "body": {"type": "string"},
                 "media": {
                     "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["url"],
-                        "properties": {
-                            "id": {"type": "string"},
+                    "items": _strict_object_schema(
+                        {
+                            "id": _nullable_schema({"type": "string"}),
                             "url": {"type": "string"},
-                            "alt": {"type": "string"},
-                            "caption": {"type": "string"},
-                        },
-                    },
+                            "alt": _nullable_schema({"type": "string"}),
+                            "caption": _nullable_schema({"type": "string"}),
+                        }
+                    ),
                 },
                 "sidebar": _nullable_schema(
-                    {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["type"],
-                        "properties": {
+                    _strict_object_schema(
+                        {
                             "type": {"type": "string", "enum": ["tips", "checklist"]},
-                            "title": {"type": "string"},
+                            "title": _nullable_schema({"type": "string"}),
                             "tips": {
                                 "type": "array",
                                 "items": {"type": "string"},
                             },
                             "items": {
                                 "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "required": ["label"],
-                                    "properties": {
-                                        "id": {"type": "string"},
+                                "items": _strict_object_schema(
+                                    {
+                                        "id": _nullable_schema({"type": "string"}),
                                         "label": {"type": "string"},
                                         "checked": {"type": "boolean"},
-                                    },
-                                },
+                                    }
+                                ),
                             },
-                        },
-                    }
+                        }
+                    )
                 ),
             },
         },
