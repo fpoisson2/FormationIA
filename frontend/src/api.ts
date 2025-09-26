@@ -365,7 +365,8 @@ export interface ActivitySelectorHeaderConfig {
 }
 
 export interface ActivityGenerationAdminConfig {
-  developerMessage: string;
+  systemMessage?: string;
+  developerMessage?: string;
 }
 
 export interface ActivityConfig {
@@ -397,6 +398,7 @@ export interface GenerateActivityPayload {
   thinking: ThinkingChoice;
   details: ActivityGenerationDetailsPayload;
   existingActivityIds?: string[];
+  systemMessage?: string;
   developerMessage?: string;
 }
 

@@ -17,6 +17,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AdminLtiUsersPage } from "./pages/admin/AdminLtiUsersPage";
 import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
+import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
 import { activities as activitiesClient } from "./api";
 
 function App(): JSX.Element {
@@ -99,10 +100,17 @@ function App(): JSX.Element {
       <Route element={<AdminGuard />}>
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="platforms" replace />} />
+          <Route
+            path="activity-generation"
+            element={<AdminActivityGenerationPage />}
+          />
           <Route path="platforms" element={<AdminPlatformsPage />} />
           <Route path="lti-users" element={<AdminLtiUsersPage />} />
           <Route path="local-users" element={<AdminLocalUsersPage />} />
-          <Route path="activity-tracking" element={<AdminActivityTrackingPage />} />
+          <Route
+            path="activity-tracking"
+            element={<AdminActivityTrackingPage />}
+          />
         </Route>
       </Route>
       {resolvedActivities

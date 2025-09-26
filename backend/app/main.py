@@ -68,6 +68,14 @@ DEFAULT_PLAN_MODEL = "gpt-5-mini"
 DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
 
+DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE = " ".join(
+    [
+        "Tu es un concepteur pédagogique francophone spécialisé en intelligence",
+        "artificielle générative. Tu proposes des activités engageantes et",
+        "structurées pour des professionnels en formation continue.",
+    ]
+)
+
 DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE = "\n".join(
     [
         "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente.",
@@ -818,6 +826,26 @@ def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
     return normalized_activity
 
 
+def _resolve_activity_generation_system_message(
+    payload: ActivityGenerationRequest,
+) -> str:
+    if isinstance(payload.system_message, str) and payload.system_message:
+        return payload.system_message
+
+    try:
+        config = _load_activities_config()
+    except HTTPException:
+        return DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
+
+    generation_config = config.get("activityGeneration")
+    if isinstance(generation_config, Mapping):
+        candidate = generation_config.get("systemMessage")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    return DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
+
+
 def _resolve_activity_generation_developer_message(
     payload: ActivityGenerationRequest,
 ) -> str:
@@ -1344,6 +1372,9 @@ class ActivityGenerationRequest(BaseModel):
     existing_activity_ids: list[str] = Field(
         default_factory=list, alias="existingActivityIds"
     )
+    system_message: str | None = Field(
+        default=None, alias="systemMessage", min_length=3, max_length=4000
+    )
     developer_message: str | None = Field(
         default=None, alias="developerMessage", min_length=3, max_length=6000
     )
@@ -1361,6 +1392,9 @@ class ActivityGenerationRequest(BaseModel):
             seen.add(trimmed)
             normalized.append(trimmed)
         self.existing_activity_ids = normalized
+        if isinstance(self.system_message, str):
+            trimmed_system = self.system_message.strip()
+            self.system_message = trimmed_system or None
         if isinstance(self.developer_message, str):
             trimmed_message = self.developer_message.strip()
             self.developer_message = trimmed_message or None
@@ -1559,6 +1593,12 @@ class ActivityPayload(BaseModel):
 class ActivityGenerationConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
+    system_message: str = Field(
+        default=DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE,
+        alias="systemMessage",
+        min_length=3,
+        max_length=4000,
+    )
     developer_message: str = Field(
         default=DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE,
         alias="developerMessage",
@@ -1568,6 +1608,8 @@ class ActivityGenerationConfig(BaseModel):
 
     @model_validator(mode="after")
     def _ensure_default_message(self) -> "ActivityGenerationConfig":
+        if not self.system_message.strip():
+            self.system_message = DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
         if not self.developer_message.strip():
             self.developer_message = DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
         return self
@@ -2782,11 +2824,7 @@ def _run_activity_generation_job(
             payload.details, payload.existing_activity_ids
         )
 
-        system_message = (
-            "Tu es un concepteur pédagogique francophone spécialisé en intelligence "
-            "artificielle générative. Tu proposes des activités engageantes et "
-            "structurées pour des professionnels en formation continue."
-        )
+        system_message = _resolve_activity_generation_system_message(payload)
         developer_message = _resolve_activity_generation_developer_message(payload)
 
         conversation: list[dict[str, Any]] = [
