@@ -84,7 +84,7 @@ def _resolve_summary_heartbeat_interval() -> float:
 
 SUMMARY_HEARTBEAT_INTERVAL = _resolve_summary_heartbeat_interval()
 
-logger = logging.getLogger(__nam__)
+logger = logging.getLogger(__name__)
 
 def _resolve_activities_config_path() -> Path:
     raw_path = os.getenv("ACTIVITIES_CONFIG_PATH")
