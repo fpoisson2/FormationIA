@@ -26,6 +26,11 @@ from typing import Any
 StepDefinition = dict[str, Any]
 
 
+JSON_VALUE_SCHEMA: dict[str, Any] = {
+    "type": ["array", "boolean", "integer", "null", "number", "object", "string"],
+}
+
+
 def _nullable_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Return a JSON schema allowing ``null`` in addition to ``schema``."""
 
@@ -41,6 +46,16 @@ def _snake_case(name: str) -> str:
     first_pass = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
     second_pass = re.sub("([a-z0-9])([A-Z])", r"\1_\2", first_pass)
     return second_pass.lower()
+
+
+def _any_object_schema() -> dict[str, Any]:
+    """Return a permissive object schema compatible with strict mode."""
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "patternProperties": {".*": deepcopy(JSON_VALUE_SCHEMA)},
+    }
 
 
 def create_step_sequence_activity(
@@ -816,8 +831,8 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                     "properties": {
                         "id": {"type": "string"},
                         "component": {"type": ["string", "null"]},
-                        "config": _nullable_schema({"type": "object"}),
-                        "composite": _nullable_schema({"type": "object"}),
+                        "config": _nullable_schema(_any_object_schema()),
+                        "composite": _nullable_schema(_any_object_schema()),
                     },
                 },
             },
@@ -840,10 +855,10 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                         "path": {"type": ["string", "null"]},
                         "completionId": {"type": ["string", "null"]},
                         "enabled": {"type": ["boolean", "null"]},
-                        "header": _nullable_schema({"type": "object"}),
-                        "layout": _nullable_schema({"type": "object"}),
-                        "card": _nullable_schema({"type": "object"}),
-                        "overrides": _nullable_schema({"type": "object"}),
+                        "header": _nullable_schema(_any_object_schema()),
+                        "layout": _nullable_schema(_any_object_schema()),
+                        "card": _nullable_schema(_any_object_schema()),
+                        "overrides": _nullable_schema(_any_object_schema()),
                     },
                 }
             ),
@@ -876,12 +891,12 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "properties": {
                             "id": {"type": "string"},
                             "component": {"type": ["string", "null"]},
-                            "config": _nullable_schema({"type": "object"}),
-                            "composite": _nullable_schema({"type": "object"}),
+                            "config": _nullable_schema(_any_object_schema()),
+                            "composite": _nullable_schema(_any_object_schema()),
                         },
                     },
                 },
-                "metadata": _nullable_schema({"type": "object"}),
+                "metadata": _nullable_schema(_any_object_schema()),
             },
         },
     },
@@ -960,11 +975,11 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "fields": {
                     "type": "array",
                     "minItems": 1,
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
                 "submitLabel": {"type": "string"},
                 "allowEmpty": {"type": "boolean"},
-                "initialValues": _nullable_schema({"type": "object"}),
+                "initialValues": _nullable_schema(_any_object_schema()),
             },
         },
     },
@@ -982,12 +997,12 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "sources": {
                     "type": "array",
                     "minItems": 1,
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
                 "poster": {"type": "string"},
                 "captions": {
                     "type": "array",
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
                 "autoAdvanceOnEnd": {"type": "boolean"},
                 "expectedDuration": {"type": ["number", "integer"]},
@@ -1008,10 +1023,10 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "title": {"type": "string"},
                 "helpText": {"type": "string"},
                 "missionId": {"type": "string"},
-                "roles": _nullable_schema({"type": "object"}),
+                "roles": _nullable_schema(_any_object_schema()),
                 "stages": {
                     "type": "array",
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
             },
         },
@@ -1033,7 +1048,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "columns": {"type": "integer"},
                 "cards": {
                     "type": "array",
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
             },
         },
@@ -1070,11 +1085,11 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "stepId": {"type": "string"},
                 "contextStepId": {"type": "string"},
                 "contextField": {"type": "string"},
-                "copy": _nullable_schema({"type": "object"}),
-                "request": _nullable_schema({"type": "object"}),
-                "variants": {"type": "object"},
-                "defaultConfigA": _nullable_schema({"type": "object"}),
-                "defaultConfigB": _nullable_schema({"type": "object"}),
+                "copy": _nullable_schema(_any_object_schema()),
+                "request": _nullable_schema(_any_object_schema()),
+                "variants": _any_object_schema(),
+                "defaultConfigA": _nullable_schema(_any_object_schema()),
+                "defaultConfigB": _nullable_schema(_any_object_schema()),
             },
         },
     },
@@ -1090,7 +1105,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "stepId": {"type": "string"},
                 "obstacleCount": {"type": "integer"},
-                "initialTarget": _nullable_schema({"type": "object"}),
+                "initialTarget": _nullable_schema(_any_object_schema()),
                 "promptStepId": {"type": "string"},
                 "allowInstructionInput": {"type": "boolean"},
                 "instructionLabel": {"type": "string"},
@@ -1130,18 +1145,18 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["stepId"],
             "properties": {
                 "stepId": {"type": "string"},
-                "terrain": _nullable_schema({"type": "object"}),
+                "terrain": _nullable_schema(_any_object_schema()),
                 "steps": {
                     "type": "array",
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
                 "quarterDesignerSteps": {
                     "type": "array",
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
                 "quarters": {
                     "type": "array",
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
             },
         },
@@ -1160,7 +1175,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "modules": {
                     "type": "array",
                     "minItems": 1,
-                    "items": {"type": "object"},
+                    "items": _any_object_schema(),
                 },
                 "autoAdvance": {"type": "boolean"},
                 "continueLabel": {"type": "string"},
