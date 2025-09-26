@@ -1063,7 +1063,10 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "strict": True,
         "parameters": _strict_object_schema(
             {
-                "stepId": _nullable_schema({"type": "string"}),
+                "stepId": {
+                    "type": "string",
+                    "description": "Identifiant unique de l'étape dans la séquence.",
+                },
                 "id": _nullable_schema({"type": "string"}),
                 "idHint": _nullable_schema({"type": "string"}),
                 "existingStepIds": _nullable_schema(
@@ -1080,8 +1083,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "submitLabel": _nullable_schema({"type": "string"}),
                 "allowEmpty": _nullable_schema({"type": "boolean"}),
                 "initialValues": _nullable_schema(_any_object_schema()),
-            },
-            required=("fields",),
+            }
         ),
     },
     {

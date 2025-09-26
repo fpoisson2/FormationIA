@@ -316,6 +316,19 @@ def test_normalize_tool_arguments_handles_camel_case() -> None:
     assert normalized == {"step_id": "intro", "default_text": "Bonjour"}
 
 
+def test_create_form_step_tool_requires_step_id() -> None:
+    definition = next(
+        definition
+        for definition in STEP_SEQUENCE_TOOL_DEFINITIONS
+        if definition["name"] == "create_form_step"
+    )
+
+    parameters = definition["parameters"]
+
+    assert "stepId" in parameters["required"]
+    assert parameters["properties"]["stepId"]["type"] == "string"
+
+
 def test_tool_definitions_cover_toolkit() -> None:
     defined_names = {definition["name"] for definition in STEP_SEQUENCE_TOOL_DEFINITIONS}
 
