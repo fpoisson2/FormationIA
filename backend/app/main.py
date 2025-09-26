@@ -1150,6 +1150,7 @@ class ActivityGenerationToolCall(BaseModel):
     arguments: dict[str, Any]
     call_id: str | None = Field(default=None, alias="callId")
     arguments_text: str | None = Field(default=None, alias="argumentsText")
+    definition: dict[str, Any] | None = None
 
 
 class ActivityGenerationResponse(BaseModel):
@@ -2524,6 +2525,7 @@ def admin_generate_activity(
             call_id=call_id,
             arguments=arguments_obj,
             arguments_text=arguments_text,
+            definition=deepcopy(STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION),
         ),
         reasoning_summary=reasoning_summary or None,
     )
