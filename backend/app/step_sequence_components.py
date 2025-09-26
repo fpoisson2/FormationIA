@@ -389,6 +389,7 @@ def create_form_step(
     submit_label: str | None = None,
     allow_empty: bool | None = None,
     initial_values: Mapping[str, Any] | None = None,
+    failure_message: str | None = None,
     id: str | None = None,
     id_hint: str | None = None,
     existing_step_ids: Sequence[str] | None = None,
@@ -410,6 +411,8 @@ def create_form_step(
         Autorise ou non l'envoi du formulaire sans réponse.
     initial_values:
         Valeurs pré-remplies associées aux ids de champs.
+    failure_message:
+        Message affiché lorsque la réponse soumise est incorrecte.
 
     Returns
     -------
@@ -490,11 +493,18 @@ def create_form_step(
     if not normalized_fields:
         raise ValueError("Au moins un champ est requis pour configurer create_form_step.")
 
+    if isinstance(failure_message, str):
+        stripped_message = failure_message.strip()
+        normalized_failure_message = stripped_message or None
+    else:
+        normalized_failure_message = None
+
     config = {
         "fields": normalized_fields,
         "submitLabel": submit_label,
         "allowEmpty": allow_empty,
         "initialValues": deepcopy(initial_values) if isinstance(initial_values, Mapping) else None,
+        "failureMessage": normalized_failure_message,
     }
     return {
         "id": str(resolved_step_id),
@@ -1211,6 +1221,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "submitLabel": _nullable_schema({"type": "string"}),
                 "allowEmpty": _nullable_schema({"type": "boolean"}),
                 "initialValues": _nullable_schema(_any_object_schema()),
+                "failureMessage": _nullable_schema({"type": "string"}),
             }
         ),
     },
