@@ -14,6 +14,11 @@ export const MODEL_OPTIONS = [
     value: "gpt-5-mini",
     label: "Profil expert",
     helper: "Explore davantage de nuances et de justification, parfait pour une analyse approfondie."
+  },
+  {
+    value: "gpt-5",
+    label: "Profil intégral",
+    helper: "Mobilise toute la profondeur analytique du modèle pour des scénarios exigeants et complexes."
   }
 ];
 
