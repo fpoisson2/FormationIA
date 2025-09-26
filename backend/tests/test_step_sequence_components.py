@@ -141,9 +141,17 @@ def test_create_simulation_chat_step_sets_roles_and_stages() -> None:
     )
 
     config = step["config"]
+    assert set(config) == {"title", "help", "missionId", "roles", "stages"}
     assert config["roles"] == {"ai": "Coach", "user": "Participant"}
     assert len(config["stages"]) == 1
     assert config["stages"][0]["prompt"] == "Question"
+    assert set(config["stages"][0]) == {
+        "id",
+        "prompt",
+        "fields",
+        "allowEmpty",
+        "submitLabel",
+    }
 
 
 def test_create_info_cards_step_includes_columns_and_cards() -> None:
@@ -157,8 +165,16 @@ def test_create_info_cards_step_includes_columns_and_cards() -> None:
     )
 
     config = step["config"]
+    assert set(config) == {
+        "eyebrow",
+        "title",
+        "description",
+        "columns",
+        "cards",
+    }
     assert config["columns"] == 2
     assert config["cards"][0]["title"] == "A"
+    assert set(config["cards"][0]) == {"title", "description", "tone", "items"}
 
 
 def test_create_prompt_evaluation_step_sets_all_options() -> None:
@@ -194,6 +210,15 @@ def test_create_ai_comparison_step_handles_optional_sections() -> None:
     )
 
     config = step["config"]
+    assert set(config) == {
+        "contextStepId",
+        "contextField",
+        "copy",
+        "request",
+        "variants",
+        "defaultConfigA",
+        "defaultConfigB",
+    }
     assert config["contextStepId"] == "context"
     assert config["variants"]["A"]["title"] == "Profil A"
 
@@ -210,6 +235,14 @@ def test_create_clarity_map_step_records_all_options() -> None:
     )
 
     config = step["config"]
+    assert set(config) == {
+        "obstacleCount",
+        "initialTarget",
+        "promptStepId",
+        "allowInstructionInput",
+        "instructionLabel",
+        "instructionPlaceholder",
+    }
     assert config["obstacleCount"] == 4
     assert config["initialTarget"] == {"x": 1, "y": 2}
 
@@ -227,6 +260,15 @@ def test_create_clarity_prompt_step_sets_preferences() -> None:
     )
 
     config = step["config"]
+    assert set(config) == {
+        "promptLabel",
+        "promptPlaceholder",
+        "model",
+        "verbosity",
+        "thinking",
+        "developerPrompt",
+        "settingsMode",
+    }
     assert config["settingsMode"] == "editable"
     assert config["model"] == "gpt-5-mini"
 
@@ -250,8 +292,10 @@ def test_create_composite_step_wraps_modules() -> None:
     assert step["component"] == "composite"
     assert step["config"] is None
     composite = step["composite"]
+    assert set(composite) == {"modules", "autoAdvance", "continueLabel"}
     assert composite["autoAdvance"] is True
     assert composite["modules"][0]["component"] == "rich-content"
+    assert set(composite["modules"][0]) == {"id", "component", "slot", "config"}
 
 
 def test_add_helpers_append_created_steps() -> None:
@@ -342,4 +386,55 @@ def test_tool_definitions_cover_toolkit() -> None:
     defined_names = {definition["name"] for definition in STEP_SEQUENCE_TOOL_DEFINITIONS}
 
     assert set(STEP_SEQUENCE_TOOLKIT) <= defined_names
+
+
+def _iter_schemas(schema: dict[str, object]) -> list[dict[str, object]]:
+    stack: list[dict[str, object]] = [schema]
+    seen: set[int] = set()
+    collected: list[dict[str, object]] = []
+    while stack:
+        current = stack.pop()
+        identifier = id(current)
+        if identifier in seen:
+            continue
+        seen.add(identifier)
+        collected.append(current)
+
+        properties = current.get("properties")
+        if isinstance(properties, dict):
+            for nested in properties.values():
+                if isinstance(nested, dict):
+                    stack.append(nested)
+
+        items = current.get("items")
+        if isinstance(items, list):
+            for nested in items:
+                if isinstance(nested, dict):
+                    stack.append(nested)
+        elif isinstance(items, dict):
+            stack.append(items)
+
+        for keyword in ("anyOf", "allOf", "oneOf"):
+            collection = current.get(keyword)
+            if isinstance(collection, list):
+                for nested in collection:
+                    if isinstance(nested, dict):
+                        stack.append(nested)
+
+    return collected
+
+
+def test_tool_definitions_require_all_properties() -> None:
+    for definition in STEP_SEQUENCE_TOOL_DEFINITIONS:
+        schemas = _iter_schemas(definition["parameters"])
+        for schema in schemas:
+            properties = schema.get("properties")
+            if not isinstance(properties, dict) or not properties:
+                continue
+            required = schema.get("required")
+            assert isinstance(required, list), f"required must be a list for schema: {schema}"
+            assert set(required) == set(properties), (
+                "Toutes les propriétés d'un objet doivent être marquées comme required",
+                schema,
+            )
 
