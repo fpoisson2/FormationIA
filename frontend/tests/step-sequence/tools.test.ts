@@ -105,6 +105,19 @@ describe("STEP_SEQUENCE_TOOLS", () => {
   });
 
   it("n'expose pas les outils d'atelier", () => {
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty(
+      "create_simulation_chat_step",
+    );
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty("create_info_cards_step");
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty(
+      "create_prompt_evaluation_step",
+    );
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty("create_ai_comparison_step");
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty("create_clarity_map_step");
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty("create_clarity_prompt_step");
+    expect(STEP_SEQUENCE_TOOLS).toHaveProperty(
+      "create_explorateur_world_step",
+    );
     expect(STEP_SEQUENCE_TOOLS).not.toHaveProperty(
       "create_workshop_context_step",
     );
@@ -114,6 +127,125 @@ describe("STEP_SEQUENCE_TOOLS", () => {
     expect(STEP_SEQUENCE_TOOLS).not.toHaveProperty(
       "create_workshop_synthesis_step",
     );
+  });
+
+  it("crée une simulation conversationnelle", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_simulation_chat_step;
+    const step = tool.handler({
+      title: "Simulation vente",
+      help: "Accompagne l'apprenant",
+      stages: [
+        {
+          prompt: "Présente-toi",
+          fields: [
+            {
+              id: "pitch",
+              label: "Pitch",
+              type: "textarea_with_counter",
+              minWords: 20,
+              maxWords: 80,
+            },
+          ],
+        },
+      ],
+      roles: {
+        ai: "Coach",
+        user: "Vendeur",
+      },
+    });
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("simulation-chat");
+    expect((step.config as { stages: unknown[] }).stages).toHaveLength(1);
+  });
+
+  it("crée un bloc info-cards", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_info_cards_step;
+    const step = tool.handler({
+      title: "Indicateurs clés",
+      cards: [
+        {
+          title: "Adoption",
+          description: "80 % des équipes utilisent l'outil",
+          tone: "sand",
+          items: ["Objectif atteint", "Suivi mensuel"],
+        },
+      ],
+    });
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("info-cards");
+    expect((step.config as { cards: unknown[] }).cards).toHaveLength(1);
+  });
+
+  it("configure une évaluation de prompt", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_prompt_evaluation_step;
+    const step = tool.handler({
+      defaultText: "Décris une activité collaborative en 3 étapes.",
+      verbosity: "high",
+    });
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("prompt-evaluation");
+    expect((step.config as { defaultText: string }).defaultText).toContain(
+      "activité collaborative",
+    );
+  });
+
+  it("configure une comparaison de modèles IA", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_ai_comparison_step;
+    const step = tool.handler({
+      contextField: "summary",
+      copy: {
+        promptLabel: "Formule ta requête",
+        variantTitles: { A: "Agent rapide", B: "Agent expert" },
+      },
+    });
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("ai-comparison");
+    expect(
+      (step.config as { copy: { variantTitles: Record<string, string> } }).copy
+        .variantTitles.A,
+    ).toContain("Agent");
+  });
+
+  it("crée une étape Clarity map", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_clarity_map_step;
+    const step = tool.handler({
+      obstacleCount: 8,
+      initialTarget: { x: 4, y: 7 },
+      instructionLabel: "Consigne reçue",
+    });
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("clarity-map");
+    expect((step.config as { obstacleCount: number }).obstacleCount).toBe(8);
+  });
+
+  it("crée une étape Clarity prompt", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_clarity_prompt_step;
+    const step = tool.handler({
+      promptLabel: "Commande IA",
+      verbosity: "high",
+      thinking: "high",
+      settingsMode: "editable",
+    });
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("clarity-prompt");
+    expect((step.config as { settingsMode: string }).settingsMode).toBe(
+      "editable",
+    );
+  });
+
+  it("charge le monde Explorateur IA", () => {
+    const tool = STEP_SEQUENCE_TOOLS.create_explorateur_world_step;
+    const step = tool.handler({});
+
+    expectStepDefinition(step);
+    expect(step.component).toBe("explorateur-world");
+    expect((step.config as { terrain: unknown }).terrain).toBeDefined();
   });
 
   it("crée une étape composite", () => {
