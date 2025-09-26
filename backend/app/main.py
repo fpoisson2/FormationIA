@@ -180,7 +180,7 @@ def _config_schema() -> dict[str, Any]:
 COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["id", "component"],
+    "required": ["id", "component", "slot"],
     "properties": {
         "id": {"type": "string"},
         "component": {"type": "string"},
