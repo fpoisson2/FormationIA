@@ -13,7 +13,6 @@ import {
 
 import mapPackAtlas from "../assets/kenney_map-pack/Spritesheet/mapPack_spritesheet.png";
 import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPack_enriched.xml?raw";
-import { useActivityCompletion } from "../hooks/useActivityCompletion";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 import {
   StepSequenceRenderer,
@@ -4307,6 +4306,7 @@ export default function ExplorateurIA({
   config,
   isEditMode: isEditModeProp,
   onUpdateConfig,
+  onAdvance,
 }: StepComponentProps): JSX.Element {
   const context = useContext(StepSequenceContext);
   const isEditMode = context?.isEditMode ?? isEditModeProp ?? false;
@@ -4315,6 +4315,8 @@ export default function ExplorateurIA({
   const activityContext =
     (context?.activityContext as StepSequenceActivityContextBridge | null | undefined) ??
     null;
+  const safeOnAdvance =
+    typeof onAdvance === "function" ? onAdvance : () => {};
   const rawCompletionId =
     typeof activityContext?.completionId === "string"
       ? activityContext.completionId
@@ -4329,6 +4331,9 @@ export default function ExplorateurIA({
     typeof activityContext?.navigateToActivities === "function"
       ? (activityContext.navigateToActivities as () => void)
       : () => {};
+
+  const hasStepSequenceContext = Boolean(context);
+  const isStepSequenceRuntime = hasStepSequenceContext && !isEditMode;
 
   const sanitizedConfig = useMemo(
     () => sanitizeExplorateurIAConfig(config),
@@ -4398,7 +4403,6 @@ export default function ExplorateurIA({
   const firstScrollRef = useRef(true);
   const audioRef = useRef<ChiptuneTheme | null>(null);
   const arrivalEffectRef = useRef<ArrivalEffect | null>(null);
-  const completionTriggered = useRef(false);
   const autoWalkQueue = useRef<Coord[]>([]);
   const autoWalkTarget = useRef<Coord | null>(null);
   const [isAutoWalking, setIsAutoWalking] = useState(false);
@@ -4697,11 +4701,6 @@ export default function ExplorateurIA({
     emitConfig({ terrain: { seed } });
   }, [emitConfig, forceWorldRefresh, isEditMode, selectedTheme, setPlayer]);
 
-  const { markCompleted } = useActivityCompletion({
-    activityId: completionId,
-    onCompleted: () => navigateToActivities(),
-  });
-
   const attemptPlayMusic = useCallback(() => {
     if (!isMusicEnabled || isMusicPlaying) {
       return;
@@ -4905,18 +4904,38 @@ export default function ExplorateurIA({
     }
   }, [player.x, player.y, cellSize, tileSize]);
 
-  useEffect(() => {
-    if (completionTriggered.current) {
+  const allQuartersCompleted = useMemo(
+    () =>
+      derivedQuarterData.quarterOrder.every((quarter) =>
+        isQuarterCompleted(quarter)
+      ),
+    [derivedQuarterData.quarterOrder, isQuarterCompleted]
+  );
+
+  const sequenceCompletionPayload = useMemo(
+    () =>
+      createExplorateurExport(progress, {
+        quarterOrder: derivedQuarterData.quarterOrder,
+      }),
+    [derivedQuarterData.quarterOrder, progress]
+  );
+
+  const handleAdvanceToDebrief = useCallback(() => {
+    if (!isStepSequenceRuntime || !allQuartersCompleted) {
       return;
     }
-    const allQuartersCompleted = derivedQuarterData.quarterOrder.every(
-      (quarter) => isQuarterCompleted(quarter)
-    );
-    if (allQuartersCompleted) {
-      completionTriggered.current = true;
-      void markCompleted({ triggerCompletionCallback: true });
-    }
-  }, [derivedQuarterData, isQuarterCompleted, markCompleted]);
+    safeOnAdvance({
+      type: "explorateur-completion",
+      exportData: sequenceCompletionPayload,
+    });
+  }, [
+    allQuartersCompleted,
+    isStepSequenceRuntime,
+    safeOnAdvance,
+    sequenceCompletionPayload,
+  ]);
+
+  const showSequenceCompletionCta = isStepSequenceRuntime && allQuartersCompleted;
 
   useEffect(() => {
     if (blockedStage && isQuarterCompleted(blockedStage)) {
@@ -5420,6 +5439,25 @@ export default function ExplorateurIA({
       )}
     >
       <Fireworks show={celebrate} />
+      {showSequenceCompletionCta ? (
+        <div className="pointer-events-none absolute bottom-4 right-4 z-40 flex max-w-xs justify-end sm:bottom-6 sm:right-6">
+          <div className="pointer-events-auto rounded-2xl border border-orange-200/80 bg-white/95 p-4 shadow-xl backdrop-blur">
+            <p className="text-sm font-semibold text-slate-800">
+              Parcours complété !
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              Consulte le bilan et valide l’activité.
+            </p>
+            <button
+              type="button"
+              onClick={handleAdvanceToDebrief}
+              className="mt-3 inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+            >
+              Voir le bilan final
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="grid min-h-0 w-full flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-0">
         <div className="relative flex min-h-0 flex-1 flex-col">
           {!isMobile && (
