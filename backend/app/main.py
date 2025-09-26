@@ -2566,216 +2566,244 @@ def admin_generate_activity(
             return
         cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
 
-    def event_stream() -> Generator[str, None, None]:
+    event_queue: Queue[Any] = Queue()
+    sentinel = object()
+
+    def _queue_event(event: str, data: Any | None = None) -> None:
+        event_queue.put(_format_sse_event(event, data))
+
+    def _generation_worker() -> None:
         reasoning_summary: str | None = None
         last_summary_sent: str | None = None
 
-        yield _format_sse_event(
-            "status", {"message": "Initialisation de la génération..."}
-        )
+        try:
+            _queue_event("status", {"message": "Initialisation de la génération..."})
 
-        max_iterations = 12
-        for iteration in range(max_iterations):
-            yield _format_sse_event(
-                "status",
-                {
-                    "message": (
-                        "Appel au modèle (itération "
-                        f"{iteration + 1}/{max_iterations})..."
-                    )
-                },
-            )
-            try:
-                response = client.responses.create(
-                    model=model,
-                    input=conversation,
-                    tools=tools,
-                    parallel_tool_calls=False,
-                    text={"verbosity": payload.verbosity},
-                    reasoning={"effort": payload.thinking, "summary": "auto"},
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.exception("Erreur lors de l'appel au modèle de génération", exc_info=exc)
-                detail = str(exc) or "Erreur du service de génération."
-                yield _format_sse_event("error", {"message": detail})
-                return
-
-            yield _format_sse_event(
-                "status", {"message": "Analyse de la réponse du modèle..."}
-            )
-
-            reasoning_summary = _extract_reasoning_summary(response) or reasoning_summary
-            if reasoning_summary and reasoning_summary != last_summary_sent:
-                last_summary_sent = reasoning_summary
-                yield _format_sse_event(
-                    "reasoning_summary", {"summary": reasoning_summary}
-                )
-
-            output_items = getattr(response, "output", None)
-            if not output_items:
-                continue
-
-            filtered_items: list[Any] = []
-            for item in output_items:
-                item_type = getattr(item, "type", None) or (
-                    item.get("type") if isinstance(item, dict) else None
-                )
-                if item_type == "web_search_call":
-                    logger.debug("Ignoring web_search_call output: %r", item)
-                    continue
-                filtered_items.append(item)
-
-            conversation.extend(filtered_items)
-
-            for item in filtered_items:
-                item_type = getattr(item, "type", None) or (
-                    item.get("type") if isinstance(item, dict) else None
-                )
-                if item_type != "function_call":
-                    continue
-
-                name = getattr(item, "name", None) or (
-                    item.get("name") if isinstance(item, dict) else None
-                )
-                if not name:
-                    continue
-
-                call_id = getattr(item, "call_id", None) or (
-                    item.get("call_id") if isinstance(item, dict) else None
-                )
-                raw_arguments = getattr(item, "arguments", None)
-                if raw_arguments is None and isinstance(item, dict):
-                    raw_arguments = item.get("arguments")
-
-                arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
-                python_arguments = normalize_tool_arguments(arguments_obj)
-
-                if name == "build_step_sequence_activity":
-                    merged_steps = _enrich_steps_argument(
-                        python_arguments.get("steps"), cached_steps
-                    )
-                    if merged_steps:
-                        python_arguments["steps"] = merged_steps
-                        arguments_obj["steps"] = deepcopy(merged_steps)
-                        try:
-                            arguments_text = json.dumps(arguments_obj)
-                        except TypeError:
-                            arguments_text = None
-
-                yield _format_sse_event(
-                    "tool_call",
+            max_iterations = 12
+            for iteration in range(max_iterations):
+                _queue_event(
+                    "status",
                     {
-                        "name": name,
-                        "callId": call_id,
-                        "arguments": arguments_obj,
-                        "argumentsText": arguments_text,
+                        "message": (
+                            "Appel au modèle (itération "
+                            f"{iteration + 1}/{max_iterations})..."
+                        )
                     },
                 )
-
-                tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
-                if tool_callable is None:
-                    yield _format_sse_event(
-                        "error",
-                        {
-                            "message": (
-                                f"L'outil {name} n'est pas pris en charge par le backend."
-                            )
-                        },
-                    )
-                    return
-
                 try:
-                    result = tool_callable(**python_arguments)
+                    response = client.responses.create(
+                        model=model,
+                        input=conversation,
+                        tools=tools,
+                        parallel_tool_calls=False,
+                        text={"verbosity": payload.verbosity},
+                        reasoning={"effort": payload.thinking, "summary": "auto"},
+                    )
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.exception("Erreur lors de l'exécution de l'outil %s", name, exc_info=exc)
-                    detail = str(exc) or "Erreur lors de l'exécution d'un outil."
-                    yield _format_sse_event("error", {"message": detail})
+                    logger.exception(
+                        "Erreur lors de l'appel au modèle de génération", exc_info=exc
+                    )
+                    detail = str(exc) or "Erreur du service de génération."
+                    _queue_event("error", {"message": detail})
                     return
 
-                if name == "create_step_sequence_activity":
-                    activity_identifier = (
-                        python_arguments.get("activity_id")
-                        or arguments_obj.get("activityId")
-                        or arguments_obj.get("activity_id")
+                _queue_event("status", {"message": "Analyse de la réponse du modèle..."})
+
+                reasoning_summary = _extract_reasoning_summary(response) or reasoning_summary
+                if reasoning_summary and reasoning_summary != last_summary_sent:
+                    last_summary_sent = reasoning_summary
+                    _queue_event("reasoning_summary", {"summary": reasoning_summary})
+
+                output_items = getattr(response, "output", None)
+                if not output_items:
+                    continue
+
+                filtered_items: list[Any] = []
+                for item in output_items:
+                    item_type = getattr(item, "type", None) or (
+                        item.get("type") if isinstance(item, dict) else None
                     )
-                    yield _format_sse_event(
-                        "status",
+                    if item_type == "web_search_call":
+                        logger.debug("Ignoring web_search_call output: %r", item)
+                        continue
+                    filtered_items.append(item)
+
+                conversation.extend(filtered_items)
+
+                for item in filtered_items:
+                    item_type = getattr(item, "type", None) or (
+                        item.get("type") if isinstance(item, dict) else None
+                    )
+                    if item_type != "function_call":
+                        continue
+
+                    name = getattr(item, "name", None) or (
+                        item.get("name") if isinstance(item, dict) else None
+                    )
+                    if not name:
+                        continue
+
+                    call_id = getattr(item, "call_id", None) or (
+                        item.get("call_id") if isinstance(item, dict) else None
+                    )
+                    raw_arguments = getattr(item, "arguments", None)
+                    if raw_arguments is None and isinstance(item, dict):
+                        raw_arguments = item.get("arguments")
+
+                    arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
+                    python_arguments = normalize_tool_arguments(arguments_obj)
+
+                    if name == "build_step_sequence_activity":
+                        merged_steps = _enrich_steps_argument(
+                            python_arguments.get("steps"), cached_steps
+                        )
+                        if merged_steps:
+                            python_arguments["steps"] = merged_steps
+                            arguments_obj["steps"] = deepcopy(merged_steps)
+                            try:
+                                arguments_text = json.dumps(arguments_obj)
+                            except TypeError:
+                                arguments_text = None
+
+                    _queue_event(
+                        "tool_call",
                         {
-                            "message": "Structure de l'activité initialisée.",
-                            "activityId": activity_identifier,
+                            "name": name,
+                            "callId": call_id,
+                            "arguments": arguments_obj,
+                            "argumentsText": arguments_text,
                         },
                     )
-                if name.startswith("create_") and name != "create_step_sequence_activity":
-                    _remember_step(result)
-                    step_count = len(cached_steps)
-                    highlight = _extract_step_highlight(result)
-                    yield _format_sse_event(
-                        "step",
-                        {
-                            "id": result.get("id"),
-                            "component": result.get("component"),
-                            "count": step_count,
-                            "highlight": highlight,
-                        },
-                    )
 
-                try:
-                    serialized_output = json.dumps(result)
-                except TypeError as exc:  # pragma: no cover - defensive
-                    logger.exception("Résultat d'outil non sérialisable", exc_info=exc)
-                    yield _format_sse_event(
-                        "error",
-                        {"message": "Résultat d'outil non sérialisable."},
-                    )
-                    return
+                    tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
+                    if tool_callable is None:
+                        _queue_event(
+                            "error",
+                            {
+                                "message": (
+                                    f"L'outil {name} n'est pas pris en charge par le backend."
+                                )
+                            },
+                        )
+                        return
 
-                conversation.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": serialized_output,
-                    }
-                )
+                    try:
+                        result = tool_callable(**python_arguments)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.exception(
+                            "Erreur lors de l'exécution de l'outil %s", name, exc_info=exc
+                        )
+                        detail = str(exc) or "Erreur lors de l'exécution d'un outil."
+                        _queue_event("error", {"message": detail})
+                        return
 
-                if name == "build_step_sequence_activity":
-                    yield _format_sse_event(
-                        "status", {"message": "Finalisation de l'activité..."}
-                    )
-
-                    response_payload = ActivityGenerationResponse(
-                        tool_call=ActivityGenerationToolCall(
-                            name=name,
-                            call_id=call_id,
-                            arguments=arguments_obj,
-                            arguments_text=arguments_text,
-                            definition=deepcopy(
-                                STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
-                            ),
-                        ),
-                        reasoning_summary=reasoning_summary or None,
-                    )
-
-                    final_summary = response_payload.reasoning_summary
-                    if final_summary and final_summary != last_summary_sent:
-                        last_summary_sent = final_summary
-                        yield _format_sse_event(
-                            "reasoning_summary", {"summary": final_summary}
+                    if name == "create_step_sequence_activity":
+                        activity_identifier = (
+                            python_arguments.get("activity_id")
+                            or arguments_obj.get("activityId")
+                            or arguments_obj.get("activity_id")
+                        )
+                        _queue_event(
+                            "status",
+                            {
+                                "message": "Structure de l'activité initialisée.",
+                                "activityId": activity_identifier,
+                            },
+                        )
+                    if name.startswith("create_") and name != "create_step_sequence_activity":
+                        _remember_step(result)
+                        step_count = len(cached_steps)
+                        highlight = _extract_step_highlight(result)
+                        _queue_event(
+                            "step",
+                            {
+                                "id": result.get("id"),
+                                "component": result.get("component"),
+                                "count": step_count,
+                                "highlight": highlight,
+                            },
                         )
 
-                    yield _format_sse_event(
-                        "complete",
-                        response_payload.model_dump(
-                            by_alias=True, exclude_none=True
-                        ),
-                    )
-                    return
+                    try:
+                        serialized_output = json.dumps(result)
+                    except TypeError as exc:  # pragma: no cover - defensive
+                        logger.exception("Résultat d'outil non sérialisable", exc_info=exc)
+                        _queue_event(
+                            "error",
+                            {"message": "Résultat d'outil non sérialisable."},
+                        )
+                        return
 
-        yield _format_sse_event(
-            "error",
-            {
-                "message": "Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations.",
-            },
+                    conversation.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": serialized_output,
+                        }
+                    )
+
+                    if name == "build_step_sequence_activity":
+                        _queue_event(
+                            "status", {"message": "Finalisation de l'activité..."}
+                        )
+
+                        response_payload = ActivityGenerationResponse(
+                            tool_call=ActivityGenerationToolCall(
+                                name=name,
+                                call_id=call_id,
+                                arguments=arguments_obj,
+                                arguments_text=arguments_text,
+                                definition=deepcopy(
+                                    STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
+                                ),
+                            ),
+                            reasoning_summary=reasoning_summary or None,
+                        )
+
+                        final_summary = response_payload.reasoning_summary
+                        if final_summary and final_summary != last_summary_sent:
+                            last_summary_sent = final_summary
+                            _queue_event(
+                                "reasoning_summary", {"summary": final_summary}
+                            )
+
+                        _queue_event(
+                            "complete",
+                            response_payload.model_dump(
+                                by_alias=True, exclude_none=True
+                            ),
+                        )
+                        return
+
+            _queue_event(
+                "error",
+                {
+                    "message": "Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations.",
+                },
+            )
+        finally:
+            event_queue.put(sentinel)
+
+    worker = Thread(target=_generation_worker, name="activity-generation", daemon=True)
+    worker.start()
+
+    def event_stream() -> Generator[str, None, None]:
+        heartbeat_interval = (
+            SUMMARY_HEARTBEAT_INTERVAL if SUMMARY_HEARTBEAT_INTERVAL > 0 else 5.0
         )
+        yield _sse_comment("keep-alive")
+
+        while True:
+            try:
+                item = event_queue.get(timeout=heartbeat_interval)
+            except Empty:
+                yield _sse_comment("keep-alive")
+                continue
+
+            if item is sentinel:
+                break
+
+            yield item
 
     return StreamingResponse(
         event_stream(), media_type="text/event-stream", headers=_sse_headers()
