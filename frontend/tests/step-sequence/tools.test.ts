@@ -6,6 +6,7 @@ import {
   type StepDefinition,
 } from "../../src/modules/step-sequence";
 import type { ActivityConfigEntry } from "../../src/config/activities";
+import { resolveActivityDefinition } from "../../src/config/activities";
 
 function expectStepDefinition(step: StepDefinition): void {
   expect(typeof step.id).toBe("string");
@@ -308,6 +309,67 @@ describe("STEP_SEQUENCE_TOOLS", () => {
       { id: richStep.id, component: "rich-content", config: expect.anything() },
       { id: formStep.id, component: "form", config: expect.anything() },
     ]);
+  });
+
+  it("réinjecte les configurations issues des overrides", async () => {
+    const rawSteps: StepDefinition[] = [
+      { id: "introduction", component: "rich-content", config: null },
+      {
+        id: "atelier",
+        component: "composite",
+        config: null,
+        composite: {
+          modules: [],
+          autoAdvance: null,
+          continueLabel: null,
+        },
+      },
+    ];
+
+    const entry = await STEP_SEQUENCE_TOOLS.build_step_sequence_activity.handler({
+      activityId: "sequence-generative",
+      steps: rawSteps,
+      metadata: {
+        overrides: {
+          stepSequence: [
+            {
+              id: "introduction",
+              component: "rich-content",
+              config: { title: "Intro", body: "Contexte" },
+            },
+            {
+              id: "atelier",
+              component: "composite",
+              composite: {
+                modules: [
+                  {
+                    id: "module-1",
+                    component: "info-cards",
+                    slot: "main",
+                    config: { cards: [{ title: "Carte" }] },
+                  },
+                ],
+                autoAdvance: false,
+                continueLabel: "Explorer",
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const overrides = entry.overrides?.stepSequence ?? [];
+    const introConfig = overrides.find((step) => step.id === "introduction")?.config;
+    expect(introConfig).toEqual({ title: "Intro", body: "Contexte" });
+
+    const compositeStep = overrides.find((step) => step.id === "atelier");
+    expect(compositeStep?.composite?.modules?.[0]?.config).toEqual({
+      cards: [{ title: "Carte" }],
+    });
+
+    const resolved = resolveActivityDefinition(entry);
+    const resolvedIntro = resolved.stepSequence?.find((step) => step.id === "introduction");
+    expect(resolvedIntro?.config).toEqual({ title: "Intro", body: "Contexte" });
   });
 
   it("génère des identifiants compatibles", () => {

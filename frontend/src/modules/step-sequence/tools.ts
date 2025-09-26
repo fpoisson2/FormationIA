@@ -18,6 +18,7 @@ import type {
   CompositeStepModuleDefinition,
   StepDefinition,
 } from "./types";
+import { isCompositeStepDefinition } from "./types";
 import type {
   ClarityMapStepConfig,
   ClarityPromptStepConfig,
@@ -1802,6 +1803,66 @@ interface BuildStepSequenceActivityInput {
   metadata?: BuildActivityMetadata;
 }
 
+function mergeGeneratedSteps(
+  steps: StepDefinition[],
+  overrideSteps: StepDefinition[] | undefined
+): StepDefinition[] {
+  const base = steps.map((step) => ({ ...step }));
+  if (!overrideSteps || overrideSteps.length === 0) {
+    return base;
+  }
+
+  const overrideMap = new Map(overrideSteps.map((step) => [step.id, step]));
+  const mergedBase = base.map((step) => {
+    const overrideStep = overrideMap.get(step.id);
+    if (!overrideStep) {
+      return step;
+    }
+
+    const overrideComponent =
+      "component" in overrideStep ? overrideStep.component : undefined;
+    const resolvedComponent =
+      overrideComponent ?? step.component ??
+      (isCompositeStepDefinition(step) ? "composite" : undefined);
+
+    if (
+      isCompositeStepDefinition(step) ||
+      isCompositeStepDefinition(overrideStep)
+    ) {
+      const composite = isCompositeStepDefinition(overrideStep)
+        ? overrideStep.composite
+        : isCompositeStepDefinition(step)
+          ? step.composite
+          : undefined;
+
+      return {
+        ...step,
+        ...overrideStep,
+        component: resolvedComponent ?? "composite",
+        config:
+          ("config" in overrideStep ? overrideStep.config : step.config) ??
+          null,
+        composite: composite ?? null,
+      };
+    }
+
+    return {
+      ...step,
+      ...overrideStep,
+      component: resolvedComponent ?? step.component ?? "composite",
+      config:
+        ("config" in overrideStep ? overrideStep.config : step.config) ?? null,
+    };
+  });
+
+  const baseIds = new Set(base.map((step) => step.id));
+  const mergedExtra = overrideSteps
+    .filter((step) => !baseIds.has(step.id))
+    .map((step) => ({ ...step }));
+
+  return [...mergedBase, ...mergedExtra];
+}
+
 const headerSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -1952,6 +2013,8 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
     const { resolveActivityDefinition, serializeActivityDefinition } =
       await import("../../config/activities");
     const { activityId, steps, metadata } = input;
+    const overrideSteps = metadata?.overrides?.stepSequence ?? undefined;
+    const normalizedSteps = mergeGeneratedSteps(steps, overrideSteps);
     const entry: ActivityConfigEntry = {
       id: activityId,
       componentKey: metadata?.componentKey ?? "step-sequence",
@@ -1961,14 +2024,14 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
       header: metadata?.header,
       layout: metadata?.layout,
       card: metadata?.card,
-      stepSequence: steps,
+      stepSequence: normalizedSteps,
       overrides: metadata?.overrides ?? null,
     };
 
     const resolvedDefinition = resolveActivityDefinition(entry);
     const definitionWithSteps = {
       ...resolvedDefinition,
-      stepSequence: steps,
+      stepSequence: normalizedSteps,
     };
     const serialized = serializeActivityDefinition(definitionWithSteps);
     return serialized;
