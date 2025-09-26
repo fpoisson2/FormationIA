@@ -8,12 +8,15 @@ import {
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import ActivityLayout from "../components/ActivityLayout";
+import { AdminModal } from "../components/admin/AdminModal";
 import {
   getProgress,
   admin,
   activities as activitiesClient,
   type ActivitySelectorHeaderConfig,
   type ProgressResponse,
+  type ActivityGenerationResponse,
+  type GenerateActivityPayload,
 } from "../api";
 import {
   getDefaultActivityDefinitions,
@@ -23,11 +26,20 @@ import {
   type ActivityDefinition,
 } from "../config/activities";
 import {
+  MODEL_OPTIONS,
+  THINKING_OPTIONS,
+  VERBOSITY_OPTIONS,
+  type ModelChoice,
+  type ThinkingChoice,
+  type VerbosityChoice,
+} from "../config";
+import {
   getStepComponent,
   STEP_COMPONENT_REGISTRY,
   StepSequenceContext,
   isCompositeStepDefinition,
   resolveStepComponentKey,
+  STEP_SEQUENCE_TOOLS,
   type CompositeStepConfig,
   type StepDefinition,
 } from "../modules/step-sequence";
@@ -52,6 +64,72 @@ const STEP_TYPE_LABELS: Record<string, string> = {
 const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
 
 const NOOP = () => {};
+
+interface ActivityGenerationFormState {
+  theme: string;
+  audience: string;
+  objectives: string;
+  deliverable: string;
+  constraints: string;
+}
+
+const DEFAULT_GENERATION_MODEL: ModelChoice =
+  MODEL_OPTIONS.find((option) => option.value === "gpt-5-mini")?.value ??
+  MODEL_OPTIONS[0]?.value ??
+  "gpt-5-mini";
+
+const DEFAULT_GENERATION_VERBOSITY: VerbosityChoice = "medium";
+const DEFAULT_GENERATION_THINKING: ThinkingChoice = "medium";
+
+const ACTIVITY_GENERATION_FIELDS: Array<{
+  key: keyof ActivityGenerationFormState;
+  label: string;
+  description: string;
+  placeholder: string;
+  rows?: number;
+}> = [
+  {
+    key: "theme",
+    label: "Thématique de l'activité",
+    description:
+      "Décris le sujet central, le contexte ou la situation à partir de laquelle l'apprenant doit travailler.",
+    placeholder: "Ex. : Évaluer l'impact de l'IA sur le service client d'une collectivité locale",
+    rows: 2,
+  },
+  {
+    key: "audience",
+    label: "Profil des apprenants",
+    description:
+      "Précise le public cible, son rôle, son niveau d'expérience et ses attentes principales.",
+    placeholder: "Ex. : Équipe support de première ligne, familiarisée avec les chatbots mais novice en IA générative",
+    rows: 2,
+  },
+  {
+    key: "objectives",
+    label: "Objectifs pédagogiques",
+    description:
+      "Indique les compétences, connaissances ou livrables que les participants doivent maîtriser en fin d'activité.",
+    placeholder:
+      "Ex. : Identifier les risques d'automatisation, définir des garde-fous de confidentialité, préparer un plan d'amélioration",
+    rows: 3,
+  },
+  {
+    key: "deliverable",
+    label: "Production attendue",
+    description:
+      "Mentionne ce que l'apprenant doit produire ou décider (plan d'action, grille d'analyse, message clé, etc.).",
+    placeholder: "Ex. : Une synthèse argumentée et un plan de déploiement en trois phases",
+    rows: 2,
+  },
+  {
+    key: "constraints",
+    label: "Contraintes ou ressources",
+    description:
+      "Ajoute les contraintes de ton, les formats imposés, les outils disponibles ou les ressources incontournables.",
+    placeholder: "Ex. : Ton collaboratif, intégrer la charte interne, durée maximale 30 minutes, s'appuyer sur deux études de cas",
+    rows: 3,
+  },
+];
 
 function generateUniqueId(prefix: string): string {
   try {
@@ -504,6 +582,30 @@ function ActivitySelector(): JSX.Element {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [headerOverrides, setHeaderOverrides] = useState<ActivitySelectorHeaderConfig>({});
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+  const [generationForm, setGenerationForm] =
+    useState<ActivityGenerationFormState>({
+      theme: "",
+      audience: "",
+      objectives: "",
+      deliverable: "",
+      constraints: "",
+    });
+  const [generationModel, setGenerationModel] = useState<ModelChoice>(
+    DEFAULT_GENERATION_MODEL
+  );
+  const [generationVerbosity, setGenerationVerbosity] =
+    useState<VerbosityChoice>(DEFAULT_GENERATION_VERBOSITY);
+  const [generationThinking, setGenerationThinking] =
+    useState<ThinkingChoice>(DEFAULT_GENERATION_THINKING);
+  const [isGeneratingActivity, setIsGeneratingActivity] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationSuccessMessage, setGenerationSuccessMessage] =
+    useState<string | null>(null);
+  const [generationReasoningSummary, setGenerationReasoningSummary] =
+    useState<string | null>(null);
+  const [lastGeneratedActivityId, setLastGeneratedActivityId] =
+    useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { context, isLTISession, loading: ltiLoading } = useLTI();
@@ -522,6 +624,35 @@ function ActivitySelector(): JSX.Element {
   const userRoles = normaliseRoles(adminUser?.roles);
   const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
 
+  const existingActivityIds = useMemo(
+    () => editableActivities.map((activity) => activity.id),
+    [editableActivities]
+  );
+
+  const trimmedGenerationForm = useMemo(
+    () => ({
+      theme: generationForm.theme.trim(),
+      audience: generationForm.audience.trim(),
+      objectives: generationForm.objectives.trim(),
+      deliverable: generationForm.deliverable.trim(),
+      constraints: generationForm.constraints.trim(),
+    }),
+    [generationForm]
+  );
+
+  const isGenerationFormValid =
+    trimmedGenerationForm.theme.length >= 5 &&
+    trimmedGenerationForm.audience.length >= 3 &&
+    trimmedGenerationForm.objectives.length >= 10 &&
+    trimmedGenerationForm.deliverable.length >= 5;
+
+  const generationModelHelper = useMemo(
+    () =>
+      MODEL_OPTIONS.find((option) => option.value === generationModel)?.helper ??
+      "",
+    [generationModel]
+  );
+
   const canUseStepSequenceShortcut = stepComponentKeys.length > 0;
   const newSequenceButtonClasses = `group flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition ${
     canUseStepSequenceShortcut
@@ -537,6 +668,23 @@ function ActivitySelector(): JSX.Element {
   const newSequenceDescriptionClasses = `text-xs ${
     canUseStepSequenceShortcut
       ? "text-orange-600 opacity-80"
+      : "text-gray-400"
+  }`;
+
+  const generateActivityButtonClasses = `group flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition ${
+    canUseStepSequenceShortcut
+      ? "border-sky-300 bg-white/70 text-sky-700 hover:border-sky-400 hover:bg-sky-50 hover:text-sky-800"
+      : "cursor-not-allowed border-gray-200 bg-gray-50/80 text-gray-400"
+  }`;
+  const generateActivityLabel = canUseStepSequenceShortcut
+    ? "Générer une activité avec l'IA"
+    : "Modules StepSequence indisponibles";
+  const generateActivityDescription = canUseStepSequenceShortcut
+    ? "Décris tes besoins et laisse l’IA proposer une séquence personnalisée."
+    : "Ajoutez un module d’étape pour débloquer la génération automatique.";
+  const generateActivityDescriptionClasses = `text-xs ${
+    canUseStepSequenceShortcut
+      ? "text-sky-700 opacity-80"
       : "text-gray-400"
   }`;
 
@@ -603,6 +751,14 @@ function ActivitySelector(): JSX.Element {
       window.clearTimeout(timeout);
     };
   }, [disabledActivity]);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setGenerationSuccessMessage(null);
+      setGenerationReasoningSummary(null);
+      setLastGeneratedActivityId(null);
+    }
+  }, [isEditMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1040,6 +1196,123 @@ function ActivitySelector(): JSX.Element {
     }));
   };
 
+  const handleGenerationFieldChange = useCallback(
+    (field: keyof ActivityGenerationFormState, value: string) => {
+      setGenerationForm((prev) => ({
+        ...prev,
+        [field]: value,
+      }));
+    },
+    []
+  );
+
+  const handleOpenGenerationModal = useCallback(() => {
+    setGenerationError(null);
+    setIsGenerateModalOpen(true);
+  }, []);
+
+  const handleCloseGenerationModal = useCallback(() => {
+    if (isGeneratingActivity) {
+      return;
+    }
+    setIsGenerateModalOpen(false);
+  }, [isGeneratingActivity]);
+
+  const handleDismissGenerationMessage = useCallback(() => {
+    setGenerationSuccessMessage(null);
+    setGenerationReasoningSummary(null);
+    setLastGeneratedActivityId(null);
+  }, []);
+
+  const handleSubmitGeneration = useCallback(async () => {
+    if (isGeneratingActivity) {
+      return;
+    }
+    if (!isGenerationFormValid) {
+      setGenerationError("Complétez les informations requises avant de lancer la génération.");
+      return;
+    }
+    if (!token) {
+      setGenerationError("Authentification administrateur requise pour générer une activité.");
+      return;
+    }
+
+    setIsGeneratingActivity(true);
+    setGenerationError(null);
+
+    try {
+      const payload: GenerateActivityPayload = {
+        model: generationModel,
+        verbosity: generationVerbosity,
+        thinking: generationThinking,
+        details: {
+          theme: trimmedGenerationForm.theme,
+          audience: trimmedGenerationForm.audience,
+          objectives: trimmedGenerationForm.objectives,
+          deliverable: trimmedGenerationForm.deliverable,
+          ...(trimmedGenerationForm.constraints
+            ? { constraints: trimmedGenerationForm.constraints }
+            : {}),
+        },
+        existingActivityIds,
+      };
+
+      const response: ActivityGenerationResponse = await admin.activities.generate(
+        payload,
+        token
+      );
+
+      if (
+        !response?.toolCall ||
+        response.toolCall.name !== "build_step_sequence_activity" ||
+        !response.toolCall.arguments ||
+        typeof response.toolCall.arguments !== "object"
+      ) {
+        throw new Error("Réponse inattendue du service de génération.");
+      }
+
+      const generatedEntry = await STEP_SEQUENCE_TOOLS.build_step_sequence_activity.handler(
+        response.toolCall.arguments as any
+      );
+      const resolvedGenerated = resolveActivityDefinition(generatedEntry);
+
+      setEditableActivities((prev) => [...prev, resolvedGenerated]);
+      setLastGeneratedActivityId(resolvedGenerated.id);
+      setGenerationSuccessMessage(
+        `L’activité « ${
+          resolvedGenerated.card?.title ?? resolvedGenerated.id
+        } » a été ajoutée en mode édition.`
+      );
+      setGenerationReasoningSummary(response.reasoningSummary?.trim() ?? null);
+      setIsGenerateModalOpen(false);
+      setGenerationForm({
+        theme: "",
+        audience: "",
+        objectives: "",
+        deliverable: "",
+        constraints: "",
+      });
+    } catch (error) {
+      console.error("Erreur lors de la génération d'activité:", error);
+      setGenerationError(
+        error instanceof Error
+          ? error.message
+          : "La génération de l'activité a échoué. Veuillez réessayer."
+      );
+    } finally {
+      setIsGeneratingActivity(false);
+    }
+  }, [
+    existingActivityIds,
+    generationModel,
+    generationThinking,
+    generationVerbosity,
+    isGenerationFormValid,
+    isGeneratingActivity,
+    trimmedGenerationForm,
+    token,
+  ]);
+
   const loadSavedConfig = async () => {
     if (isLoading) return;
 
@@ -1200,10 +1473,41 @@ function ActivitySelector(): JSX.Element {
       contentClassName="animate-section-delayed"
       contentAs="div"
     >
+      {generationSuccessMessage ? (
+        <div className="animate-section mb-6 space-y-3 rounded-3xl border border-sky-200/70 bg-sky-50/90 p-6 text-sky-900 shadow-sm backdrop-blur">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-sky-700/80">
+                Activité générée
+              </p>
+              <p className="text-sm leading-relaxed md:text-base">
+                {generationSuccessMessage}
+              </p>
+              {generationReasoningSummary ? (
+                <p className="text-xs text-sky-800/80">
+                  {generationReasoningSummary}
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissGenerationMessage}
+              className="inline-flex items-center justify-center self-start rounded-full border border-sky-400/40 px-3 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-500/70 hover:text-sky-900"
+            >
+              Fermer
+            </button>
+          </div>
+          <p className="text-xs text-sky-800/70">
+            Pensez à enregistrer vos modifications pour rendre l’activité disponible aux apprenants.
+          </p>
+        </div>
+      ) : null}
       <div className="grid gap-6 md:grid-cols-2">
         {activitiesToDisplay.map((activity: ActivityDefinition, index: number) => {
           const isDisabled = activity.enabled === false;
           const isCompleted = completedMap[activity.id];
+          const isRecentlyGenerated =
+            isEditMode && !isDisabled && lastGeneratedActivityId === activity.id;
           const hoverClasses = isDisabled
             ? "hover:translate-y-0 hover:shadow-sm"
             : "hover:-translate-y-1 hover:shadow-lg";
@@ -1216,6 +1520,9 @@ function ActivitySelector(): JSX.Element {
             ? isDisabled
               ? "cursor-move border-orange-200/70 ring-1 ring-orange-100/60"
               : "cursor-move border-orange-200 ring-2 ring-orange-100"
+            : "";
+          const generatedClasses = isRecentlyGenerated
+            ? "border-sky-200 ring-4 ring-sky-200"
             : "";
           const dragClasses = [
             draggedIndex === index ? "opacity-50" : "",
@@ -1233,7 +1540,7 @@ function ActivitySelector(): JSX.Element {
               onDragStart={() => handleDragStart(index)}
               onDragOver={(e) => handleDragOver(e, index)}
               onDragEnd={handleDragEnd}
-              className={`group relative flex h-full flex-col gap-6 rounded-3xl border p-8 shadow-sm backdrop-blur transition ${hoverClasses} ${statusClasses} ${editClasses} ${dragClasses}`.trim()}
+              className={`group relative flex h-full flex-col gap-6 rounded-3xl border p-8 shadow-sm backdrop-blur transition ${hoverClasses} ${statusClasses} ${editClasses} ${generatedClasses} ${dragClasses}`.trim()}
             >
               {isEditMode && (
                 <div className="absolute left-4 top-4 flex flex-col gap-1">
@@ -1430,24 +1737,156 @@ function ActivitySelector(): JSX.Element {
           </div>
         ) : null}
         {isEditMode ? (
-          <button
-            type="button"
-            onClick={handleCreateStepSequenceActivity}
-            disabled={!canUseStepSequenceShortcut}
-            aria-disabled={!canUseStepSequenceShortcut}
-            className={newSequenceButtonClasses}
-          >
-            <span className="flex h-16 w-16 items-center justify-center rounded-full border border-current text-4xl font-light leading-none">
-              +
-            </span>
-            <span className="text-sm font-semibold uppercase tracking-wide">
-              {newSequenceLabel}
-            </span>
-            <span className={newSequenceDescriptionClasses}>{newSequenceDescription}</span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleCreateStepSequenceActivity}
+              disabled={!canUseStepSequenceShortcut}
+              aria-disabled={!canUseStepSequenceShortcut}
+              className={newSequenceButtonClasses}
+            >
+              <span className="flex h-16 w-16 items-center justify-center rounded-full border border-current text-4xl font-light leading-none">
+                +
+              </span>
+              <span className="text-sm font-semibold uppercase tracking-wide">
+                {newSequenceLabel}
+              </span>
+              <span className={newSequenceDescriptionClasses}>{newSequenceDescription}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenGenerationModal}
+              disabled={!canUseStepSequenceShortcut}
+              aria-disabled={!canUseStepSequenceShortcut}
+              className={generateActivityButtonClasses}
+            >
+              <span className="flex h-16 w-16 items-center justify-center rounded-full border border-current text-3xl leading-none">
+                🪄
+              </span>
+              <span className="text-sm font-semibold uppercase tracking-wide">
+                {generateActivityLabel}
+              </span>
+              <span className={generateActivityDescriptionClasses}>
+                {generateActivityDescription}
+              </span>
+            </button>
+          </>
         ) : null}
       </div>
       </ActivityLayout>
+      <AdminModal
+        open={isGenerateModalOpen}
+        onClose={handleCloseGenerationModal}
+        title="Générer une activité avec l'IA"
+        description="Décris la situation pédagogique pour recevoir une proposition d'activité StepSequence personnalisée."
+        size="lg"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={handleCloseGenerationModal}
+              disabled={isGeneratingActivity}
+              className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-charcoal)]/40 hover:text-[color:var(--brand-black)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitGeneration}
+              disabled={!isGenerationFormValid || isGeneratingActivity}
+              className="inline-flex items-center justify-center rounded-full border border-sky-500/50 bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700 disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-200"
+            >
+              {isGeneratingActivity ? "Génération en cours..." : "Générer l'activité"}
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
+          L’IA propose une base structurée (carte d’activité, header et étapes). Vous pourrez ensuite modifier chaque élément
+          avant d’enregistrer la configuration.
+        </p>
+        {generationError ? (
+          <div className="rounded-xl border border-red-200/80 bg-red-50/80 p-3 text-sm text-red-700">
+            {generationError}
+          </div>
+        ) : null}
+        <div className="grid gap-4">
+          {ACTIVITY_GENERATION_FIELDS.map((field) => (
+            <label
+              key={field.key}
+              className="flex flex-col gap-2 text-sm text-[color:var(--brand-charcoal)]"
+            >
+              <span className="font-semibold text-[color:var(--brand-black)]">{field.label}</span>
+              <span className="text-xs text-[color:var(--brand-charcoal)]/70">
+                {field.description}
+              </span>
+              <textarea
+                value={generationForm[field.key]}
+                onChange={(event) =>
+                  handleGenerationFieldChange(field.key, event.target.value)
+                }
+                rows={field.rows ?? 3}
+                placeholder={field.placeholder}
+                required={field.key !== "constraints"}
+                className="resize-none rounded-xl border border-[color:var(--brand-charcoal)]/15 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none focus:ring-0"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="flex flex-col gap-2 text-sm text-[color:var(--brand-charcoal)]">
+            <span className="font-semibold text-[color:var(--brand-black)]">Modèle</span>
+            <select
+              value={generationModel}
+              onChange={(event) => setGenerationModel(event.target.value as ModelChoice)}
+              className="rounded-xl border border-[color:var(--brand-charcoal)]/15 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+            >
+              {MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {generationModelHelper ? (
+              <span className="text-xs text-[color:var(--brand-charcoal)]/70">
+                {generationModelHelper}
+              </span>
+            ) : null}
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-[color:var(--brand-charcoal)]">
+            <span className="font-semibold text-[color:var(--brand-black)]">Verbosité</span>
+            <select
+              value={generationVerbosity}
+              onChange={(event) =>
+                setGenerationVerbosity(event.target.value as VerbosityChoice)
+              }
+              className="rounded-xl border border-[color:var(--brand-charcoal)]/15 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+            >
+              {VERBOSITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-[color:var(--brand-charcoal)]">
+            <span className="font-semibold text-[color:var(--brand-black)]">Raisonnement</span>
+            <select
+              value={generationThinking}
+              onChange={(event) =>
+                setGenerationThinking(event.target.value as ThinkingChoice)
+              }
+              className="rounded-xl border border-[color:var(--brand-charcoal)]/15 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
+            >
+              {THINKING_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </AdminModal>
     </>
   );
 }

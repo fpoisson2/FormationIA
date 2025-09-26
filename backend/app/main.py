@@ -139,6 +139,223 @@ PROMPT_EVALUATION_FORMAT = {
 }
 
 
+COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["component"],
+    "properties": {
+        "id": {"type": "string"},
+        "component": {"type": "string"},
+        "slot": {"type": "string"},
+        "config": {},
+    },
+}
+
+
+STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
+    "type": "function",
+    "name": "build_step_sequence_activity",
+    "description": "Assemble une configuration d'activité basée sur une suite d'étapes générées.",
+    "strict": True,
+    "parameters": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["activityId", "steps"],
+        "properties": {
+            "activityId": {"type": "string"},
+            "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["id"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "component": {"type": "string"},
+                        "config": {},
+                        "composite": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["modules"],
+                            "properties": {
+                                "modules": {
+                                    "type": "array",
+                                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
+                                },
+                                "autoAdvance": {"type": "boolean"},
+                                "continueLabel": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+            "metadata": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [],
+                "properties": {
+                    "componentKey": {"type": "string"},
+                    "path": {"type": "string"},
+                    "completionId": {"type": "string"},
+                    "enabled": {"type": "boolean"},
+                    "header": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [],
+                        "properties": {
+                            "eyebrow": {"type": "string"},
+                            "title": {"type": "string"},
+                            "subtitle": {"type": "string"},
+                            "badge": {"type": "string"},
+                            "titleAlign": {
+                                "type": "string",
+                                "enum": ["left", "center"],
+                            },
+                        },
+                    },
+                    "layout": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [],
+                        "properties": {
+                            "activityId": {"type": "string"},
+                            "outerClassName": {"type": "string"},
+                            "innerClassName": {"type": "string"},
+                            "headerClassName": {"type": "string"},
+                            "contentClassName": {"type": "string"},
+                            "contentAs": {"type": "string"},
+                            "withLandingGradient": {"type": "boolean"},
+                            "useDynamicViewportHeight": {"type": "boolean"},
+                            "withBasePadding": {"type": "boolean"},
+                            "withBaseContentSpacing": {"type": "boolean"},
+                            "withBaseInnerGap": {"type": "boolean"},
+                            "actions": {},
+                            "headerChildren": {},
+                            "beforeHeader": {},
+                        },
+                    },
+                    "card": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["title", "description", "highlights", "cta"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "description": {"type": "string"},
+                            "highlights": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "cta": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["label", "to"],
+                                "properties": {
+                                    "label": {"type": "string"},
+                                    "to": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                    "overrides": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": [],
+                        "properties": {
+                            "header": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [],
+                                "properties": {
+                                    "eyebrow": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "subtitle": {"type": "string"},
+                                    "badge": {"type": "string"},
+                                    "titleAlign": {
+                                        "type": "string",
+                                        "enum": ["left", "center"],
+                                    },
+                                },
+                            },
+                            "layout": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": [],
+                                "properties": {
+                                    "activityId": {"type": "string"},
+                                    "outerClassName": {"type": "string"},
+                                    "innerClassName": {"type": "string"},
+                                    "headerClassName": {"type": "string"},
+                                    "contentClassName": {"type": "string"},
+                                    "contentAs": {"type": "string"},
+                                    "withLandingGradient": {"type": "boolean"},
+                                    "useDynamicViewportHeight": {"type": "boolean"},
+                                    "withBasePadding": {"type": "boolean"},
+                                    "withBaseContentSpacing": {"type": "boolean"},
+                                    "withBaseInnerGap": {"type": "boolean"},
+                                    "actions": {},
+                                    "headerChildren": {},
+                                    "beforeHeader": {},
+                                },
+                            },
+                            "card": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["title", "description", "highlights", "cta"],
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "highlights": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "cta": {
+                                        "type": "object",
+                                        "additionalProperties": False,
+                                        "required": ["label", "to"],
+                                        "properties": {
+                                            "label": {"type": "string"},
+                                            "to": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                            "completionId": {"type": "string"},
+                            "stepSequence": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": ["id"],
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "component": {"type": "string"},
+                                        "config": {},
+                                        "composite": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "required": ["modules"],
+                                            "properties": {
+                                                "modules": {
+                                                    "type": "array",
+                                                    "items": COMPOSITE_MODULE_JSON_SCHEMA,
+                                                },
+                                                "autoAdvance": {"type": "boolean"},
+                                                "continueLabel": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
+
 class Coordinate(BaseModel):
     x: int = Field(..., ge=0, le=GRID_SIZE - 1)
     y: int = Field(..., ge=0, le=GRID_SIZE - 1)
@@ -751,6 +968,74 @@ def _extract_reasoning_summary(response) -> str:
     return "\n".join(summary_chunks).strip()
 
 
+def _build_activity_generation_prompt(
+    details: ActivityGenerationDetails, existing_ids: Sequence[str]
+) -> str:
+    sections: list[str] = [
+        "Conçois une activité pédagogique StepSequence en français pour la plateforme Formation IA.",
+        f"Thématique principale : {details.theme}.",
+        f"Public cible : {details.audience}.",
+        f"Objectifs pédagogiques prioritaires : {details.objectives}.",
+        f"Livrable ou production attendue : {details.deliverable}.",
+    ]
+    if details.constraints:
+        sections.append(f"Contraintes ou ressources à intégrer : {details.constraints}.")
+    if existing_ids:
+        ordered = ", ".join(sorted(existing_ids))
+        sections.append(
+            "Identifiants d'activité déjà utilisés (ne pas les réemployer) : " + ordered
+        )
+    sections.extend(
+        [
+            "Exigences de conception :",
+            "- Génère 3 à 5 étapes maximum en privilégiant la progression pédagogique (accroche, exploration guidée, consolidation).",
+            "- Utilise uniquement les composants disponibles : rich-content, form, video, composite, workshop-context, workshop-comparison, workshop-synthesis.",
+            "- Propose des identifiants d'étape courts en minuscules séparés par des tirets.",
+            "- Les formulaires doivent comporter des consignes explicites et des contraintes adaptées (nombre de mots, choix, etc.).",
+            "- Complète la carte d'activité (titre, description, highlights, CTA) et le header avec des textes synthétiques.",
+            "- Si aucun chemin spécifique n'est requis, oriente le CTA vers /activites/{activityId}.",
+        ]
+    )
+    sections.append(
+        "Réponds uniquement via l'appel à la fonction build_step_sequence_activity, sans texte libre supplémentaire."
+    )
+    return "\n".join(sections)
+
+
+def _extract_first_tool_call(response: Any) -> tuple[str, str | None, Any] | None:
+    output_items = getattr(response, "output", None)
+    if output_items is None and isinstance(response, dict):
+        output_items = response.get("output")
+    if not output_items:
+        return None
+
+    for item in output_items:
+        item_type = getattr(item, "type", None) or (
+            item.get("type") if isinstance(item, dict) else None
+        )
+        if item_type != "function_call":
+            continue
+
+        name = getattr(item, "name", None) or (
+            item.get("name") if isinstance(item, dict) else None
+        )
+        if not name:
+            continue
+
+        call_id = getattr(item, "call_id", None) or (
+            item.get("call_id") if isinstance(item, dict) else None
+        )
+        arguments = getattr(item, "arguments", None)
+        if arguments is None and isinstance(item, dict):
+            arguments = item.get("arguments")
+        if arguments is None:
+            continue
+
+        return name, call_id, arguments
+
+    return None
+
+
 class SummaryRequest(BaseModel):
     text: str = Field(..., min_length=10)
     model: str = Field(default="gpt-5-mini")
@@ -760,6 +1045,59 @@ class SummaryRequest(BaseModel):
 
 class FlashcardRequest(SummaryRequest):
     card_count: int = Field(default=3, ge=1, le=6)
+
+
+class ActivityGenerationDetails(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    theme: str = Field(..., min_length=5, max_length=240)
+    audience: str = Field(..., min_length=3, max_length=240)
+    objectives: str = Field(..., min_length=10, max_length=600)
+    deliverable: str = Field(..., min_length=5, max_length=360)
+    constraints: str | None = Field(default=None, max_length=600)
+
+
+class ActivityGenerationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    model: str = Field(default="gpt-5-mini")
+    verbosity: Literal["low", "medium", "high"] = "medium"
+    thinking: Literal["minimal", "medium", "high"] = "medium"
+    details: ActivityGenerationDetails
+    existing_activity_ids: list[str] = Field(
+        default_factory=list, alias="existingActivityIds"
+    )
+
+    @model_validator(mode="after")
+    def _normalize_ids(self) -> "ActivityGenerationRequest":
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in self.existing_activity_ids:
+            if not isinstance(value, str):
+                continue
+            trimmed = value.strip()
+            if not trimmed or trimmed in seen:
+                continue
+            seen.add(trimmed)
+            normalized.append(trimmed)
+        self.existing_activity_ids = normalized
+        return self
+
+
+class ActivityGenerationToolCall(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    arguments: dict[str, Any]
+    call_id: str | None = Field(default=None, alias="callId")
+    arguments_text: str | None = Field(default=None, alias="argumentsText")
+
+
+class ActivityGenerationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_call: ActivityGenerationToolCall = Field(alias="toolCall")
+    reasoning_summary: str | None = Field(default=None, alias="reasoningSummary")
 
 
 class PromptEvaluationScoreModel(BaseModel):
@@ -2032,6 +2370,104 @@ def admin_save_activities_config(
     """Sauvegarde la configuration des activités."""
     _save_activities_config(payload.model_dump(by_alias=True, exclude_none=True))
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
+
+
+@admin_router.post(
+    "/activities/generate", response_model=ActivityGenerationResponse
+)
+def admin_generate_activity(
+    payload: ActivityGenerationRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> ActivityGenerationResponse:
+    """Génère une activité StepSequence via l'API Responses."""
+
+    client = _ensure_client()
+    model = _validate_model(payload.model)
+    prompt = _build_activity_generation_prompt(
+        payload.details, payload.existing_activity_ids
+    )
+
+    system_message = (
+        "Tu es un concepteur pédagogique francophone spécialisé en intelligence "
+        "artificielle générative. Tu proposes des activités engageantes et "
+        "structurées pour des professionnels en formation continue."
+    )
+    developer_message = (
+        "Réponds exclusivement via l'appel à la fonction build_step_sequence_activity. "
+        "Chaque étape doit utiliser un composant disponible et rester cohérente avec "
+        "les objectifs fournis. Assure-toi que la carte d'activité et le header sont "
+        "renseignés avec des textes concis, inclusifs et professionnels."
+    )
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system_message},
+                {"role": "developer", "content": developer_message},
+                {"role": "user", "content": prompt},
+            ],
+            tools=[STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION],
+            tool_choice={"type": "function", "name": "build_step_sequence_activity"},
+            text={"verbosity": payload.verbosity},
+            reasoning={"effort": payload.thinking, "summary": "auto"},
+            parallel_tool_calls=False,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    extracted = _extract_first_tool_call(response)
+    if not extracted:
+        raise HTTPException(
+            status_code=500,
+            detail="Le modèle n'a pas renvoyé d'appel d'outil valide.",
+        )
+
+    name, call_id, raw_arguments = extracted
+
+    arguments_obj: dict[str, Any] | None = None
+    arguments_text: str | None = None
+
+    if isinstance(raw_arguments, dict):
+        arguments_obj = raw_arguments
+        try:
+            arguments_text = json.dumps(raw_arguments)
+        except TypeError:  # pragma: no cover - fallback
+            arguments_text = None
+    elif isinstance(raw_arguments, (bytes, bytearray)):
+        arguments_text = raw_arguments.decode("utf-8", "ignore")
+    else:
+        arguments_text = str(raw_arguments)
+
+    if arguments_obj is None:
+        try:
+            parsed = json.loads(arguments_text or "null")
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise HTTPException(
+                status_code=500,
+                detail="Arguments d'outil invalides renvoyés par le modèle.",
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=500,
+                detail="Les arguments d'outil ne sont pas un objet JSON.",
+            )
+        arguments_obj = parsed
+
+    if arguments_text is None:
+        arguments_text = json.dumps(arguments_obj)
+
+    reasoning_summary = _extract_reasoning_summary(response) or None
+
+    return ActivityGenerationResponse(
+        tool_call=ActivityGenerationToolCall(
+            name=name,
+            call_id=call_id,
+            arguments=arguments_obj,
+            arguments_text=arguments_text,
+        ),
+        reasoning_summary=reasoning_summary or None,
+    )
 
 
 app.include_router(admin_auth_router)
