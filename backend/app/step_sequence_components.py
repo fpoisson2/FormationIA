@@ -85,6 +85,27 @@ def _strict_object_schema(
     }
 
 
+VIDEO_SOURCE_TYPE_ENUM = ["mp4", "hls", "youtube"]
+
+
+VIDEO_SOURCE_SCHEMA = _strict_object_schema(
+    {
+        "type": {"type": "string", "enum": VIDEO_SOURCE_TYPE_ENUM},
+        "url": {"type": "string"},
+    }
+)
+
+
+VIDEO_CAPTION_SCHEMA = _strict_object_schema(
+    {
+        "src": {"type": "string"},
+        "srclang": _nullable_schema({"type": "string"}),
+        "label": _nullable_schema({"type": "string"}),
+        "default": {"type": "boolean"},
+    }
+)
+
+
 def create_step_sequence_activity(
     *,
     activity_id: str,
@@ -443,12 +464,50 @@ def create_video_step(
     automatique en fin de lecture ou d'indiquer une durée estimée.
     """
 
-    normalized_sources = [deepcopy(source) for source in sources if isinstance(source, Mapping)]
-    normalized_captions = (
-        [deepcopy(caption) for caption in captions if isinstance(caption, Mapping)]
-        if captions
-        else []
-    )
+    normalized_sources: list[dict[str, Any]] = []
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+
+        normalized_source = deepcopy(source)
+        raw_type = str(normalized_source.get("type", "")).lower()
+        normalized_type = (
+            raw_type if raw_type in VIDEO_SOURCE_TYPE_ENUM else "mp4"
+        )
+        normalized_source["type"] = normalized_type
+        normalized_source["url"] = str(normalized_source.get("url", ""))
+        if not normalized_source["url"]:
+            continue
+
+        normalized_sources.append(normalized_source)
+
+    if not normalized_sources:
+        raise ValueError("Au moins une source vidéo valide est requise.")
+
+    normalized_captions: list[dict[str, Any]] = []
+    if captions:
+        for caption in captions:
+            if not isinstance(caption, Mapping):
+                continue
+
+            normalized_caption = deepcopy(caption)
+            src = str(normalized_caption.get("src", "")).strip()
+            if not src:
+                continue
+
+            normalized_caption["src"] = src
+            normalized_caption["srclang"] = (
+                str(normalized_caption.get("srclang"))
+                if normalized_caption.get("srclang") is not None
+                else None
+            )
+            normalized_caption["label"] = (
+                str(normalized_caption.get("label"))
+                if normalized_caption.get("label") is not None
+                else None
+            )
+            normalized_caption["default"] = bool(normalized_caption.get("default"))
+            normalized_captions.append(normalized_caption)
 
     config = {
         "sources": normalized_sources,
@@ -1097,13 +1156,13 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "sources": {
                     "type": "array",
                     "minItems": 1,
-                    "items": _any_object_schema(),
+                    "items": VIDEO_SOURCE_SCHEMA,
                 },
                 "poster": _nullable_schema({"type": "string"}),
                 "captions": _nullable_schema(
                     {
                         "type": "array",
-                        "items": _any_object_schema(),
+                        "items": VIDEO_CAPTION_SCHEMA,
                     }
                 ),
                 "autoAdvanceOnEnd": _nullable_schema({"type": "boolean"}),

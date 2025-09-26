@@ -1,4 +1,5 @@
 from __future__ import annotations
+import pytest
 
 from backend.app.step_sequence_components import (
     add_ai_comparison_step,
@@ -117,8 +118,16 @@ def test_create_video_step_preserves_sources_and_captions() -> None:
     config = step["config"]
     assert config["sources"][0]["type"] == "mp4"
     assert config["captions"][0]["src"] == "https://cdn.example/video.vtt"
+    assert config["captions"][0]["srclang"] is None
+    assert config["captions"][0]["label"] is None
+    assert config["captions"][0]["default"] is False
     assert config["autoAdvanceOnEnd"] is True
     assert config["expectedDuration"] == 120
+
+
+def test_create_video_step_rejects_missing_sources() -> None:
+    with pytest.raises(ValueError):
+        create_video_step(step_id="video", sources=[{"type": "mp4"}])
 
 
 def test_create_simulation_chat_step_sets_roles_and_stages() -> None:
