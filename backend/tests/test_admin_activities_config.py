@@ -238,8 +238,15 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
             data = response.json()
             assert data["toolCall"]["definition"] == STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
             assert len(captured_requests) == 3
+            expected_tools = [
+                *STEP_SEQUENCE_TOOL_DEFINITIONS,
+                {
+                    "type": "web_search",
+                    "filters": {"allowed_domains": ["youtube.com", "youtu.be"]},
+                },
+            ]
             for request in captured_requests:
-                assert request["tools"] == STEP_SEQUENCE_TOOL_DEFINITIONS
+                assert request["tools"] == expected_tools
     finally:
         app.dependency_overrides.clear()
 
