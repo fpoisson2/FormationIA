@@ -7,6 +7,7 @@ import { SimulationChatStep } from "./SimulationChatStep";
 import { VideoStep } from "./VideoStep";
 import { PromptEvaluationStep } from "./PromptEvaluationStep";
 import { DualModelComparisonStep } from "./DualModelComparisonStep";
+import { InfoCardsStep } from "./InfoCardsStep";
 import { ClarityMapStep } from "./clarity/ClarityMapStep";
 import { ClarityPromptStep } from "./clarity/ClarityPromptStep";
 import type {
@@ -57,6 +58,7 @@ registerStepComponent("simulation-chat", SimulationChatStep);
 registerStepComponent("video", VideoStep);
 registerStepComponent("prompt-evaluation", PromptEvaluationStep);
 registerStepComponent("ai-comparison", DualModelComparisonStep);
+registerStepComponent("info-cards", InfoCardsStep);
 registerStepComponent("clarity-map", ClarityMapStep);
 registerStepComponent("clarity-prompt", ClarityPromptStep);
 
@@ -116,6 +118,9 @@ export type {
   DualModelComparisonVariantConfig,
 } from "./DualModelComparisonStep";
 export { DualModelComparisonStep };
+
+export type { InfoCardsStepConfig, InfoCardsStepCardConfig, InfoCardTone } from "./InfoCardsStep";
+export { InfoCardsStep };
 
 export type {
   ClarityMapStepConfig,
