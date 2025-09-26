@@ -6,7 +6,11 @@ import {
   StepSequenceContext,
   type StepComponentProps,
 } from "../../src/modules/step-sequence";
-import type { StageAnswer } from "../../src/api";
+import type {
+  StageAnswer,
+  SingleChoiceFieldSpec,
+  MultipleChoiceFieldSpec,
+} from "../../src/api";
 import {
   FormStep,
   type FormStepConfig,
@@ -155,6 +159,108 @@ describe("FormStep", () => {
     const afterRemoval = onChange.mock.calls.at(-1)?.[0] as FormStepConfig;
     expect(afterRemoval.fields.length).toBe(0);
     expect(screen.queryByText("Aucun champ configuré.")).not.toBeNull();
+  });
+
+  it("allows designers to mark correct answers for choice fields", () => {
+    const onChange = vi.fn();
+    const config: FormStepConfig = {
+      fields: [
+        {
+          id: "single",
+          label: "Choix unique",
+          type: "single_choice",
+          options: [
+            { value: "a", label: "Réponse A" },
+            { value: "b", label: "Réponse B" },
+          ],
+          correctAnswer: "a",
+        } satisfies SingleChoiceFieldSpec,
+        {
+          id: "multi",
+          label: "Choix multiples",
+          type: "multiple_choice",
+          options: [
+            { value: "x", label: "Option X" },
+            { value: "y", label: "Option Y" },
+          ],
+          correctAnswers: ["x"],
+        } satisfies MultipleChoiceFieldSpec,
+      ],
+      submitLabel: "Configurer",
+      onChange,
+    };
+
+    renderFormStep({ config, isEditMode: true });
+
+    const singleFieldTrigger = screen
+      .getAllByText("Choix unique")
+      .map((element) => element.closest('[role="button"]'))
+      .find((element): element is HTMLElement => Boolean(element));
+    expect(singleFieldTrigger).not.toBeUndefined();
+    fireEvent.click(singleFieldTrigger!);
+
+    const singleRadio = screen.getByRole("radio", {
+      name: "Bonne réponse : Réponse B",
+    });
+    fireEvent.click(singleRadio);
+
+    const updatedSingle = onChange.mock.calls.at(-1)?.[0] as FormStepConfig;
+    const singleField = updatedSingle.fields[0] as SingleChoiceFieldSpec;
+    expect(singleField.correctAnswer).toBe("b");
+
+    const multiFieldTrigger = screen
+      .getAllByText("Choix multiples")
+      .map((element) => element.closest('[role="button"]'))
+      .find((element): element is HTMLElement => Boolean(element));
+    expect(multiFieldTrigger).not.toBeUndefined();
+    fireEvent.click(multiFieldTrigger!);
+
+    const multiCheckbox = screen.getByRole("checkbox", {
+      name: "Bonne réponse possible : Option Y",
+    });
+    fireEvent.click(multiCheckbox);
+
+    const updatedMulti = onChange.mock.calls.at(-1)?.[0] as FormStepConfig;
+    const multiField = updatedMulti.fields[1] as MultipleChoiceFieldSpec;
+    expect(multiField.correctAnswers).toContain("y");
+  });
+
+  it("displays correction feedback after submission", () => {
+    const config: FormStepConfig = {
+      fields: [
+        {
+          id: "quiz",
+          label: "Quelle réponse est correcte ?",
+          type: "single_choice",
+          options: [
+            { value: "r1", label: "Réponse 1" },
+            { value: "r2", label: "Réponse 2" },
+          ],
+          correctAnswer: "r2",
+        } satisfies SingleChoiceFieldSpec,
+      ],
+      submitLabel: "Valider",
+    };
+
+    const { onAdvance } = renderFormStep({ config });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Réponse 1" }));
+    const firstForm = screen.getAllByRole("form", { name: "Formulaire guidé" }).at(-1);
+    expect(firstForm).toBeTruthy();
+    fireEvent.submit(firstForm!);
+
+    expect(onAdvance).toHaveBeenCalledWith({ quiz: "r1" });
+    expect(
+      screen.getByText(/Correction : Réponse 2 · Ta réponse : Réponse 1/)
+    ).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Réponse 2" }));
+    const secondForm = screen.getAllByRole("form", { name: "Formulaire guidé" }).at(-1);
+    expect(secondForm).toBeTruthy();
+    fireEvent.submit(secondForm!);
+
+    expect(onAdvance).toHaveBeenCalledWith({ quiz: "r2" });
+    expect(screen.getByText(/Bonne réponse ! Réponse 2/)).not.toBeNull();
   });
 });
 

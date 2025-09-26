@@ -10,11 +10,18 @@ import type {
   SingleChoiceFieldSpec,
 } from "../api";
 
+type FieldCorrection = {
+  expectedValues: string[];
+  selectedValues: string[];
+  isCorrect: boolean;
+};
+
 interface GuidedFieldsProps {
   fields: FieldSpec[];
   values: StageAnswer;
   onChange: (fieldId: string, value: FieldValue) => void;
   errors: Record<string, string>;
+  corrections?: Record<string, FieldCorrection>;
 }
 
 function countWords(text: string): number {
@@ -36,15 +43,46 @@ function ensureArray(value: FieldValue, minSize = 1): string[] {
   return parsed;
 }
 
-function GuidedFields({ fields, values, onChange, errors }: GuidedFieldsProps): JSX.Element {
+function formatChoiceLabels(
+  values: string[],
+  options: SingleChoiceFieldSpec["options"]
+): string[] {
+  const optionMap = new Map(options.map((option) => [option.value, option.label]));
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  values.forEach((value) => {
+    const label = optionMap.get(value) ?? value;
+    if (!label || seen.has(label)) {
+      return;
+    }
+    seen.add(label);
+    labels.push(label);
+  });
+  return labels;
+}
+
+function GuidedFields({
+  fields,
+  values,
+  onChange,
+  errors,
+  corrections,
+}: GuidedFieldsProps): JSX.Element {
   return (
     <div className="space-y-6">
       {fields.map((field) => {
         const error = errors[field.id];
+        const correction = corrections?.[field.id];
         switch (field.type) {
           case "single_choice": {
             const { options } = field as SingleChoiceFieldSpec;
             const selected = typeof values[field.id] === "string" ? (values[field.id] as string) : "";
+            const expectedLabels = correction
+              ? formatChoiceLabels(correction.expectedValues, options)
+              : [];
+            const selectedLabels = correction
+              ? formatChoiceLabels(correction.selectedValues, options)
+              : [];
             return (
               <fieldset key={field.id} className="space-y-3">
                 <legend className="text-sm font-semibold text-[color:var(--brand-black)]">
@@ -85,6 +123,21 @@ function GuidedFields({ fields, values, onChange, errors }: GuidedFieldsProps): 
                   })}
                 </div>
                 {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+                {correction && expectedLabels.length > 0 && (
+                  <p
+                    className={`text-xs font-semibold ${
+                      correction.isCorrect
+                        ? "text-emerald-600"
+                        : "text-[color:var(--brand-red)]"
+                    }`}
+                  >
+                    {correction.isCorrect
+                      ? `Bonne réponse ! ${expectedLabels.join(", ")}`
+                      : `Correction : ${expectedLabels.join(", ")} · Ta réponse : ${
+                          selectedLabels.length > 0 ? selectedLabels.join(", ") : "aucune"
+                        }`}
+                  </p>
+                )}
               </fieldset>
             );
           }
@@ -95,6 +148,12 @@ function GuidedFields({ fields, values, onChange, errors }: GuidedFieldsProps): 
               ? ((values[field.id] as string[]).filter((item) => typeof item === "string").slice())
               : [];
             const selected = new Set(rawSelection);
+            const expectedLabels = correction
+              ? formatChoiceLabels(correction.expectedValues, options)
+              : [];
+            const selectedLabels = correction
+              ? formatChoiceLabels(correction.selectedValues, options)
+              : [];
             const toggleValue = (value: string) => {
               const next = new Set(selected);
               if (next.has(value)) {
@@ -157,6 +216,21 @@ function GuidedFields({ fields, values, onChange, errors }: GuidedFieldsProps): 
                   </p>
                 )}
                 {error && <p className="text-xs font-semibold text-red-600">{error}</p>}
+                {correction && expectedLabels.length > 0 && (
+                  <p
+                    className={`text-xs font-semibold ${
+                      correction.isCorrect
+                        ? "text-emerald-600"
+                        : "text-[color:var(--brand-red)]"
+                    }`}
+                  >
+                    {correction.isCorrect
+                      ? `Bonnes réponses ! ${expectedLabels.join(", ")}`
+                      : `Correction : ${expectedLabels.join(", ")} · Ta réponse : ${
+                          selectedLabels.length > 0 ? selectedLabels.join(", ") : "aucune"
+                        }`}
+                  </p>
+                )}
               </fieldset>
             );
           }

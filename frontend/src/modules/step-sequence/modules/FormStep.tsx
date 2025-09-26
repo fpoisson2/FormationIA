@@ -59,6 +59,14 @@ type NormalizeOptions = {
 
 type ChoiceFieldSpec = SingleChoiceFieldSpec | MultipleChoiceFieldSpec;
 
+type FormFieldCorrection = {
+  expectedValues: string[];
+  selectedValues: string[];
+  isCorrect: boolean;
+};
+
+type FormStepCorrections = Record<string, FormFieldCorrection>;
+
 export type FormStepValidationResult = Record<string, string>;
 
 export type FormStepValidationFn = (
@@ -110,6 +118,7 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
       return {
         ...spec,
         options: spec.options.map((option) => ({ ...option })),
+        correctAnswer: spec.correctAnswer,
       };
     }
     case "multiple_choice": {
@@ -117,6 +126,9 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
       return {
         ...spec,
         options: spec.options.map((option) => ({ ...option })),
+        correctAnswers: spec.correctAnswers
+          ? [...new Set(spec.correctAnswers)]
+          : undefined,
       };
     }
     default:
@@ -126,6 +138,38 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
 
 function isChoiceField(field: FieldSpec): field is ChoiceFieldSpec {
   return field.type === "single_choice" || field.type === "multiple_choice";
+}
+
+function normalizeChoiceFieldCorrectAnswers(field: ChoiceFieldSpec): ChoiceFieldSpec {
+  if (field.type === "single_choice") {
+    if (!field.correctAnswer) {
+      return field;
+    }
+    const isValid = field.options.some((option) => option.value === field.correctAnswer);
+    if (isValid) {
+      return field;
+    }
+    const fallback = field.options.at(0)?.value;
+    return {
+      ...field,
+      correctAnswer: fallback,
+    };
+  }
+
+  const validOptions = new Set(field.options.map((option) => option.value));
+  if (!field.correctAnswers) {
+    return { ...field, correctAnswers: undefined };
+  }
+  const filtered = field.correctAnswers.filter(
+    (value, index, array) =>
+      typeof value === "string" &&
+      validOptions.has(value) &&
+      array.indexOf(value) === index
+  );
+  return {
+    ...field,
+    correctAnswers: filtered.length > 0 ? filtered : undefined,
+  };
 }
 
 function normalizeFieldValue(
@@ -288,6 +332,7 @@ export function createDefaultFieldSpec(type: FieldType): FieldSpec {
           { value: `${id}-option-b`, label: "Option B" },
           { value: `${id}-option-c`, label: "Option C" },
         ],
+        correctAnswer: `${id}-option-a`,
       } satisfies SingleChoiceFieldSpec;
     case "multiple_choice":
       return {
@@ -300,6 +345,8 @@ export function createDefaultFieldSpec(type: FieldType): FieldSpec {
           { value: `${id}-option-c`, label: "Option C" },
         ],
         minSelections: 1,
+        maxSelections: undefined,
+        correctAnswers: [`${id}-option-a`],
       } satisfies MultipleChoiceFieldSpec;
     default:
       return {
@@ -388,7 +435,7 @@ export function validateFieldSpec(spec: unknown): spec is FieldSpec {
       if (!Array.isArray(typed.options) || typed.options.length === 0) {
         return false;
       }
-      return typed.options.every(
+      const optionsValid = typed.options.every(
         (option) =>
           typeof option.value === "string" &&
           option.value.length > 0 &&
@@ -396,6 +443,17 @@ export function validateFieldSpec(spec: unknown): spec is FieldSpec {
           option.label.length > 0 &&
           (option.description === undefined || typeof option.description === "string")
       );
+      if (!optionsValid) {
+        return false;
+      }
+      if (
+        typed.correctAnswer !== undefined &&
+        (!typed.correctAnswer ||
+          !typed.options.some((option) => option.value === typed.correctAnswer))
+      ) {
+        return false;
+      }
+      return true;
     }
     case "multiple_choice": {
       const typed = spec as MultipleChoiceFieldSpec;
@@ -443,6 +501,19 @@ export function validateFieldSpec(spec: unknown): spec is FieldSpec {
         typed.maxSelections > typed.options.length
       ) {
         return false;
+      }
+      if (typed.correctAnswers !== undefined) {
+        if (!Array.isArray(typed.correctAnswers)) {
+          return false;
+        }
+        const optionValues = new Set(typed.options.map((option) => option.value));
+        const seen = new Set<string>();
+        for (const value of typed.correctAnswers) {
+          if (typeof value !== "string" || !optionValues.has(value) || seen.has(value)) {
+            return false;
+          }
+          seen.add(value);
+        }
       }
       return true;
     }
@@ -676,13 +747,16 @@ function normalizeConfig(config: unknown): FormStepConfig {
   const fields = Array.isArray(base.fields)
     ? base.fields.filter(validateFieldSpec).map(cloneFieldSpec)
     : [];
+  const normalizedFields = fields.map((field) =>
+    isChoiceField(field) ? normalizeChoiceFieldCorrectAnswers(field) : field
+  );
   const submitLabel =
     typeof base.submitLabel === "string" && base.submitLabel.trim().length > 0
       ? base.submitLabel
       : DEFAULT_SUBMIT_LABEL;
 
   return {
-    fields,
+    fields: normalizedFields,
     submitLabel,
     allowEmpty: Boolean(base.allowEmpty),
     initialValues: isStageAnswerLike(base.initialValues)
@@ -763,6 +837,8 @@ interface ChoiceFieldEditorProps {
   onRemoveOption: (optionIndex: number) => void;
   onMinSelectionsChange?: (value: number | undefined) => void;
   onMaxSelectionsChange?: (value: number | undefined) => void;
+  onSelectCorrectOption?: (optionValue: string) => void;
+  onToggleCorrectOption?: (optionValue: string) => void;
 }
 
 function ChoiceFieldEditor({
@@ -774,6 +850,8 @@ function ChoiceFieldEditor({
   onRemoveOption,
   onMinSelectionsChange,
   onMaxSelectionsChange,
+  onSelectCorrectOption,
+  onToggleCorrectOption,
 }: ChoiceFieldEditorProps): JSX.Element {
   const canRemoveOption = field.options.length > 1;
 
@@ -838,6 +916,31 @@ function ChoiceFieldEditor({
                 placeholder="Détail complémentaire affiché sous le choix"
               />
             </label>
+            {field.type === "single_choice" ? (
+              <label className="flex items-center gap-2 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                <input
+                  type="radio"
+                  name={`correct-${field.id}`}
+                  checked={field.correctAnswer === option.value}
+                  onChange={() => onSelectCorrectOption?.(option.value)}
+                  aria-label={`Bonne réponse : ${option.label}`}
+                  className="h-4 w-4 border-slate-300 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                />
+                Bonne réponse
+              </label>
+            ) : null}
+            {field.type === "multiple_choice" ? (
+              <label className="flex items-center gap-2 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                <input
+                  type="checkbox"
+                  checked={(field.correctAnswers ?? []).includes(option.value)}
+                  onChange={() => onToggleCorrectOption?.(option.value)}
+                  aria-label={`Bonne réponse possible : ${option.label}`}
+                  className="h-4 w-4 rounded border-slate-300 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
+                />
+                Marquer comme bonne réponse
+              </label>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -941,6 +1044,7 @@ export function FormStep({
     createInitialFormValues(typedConfig.fields, payloadAnswer ?? typedConfig.initialValues)
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [corrections, setCorrections] = useState<FormStepCorrections>({});
   const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -960,11 +1064,20 @@ export function FormStep({
       return createInitialFormValues(activeConfig.fields, source);
     });
     setErrors({});
+    setCorrections({});
   }, [activeConfig.fields, activeConfig.initialValues, payloadAnswer]);
 
   const handleValueChange = useCallback(
     (fieldId: string, value: FieldValue) => {
       setValues((prev) => ({ ...prev, [fieldId]: value }));
+      setCorrections((prev) => {
+        if (!prev[fieldId]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[fieldId];
+        return next;
+      });
     },
     []
   );
@@ -995,10 +1108,63 @@ export function FormStep({
       });
       if (Object.keys(filteredErrors).length > 0) {
         setErrors(filteredErrors);
+        setCorrections({});
         return;
       }
       setErrors({});
       const finalValues = sanitizeFormValues(activeConfig.fields, values);
+      const nextCorrections: FormStepCorrections = {};
+      activeConfig.fields.forEach((field) => {
+        if (!isChoiceField(field)) {
+          return;
+        }
+        if (field.type === "single_choice") {
+          const expected = field.correctAnswer;
+          if (!expected || !field.options.some((option) => option.value === expected)) {
+            return;
+          }
+          const selectedValue =
+            typeof finalValues[field.id] === "string"
+              ? (finalValues[field.id] as string)
+              : "";
+          const selectedValues = selectedValue ? [selectedValue] : [];
+          nextCorrections[field.id] = {
+            expectedValues: [expected],
+            selectedValues,
+            isCorrect: selectedValue === expected,
+          };
+          return;
+        }
+        const expectedValues = Array.isArray(field.correctAnswers)
+          ? field.correctAnswers.filter((value, index, array) => {
+              if (typeof value !== "string") {
+                return false;
+              }
+              if (array.indexOf(value) !== index) {
+                return false;
+              }
+              return field.options.some((option) => option.value === value);
+            })
+          : [];
+        if (expectedValues.length === 0) {
+          return;
+        }
+        const selectedValues = Array.isArray(finalValues[field.id])
+          ? (finalValues[field.id] as string[]).filter((value) =>
+              field.options.some((option) => option.value === value)
+            )
+          : [];
+        const expectedSet = new Set(expectedValues);
+        const isCorrect =
+          expectedValues.length === selectedValues.length &&
+          selectedValues.every((value) => expectedSet.has(value));
+        nextCorrections[field.id] = {
+          expectedValues,
+          selectedValues,
+          isCorrect,
+        };
+      });
+      setCorrections(nextCorrections);
       setValues(createInitialFormValues(activeConfig.fields, finalValues));
       effectiveOnAdvance(finalValues);
     },
@@ -1099,11 +1265,41 @@ export function FormStep({
         if (trimmed.length === 0) {
           return field;
         }
+        const previousValue = field.options[optionIndex]?.value;
+        const options = field.options.map((option, idx) =>
+          idx === optionIndex ? { ...option, value: trimmed } : option
+        );
+        if (field.type === "single_choice") {
+          const nextCorrect =
+            field.correctAnswer && field.correctAnswer === previousValue
+              ? trimmed
+              : field.correctAnswer;
+          return {
+            ...field,
+            options,
+            correctAnswer: nextCorrect,
+          };
+        }
+        if (field.type === "multiple_choice") {
+          const currentAnswers = field.correctAnswers ?? [];
+          const nextAnswers = currentAnswers.map((answer) =>
+            answer === previousValue ? trimmed : answer
+          );
+          const filtered = nextAnswers.filter((answer, idx, array) => {
+            if (typeof answer !== "string" || answer.length === 0) {
+              return false;
+            }
+            return array.indexOf(answer) === idx;
+          });
+          return {
+            ...field,
+            options,
+            correctAnswers: filtered.length > 0 ? filtered : undefined,
+          };
+        }
         return {
           ...field,
-          options: field.options.map((option, idx) =>
-            idx === optionIndex ? { ...option, value: trimmed } : option
-          ),
+          options,
         };
       });
     },
@@ -1168,6 +1364,51 @@ export function FormStep({
     [updateChoiceField]
   );
 
+  const handleSingleChoiceCorrectAnswerChange = useCallback(
+    (fieldIndex: number, optionValue: string) => {
+      updateChoiceField(fieldIndex, (field) => {
+        if (field.type !== "single_choice") {
+          return field;
+        }
+        if (!field.options.some((option) => option.value === optionValue)) {
+          return field;
+        }
+        return {
+          ...field,
+          correctAnswer: optionValue,
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
+  const handleMultipleChoiceCorrectAnswersToggle = useCallback(
+    (fieldIndex: number, optionValue: string) => {
+      updateChoiceField(fieldIndex, (field) => {
+        if (field.type !== "multiple_choice") {
+          return field;
+        }
+        if (!field.options.some((option) => option.value === optionValue)) {
+          return field;
+        }
+        const current = new Set(field.correctAnswers ?? []);
+        if (current.has(optionValue)) {
+          current.delete(optionValue);
+        } else {
+          current.add(optionValue);
+        }
+        const filtered = Array.from(current).filter((value, index, array) =>
+          field.options.some((option) => option.value === value) && array.indexOf(value) === index
+        );
+        return {
+          ...field,
+          correctAnswers: filtered.length > 0 ? filtered : undefined,
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
   const handleAddChoiceOption = useCallback(
     (fieldIndex: number) => {
       updateChoiceField(fieldIndex, (field) => {
@@ -1192,11 +1433,17 @@ export function FormStep({
         if (field.options.length <= 1) {
           return field;
         }
+        const removedValue = field.options[optionIndex]?.value;
         const options = field.options.filter((_, idx) => idx !== optionIndex);
         if (field.type === "single_choice") {
+          const nextCorrect =
+            field.correctAnswer && field.correctAnswer === removedValue
+              ? options.at(0)?.value
+              : field.correctAnswer;
           return {
             ...field,
             options,
+            correctAnswer: nextCorrect,
           };
         }
         const nextLength = options.length;
@@ -1208,11 +1455,18 @@ export function FormStep({
         if (typeof maxSelections === "number" && maxSelections > nextLength) {
           maxSelections = nextLength > 0 ? nextLength : undefined;
         }
+        const nextCorrectAnswers = (field.correctAnswers ?? []).filter(
+          (value, index, array) =>
+            value !== removedValue &&
+            options.some((option) => option.value === value) &&
+            array.indexOf(value) === index
+        );
         return {
           ...field,
           options,
           minSelections,
           maxSelections,
+          correctAnswers: nextCorrectAnswers.length > 0 ? nextCorrectAnswers : undefined,
         };
       });
     },
@@ -1489,6 +1743,7 @@ export function FormStep({
           values={values}
           onChange={handleValueChange}
           errors={errors}
+          corrections={isDesignerMode ? undefined : corrections}
         />
         <button
           type="submit"
@@ -1820,6 +2075,12 @@ export function FormStep({
                             onRemoveOption={(optionIndex) =>
                               handleRemoveChoiceOption(selectedFieldIndex, optionIndex)
                             }
+                            onSelectCorrectOption={(optionValue) =>
+                              handleSingleChoiceCorrectAnswerChange(
+                                selectedFieldIndex,
+                                optionValue
+                              )
+                            }
                           />
                         );
                       }
@@ -1846,6 +2107,12 @@ export function FormStep({
                             }
                             onMaxSelectionsChange={(value) =>
                               handleMultipleChoiceMaxSelectionsChange(selectedFieldIndex, value)
+                            }
+                            onToggleCorrectOption={(optionValue) =>
+                              handleMultipleChoiceCorrectAnswersToggle(
+                                selectedFieldIndex,
+                                optionValue
+                              )
                             }
                           />
                         );
