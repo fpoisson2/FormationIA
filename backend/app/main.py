@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 from collections import deque
+from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -141,6 +142,41 @@ PROMPT_EVALUATION_FORMAT = {
 }
 
 
+_GENERIC_CONFIG_JSON_SCHEMA_TEMPLATE: dict[str, Any] = {
+    "$defs": {
+        "configValue": {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "number"},
+                {"type": "integer"},
+                {"type": "boolean"},
+                {"type": "null"},
+                {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/configValue"},
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "patternProperties": {
+                        r".+": {"$ref": "#/$defs/configValue"},
+                    },
+                },
+            ]
+        }
+    },
+    "type": "object",
+    "additionalProperties": False,
+    "patternProperties": {
+        r".+": {"$ref": "#/$defs/configValue"},
+    },
+}
+
+
+def _config_schema() -> dict[str, Any]:
+    return deepcopy(_GENERIC_CONFIG_JSON_SCHEMA_TEMPLATE)
+
+
 COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -149,7 +185,7 @@ COMPOSITE_MODULE_JSON_SCHEMA: dict[str, Any] = {
         "id": {"type": "string"},
         "component": {"type": "string"},
         "slot": {"type": "string"},
-        "config": {"type": "object"},
+        "config": _config_schema(),
     },
 }
 
@@ -175,7 +211,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                     "properties": {
                         "id": {"type": "string"},
                         "component": {"type": "string"},
-                        "config": {"type": "object"},
+                        "config": _config_schema(),
                         "composite": {
                             "type": "object",
                             "additionalProperties": False,
@@ -232,9 +268,9 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                             "withBasePadding": {"type": "boolean"},
                             "withBaseContentSpacing": {"type": "boolean"},
                             "withBaseInnerGap": {"type": "boolean"},
-                            "actions": {"type": "object"},
-                            "headerChildren": {"type": "object"},
-                            "beforeHeader": {"type": "object"},
+                            "actions": _config_schema(),
+                            "headerChildren": _config_schema(),
+                            "beforeHeader": _config_schema(),
                         },
                     },
                     "card": {
@@ -295,9 +331,9 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                                     "withBasePadding": {"type": "boolean"},
                                     "withBaseContentSpacing": {"type": "boolean"},
                                     "withBaseInnerGap": {"type": "boolean"},
-                                    "actions": {"type": "object"},
-                                    "headerChildren": {"type": "object"},
-                                    "beforeHeader": {"type": "object"},
+                                    "actions": _config_schema(),
+                                    "headerChildren": _config_schema(),
+                                    "beforeHeader": _config_schema(),
                                 },
                             },
                             "card": {
@@ -332,7 +368,7 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
                                     "properties": {
                                         "id": {"type": "string"},
                                         "component": {"type": "string"},
-                                        "config": {"type": "object"},
+                                        "config": _config_schema(),
                                         "composite": {
                                             "type": "object",
                                             "additionalProperties": False,

@@ -44,6 +44,39 @@ export interface StepSequenceFunctionTool<
 
 type StepIdSource = Iterable<string> | undefined;
 
+const GENERIC_CONFIG_SCHEMA: JsonSchema = {
+  $defs: {
+    configValue: {
+      anyOf: [
+        { type: "string" },
+        { type: "number" },
+        { type: "integer" },
+        { type: "boolean" },
+        { type: "null" },
+        {
+          type: "array",
+          items: { $ref: "#/$defs/configValue" },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          patternProperties: {
+            ".+": { $ref: "#/$defs/configValue" },
+          },
+        },
+      ],
+    },
+  },
+  type: "object",
+  additionalProperties: false,
+  patternProperties: {
+    ".+": { $ref: "#/$defs/configValue" },
+  },
+};
+
+const configSchema = (): JsonSchema =>
+  JSON.parse(JSON.stringify(GENERIC_CONFIG_SCHEMA));
+
 function sanitizeId(value: string): string {
   return value
     .normalize("NFD")
@@ -640,7 +673,7 @@ const compositeModuleSchema: JsonSchema = {
     id: { type: "string" },
     component: { type: "string" },
     slot: { type: "string" },
-    config: { type: "object" },
+    config: configSchema(),
   },
 };
 
@@ -744,9 +777,9 @@ const layoutSchema: JsonSchema = {
     withBasePadding: { type: "boolean" },
     withBaseContentSpacing: { type: "boolean" },
     withBaseInnerGap: { type: "boolean" },
-    actions: { type: "object" },
-    headerChildren: { type: "object" },
-    beforeHeader: { type: "object" },
+    actions: configSchema(),
+    headerChildren: configSchema(),
+    beforeHeader: configSchema(),
   },
 };
 
@@ -799,7 +832,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
             properties: {
               id: { type: "string" },
               component: { type: "string" },
-              config: { type: "object" },
+              config: configSchema(),
               composite: {
                 type: "object",
                 additionalProperties: false,
@@ -846,7 +879,7 @@ const buildStepSequenceActivity: StepSequenceFunctionTool<
                     properties: {
                       id: { type: "string" },
                       component: { type: "string" },
-                      config: { type: "object" },
+                      config: configSchema(),
                       composite: {
                         type: "object",
                         additionalProperties: false,
