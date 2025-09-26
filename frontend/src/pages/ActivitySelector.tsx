@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
 } from "react";
@@ -17,6 +18,7 @@ import {
   type ProgressResponse,
   type ActivityGenerationResponse,
   type ActivityGenerationDetailsPayload,
+  type ActivityGenerationProgressEvent,
   type GenerateActivityPayload,
 } from "../api";
 import {
@@ -629,6 +631,14 @@ function ActivitySelector(): JSX.Element {
     useState<string | null>(null);
   const [generationReasoningSummary, setGenerationReasoningSummary] =
     useState<string | null>(null);
+  const generationControllerRef = useRef<AbortController | null>(null);
+  const [generationStatusMessage, setGenerationStatusMessage] =
+    useState<string | null>(null);
+  const [generationStepCount, setGenerationStepCount] = useState(0);
+  const [generationStepLabel, setGenerationStepLabel] =
+    useState<string | null>(null);
+  const [liveReasoningSummary, setLiveReasoningSummary] =
+    useState<string | null>(null);
   const [lastGeneratedActivityId, setLastGeneratedActivityId] =
     useState<string | null>(null);
   const location = useLocation();
@@ -706,6 +716,12 @@ function ActivitySelector(): JSX.Element {
       ? "text-sky-700 opacity-80"
       : "text-gray-400"
   }`;
+
+  useEffect(() => {
+    return () => {
+      generationControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!completedId && !disabledId) {
@@ -1241,6 +1257,10 @@ function ActivitySelector(): JSX.Element {
 
   const handleOpenGenerationModal = useCallback(() => {
     setGenerationError(null);
+    setGenerationStatusMessage(null);
+    setGenerationStepCount(0);
+    setGenerationStepLabel(null);
+    setLiveReasoningSummary(null);
     setIsGenerateModalOpen(true);
   }, []);
 
@@ -1255,6 +1275,10 @@ function ActivitySelector(): JSX.Element {
     setGenerationSuccessMessage(null);
     setGenerationReasoningSummary(null);
     setLastGeneratedActivityId(null);
+    setLiveReasoningSummary(null);
+    setGenerationStatusMessage(null);
+    setGenerationStepCount(0);
+    setGenerationStepLabel(null);
   }, []);
 
   const handleSubmitGeneration = useCallback(async () => {
@@ -1263,6 +1287,16 @@ function ActivitySelector(): JSX.Element {
     }
     setIsGeneratingActivity(true);
     setGenerationError(null);
+    setGenerationReasoningSummary(null);
+    setGenerationSuccessMessage(null);
+    setGenerationStatusMessage("Initialisation de la génération...");
+    setGenerationStepCount(0);
+    setGenerationStepLabel(null);
+    setLiveReasoningSummary(null);
+
+    generationControllerRef.current?.abort();
+    const controller = new AbortController();
+    generationControllerRef.current = controller;
 
     try {
       const details: ActivityGenerationDetailsPayload = {};
@@ -1290,9 +1324,33 @@ function ActivitySelector(): JSX.Element {
         existingActivityIds,
       };
 
+      const formatComponentLabel = (value: string | null | undefined) => {
+        if (!value) {
+          return null;
+        }
+        return value
+          .split(/[-_]/g)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      };
+
       const response: ActivityGenerationResponse = await admin.activities.generate(
         payload,
-        token
+        token,
+        {
+          signal: controller.signal,
+          onStatus: (message) => {
+            setGenerationStatusMessage(message);
+          },
+          onStep: (event: ActivityGenerationProgressEvent) => {
+            setGenerationStepCount(event.count ?? 0);
+            const label = event.highlight?.trim() || formatComponentLabel(event.component ?? null);
+            setGenerationStepLabel(label ?? null);
+          },
+          onReasoningSummary: (summary) => {
+            setLiveReasoningSummary(summary.trim());
+          },
+        }
       );
 
       if (
@@ -1325,7 +1383,14 @@ function ActivitySelector(): JSX.Element {
         deliverable: "",
         constraints: "",
       });
+      setLiveReasoningSummary(null);
+      setGenerationStatusMessage(null);
+      setGenerationStepCount(0);
+      setGenerationStepLabel(null);
     } catch (error) {
+      if ((error as DOMException).name === "AbortError") {
+        return;
+      }
       console.error("Erreur lors de la génération d'activité:", error);
       const detail = extractErrorMessage(error);
       setGenerationError(
@@ -1333,6 +1398,11 @@ function ActivitySelector(): JSX.Element {
       );
     } finally {
       setIsGeneratingActivity(false);
+      generationControllerRef.current = null;
+      setGenerationStatusMessage(null);
+      setGenerationStepCount(0);
+      setGenerationStepLabel(null);
+      setLiveReasoningSummary(null);
     }
   }, [
     existingActivityIds,
@@ -1842,6 +1912,25 @@ function ActivitySelector(): JSX.Element {
         {generationError ? (
           <div className="rounded-xl border border-red-200/80 bg-red-50/80 p-3 text-sm text-red-700">
             {generationError}
+          </div>
+        ) : null}
+        {isGeneratingActivity ? (
+          <div className="space-y-1 rounded-xl border border-sky-200/70 bg-sky-50/80 p-3 text-xs text-sky-900">
+            <p className="text-sm font-semibold text-sky-900">Génération en cours…</p>
+            {generationStatusMessage ? (
+              <p className="text-xs text-sky-900/80">{generationStatusMessage}</p>
+            ) : null}
+            {generationStepCount > 0 ? (
+              <p className="text-xs text-sky-900/70">
+                {generationStepCount} étape
+                {generationStepCount > 1 ? "s" : ""} générée
+                {generationStepCount > 1 ? "s" : ""}
+                {generationStepLabel ? ` – ${generationStepLabel}` : ""}
+              </p>
+            ) : null}
+            {liveReasoningSummary ? (
+              <p className="text-xs text-sky-900/70">{liveReasoningSummary}</p>
+            ) : null}
           </div>
         ) : null}
         <div className="grid gap-4">

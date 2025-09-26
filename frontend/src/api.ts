@@ -405,6 +405,20 @@ export interface ActivityGenerationResponse {
   reasoningSummary?: string | null;
 }
 
+export interface ActivityGenerationProgressEvent {
+  id?: string | null;
+  component?: string | null;
+  count: number;
+  highlight?: string | null;
+}
+
+export interface ActivityGenerationStreamOptions {
+  signal?: AbortSignal;
+  onStatus?: (message: string) => void;
+  onStep?: (event: ActivityGenerationProgressEvent) => void;
+  onReasoningSummary?: (summary: string) => void;
+}
+
 export const activities = {
   getConfig: async (): Promise<ActivityConfigResponse> =>
     fetchJson<ActivityConfigResponse>(`${API_BASE_URL}/activities-config`),
@@ -436,21 +450,194 @@ export const admin = {
       ),
     generate: async (
       payload: GenerateActivityPayload,
-      token?: string | null
-    ): Promise<ActivityGenerationResponse> =>
-      fetchJson<ActivityGenerationResponse>(
-        `${API_BASE_URL}/admin/activities/generate`,
-        withAdminCredentials(
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
+      token?: string | null,
+      options?: ActivityGenerationStreamOptions
+    ): Promise<ActivityGenerationResponse> => {
+      const requestInit = withAdminCredentials(
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
           },
-          token
-        )
-      ),
+          body: JSON.stringify(payload),
+        },
+        token
+      );
+
+      const response = await fetch(
+        `${API_BASE_URL}/admin/activities/generate`,
+        {
+          ...requestInit,
+          signal: options?.signal,
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Erreur serveur (${response.status}).`);
+      }
+
+      if (!response.body) {
+        throw new Error("Flux de réponse indisponible.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalPayload: ActivityGenerationResponse | null = null;
+      let streamError: Error | null = null;
+
+      const emitStep = (data: unknown) => {
+        if (!options?.onStep || typeof data !== "object" || data === null) {
+          return;
+        }
+        const stepData = data as Record<string, unknown>;
+        const rawCount = stepData.count;
+        const parsedCount =
+          typeof rawCount === "number"
+            ? rawCount
+            : Number.parseInt(String(rawCount ?? ""), 10);
+        const count = Number.isFinite(parsedCount) ? parsedCount : 0;
+        const component =
+          typeof stepData.component === "string" && stepData.component.trim().length > 0
+            ? stepData.component
+            : null;
+        const highlight =
+          typeof stepData.highlight === "string" && stepData.highlight.trim().length > 0
+            ? stepData.highlight.trim()
+            : null;
+        const id =
+          typeof stepData.id === "string" && stepData.id.trim().length > 0
+            ? stepData.id.trim()
+            : null;
+        options.onStep({ id, component, count, highlight });
+      };
+
+      const dispatchEvent = (eventName: string, data: unknown) => {
+        switch (eventName) {
+          case "status": {
+            if (
+              options?.onStatus &&
+              typeof data === "object" &&
+              data !== null &&
+              typeof (data as Record<string, unknown>).message === "string"
+            ) {
+              const message = ((data as Record<string, unknown>).message as string).trim();
+              if (message) {
+                options.onStatus(message);
+              }
+            }
+            break;
+          }
+          case "step":
+            emitStep(data);
+            break;
+          case "reasoning_summary":
+            if (
+              options?.onReasoningSummary &&
+              typeof data === "object" &&
+              data !== null &&
+              typeof (data as Record<string, unknown>).summary === "string"
+            ) {
+              const summary = ((data as Record<string, unknown>).summary as string).trim();
+              if (summary) {
+                options.onReasoningSummary(summary);
+              }
+            }
+            break;
+          case "complete":
+            if (data && typeof data === "object") {
+              finalPayload = data as ActivityGenerationResponse;
+            }
+            break;
+          case "error": {
+            const message =
+              typeof data === "object" &&
+              data !== null &&
+              typeof (data as Record<string, unknown>).message === "string"
+                ? ((data as Record<string, unknown>).message as string)
+                : "La génération de l'activité a échoué.";
+            streamError = new Error(message);
+            break;
+          }
+          default:
+            break;
+        }
+      };
+
+      const processChunk = (chunk: string) => {
+        const trimmed = chunk.trim();
+        if (!trimmed) {
+          return;
+        }
+        let eventName = "message";
+        const dataLines: string[] = [];
+        for (const line of trimmed.split("\n")) {
+          if (line.startsWith("event:")) {
+            eventName = line.replace("event:", "", 1).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.replace("data:", "", 1).trim());
+          }
+        }
+
+        let parsed: unknown = null;
+        if (dataLines.length > 0) {
+          const dataStr = dataLines.join("");
+          if (dataStr && dataStr !== "null") {
+            try {
+              parsed = JSON.parse(dataStr);
+            } catch {
+              parsed = null;
+            }
+          }
+        }
+
+        dispatchEvent(eventName, parsed);
+      };
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            if (buffer.trim()) {
+              processChunk(buffer);
+            }
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary !== -1) {
+            const chunk = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            processChunk(chunk);
+            if (streamError) {
+              break;
+            }
+            boundary = buffer.indexOf("\n\n");
+          }
+          if (streamError) {
+            break;
+          }
+        }
+      } finally {
+        if (streamError) {
+          await reader.cancel().catch(() => {
+            /* noop */
+          });
+        }
+      }
+
+      if (streamError) {
+        throw streamError;
+      }
+
+      if (!finalPayload) {
+        throw new Error("La génération n'a pas retourné de résultat.");
+      }
+
+      return finalPayload;
+    },
   },
   auth: {
     login: async (payload: AdminLoginPayload): Promise<AdminAuthResponse> =>

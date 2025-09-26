@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,33 @@ from backend.app.main import (
     _require_admin_user,
     app,
 )
+
+
+def _parse_sse_events(raw: str) -> list[tuple[str, Any]]:
+    events: list[tuple[str, Any]] = []
+    if not raw:
+        return events
+
+    chunks = raw.split("\n\n")
+    for chunk in chunks:
+        content = chunk.strip()
+        if not content:
+            continue
+        event_name = "message"
+        data_lines: list[str] = []
+        for line in content.splitlines():
+            if line.startswith("event:"):
+                event_name = line.replace("event:", "", 1).strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.replace("data:", "", 1).strip())
+
+        data: Any = None
+        if data_lines:
+            data_str = "".join(data_lines)
+            if data_str and data_str != "null":
+                data = json.loads(data_str)
+        events.append((event_name, data))
+    return events
 
 
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
@@ -235,15 +263,20 @@ def test_admin_generate_activity_includes_tool_definition(monkeypatch) -> None:
             response = client.post("/api/admin/activities/generate", json=payload)
             assert response.status_code == 200, response.text
 
-            data = response.json()
-            assert data["toolCall"]["definition"] == STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
+            events = _parse_sse_events(response.text)
+            complete_payload = next(
+                (data for event, data in events if event == "complete"), None
+            )
+            assert complete_payload is not None, "L'événement de complétion est attendu"
+
+            assert (
+                complete_payload["toolCall"]["definition"]
+                == STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION
+            )
             assert len(captured_requests) == 3
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
-                {
-                    "type": "web_search",
-                    "filters": {"allowed_domains": ["youtube.com", "youtu.be"]},
-                },
+                {"type": "web_search"},
             ]
             for request in captured_requests:
                 assert request["tools"] == expected_tools
@@ -347,8 +380,13 @@ def test_admin_generate_activity_backfills_missing_config(monkeypatch) -> None:
             response = client.post("/api/admin/activities/generate", json=payload)
             assert response.status_code == 200, response.text
 
-            data = response.json()
-            steps = data["toolCall"]["arguments"]["steps"]
+            events = _parse_sse_events(response.text)
+            complete_payload = next(
+                (data for event, data in events if event == "complete"), None
+            )
+            assert complete_payload is not None
+
+            steps = complete_payload["toolCall"]["arguments"]["steps"]
             assert steps == [
                 {
                     "id": "intro",
@@ -453,8 +491,13 @@ def test_admin_generate_activity_supports_snake_case_step_id(monkeypatch) -> Non
             response = client.post("/api/admin/activities/generate", json=payload)
             assert response.status_code == 200, response.text
 
-            data = response.json()
-            steps = data["toolCall"]["arguments"]["steps"]
+            events = _parse_sse_events(response.text)
+            complete_payload = next(
+                (data for event, data in events if event == "complete"), None
+            )
+            assert complete_payload is not None
+
+            steps = complete_payload["toolCall"]["arguments"]["steps"]
             assert steps == [
                 {
                     "id": "intro",
