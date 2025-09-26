@@ -668,7 +668,7 @@ interface CreateCompositeStepInput extends ToolBaseInput {
 const compositeModuleSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["component"],
+  required: ["id", "component"],
   properties: {
     id: { type: "string" },
     component: { type: "string" },
