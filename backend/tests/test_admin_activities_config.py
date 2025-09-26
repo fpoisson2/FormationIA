@@ -53,12 +53,21 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
             assert get_response.status_code == 200
             returned = get_response.json()
             assert returned["activities"][0]["stepSequence"] == payload["activities"][0]["stepSequence"]
+            assert (
+                returned["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
 
             public_response = client.get("/api/activities-config")
             assert public_response.status_code == 200
+            public_payload = public_response.json()
             assert (
-                public_response.json()["activities"][0]["stepSequence"]
+                public_payload["activities"][0]["stepSequence"]
                 == payload["activities"][0]["stepSequence"]
+            )
+            assert (
+                public_payload["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
     finally:
         app.dependency_overrides.clear()
@@ -68,6 +77,10 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
     assert (
         persisted["activities"][0]["stepSequence"]
         == payload["activities"][0]["stepSequence"]
+    )
+    assert (
+        persisted["activityGeneration"]["developerMessage"]
+        == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
     )
 
 
@@ -120,18 +133,30 @@ def test_admin_can_remove_all_activities(tmp_path, monkeypatch) -> None:
             admin_payload = admin_response.json()
             assert admin_payload["activities"] == []
             assert admin_payload.get("usesDefaultFallback") is False
+            assert (
+                admin_payload["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
 
             public_response = client.get("/api/activities-config")
             assert public_response.status_code == 200
             public_payload = public_response.json()
             assert public_payload["activities"] == []
             assert public_payload.get("usesDefaultFallback") is False
+            assert (
+                public_payload["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
     finally:
         app.dependency_overrides.clear()
 
     assert config_path.exists(), "Une configuration vide doit être persistée"
     persisted = json.loads(config_path.read_text(encoding="utf-8"))
     assert persisted["activities"] == []
+    assert (
+        persisted["activityGeneration"]["developerMessage"]
+        == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+    )
 
 
 def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch) -> None:
@@ -275,10 +300,21 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             for request in captured_requests:
                 assert request["tools"] == expected_tools
 
+            first_request = captured_requests[0]
+            assert first_request["input"][1]["role"] == "developer"
+            assert (
+                first_request["input"][1]["content"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
+
             assert config_path.exists()
             persisted = json.loads(config_path.read_text(encoding="utf-8"))
             saved_activity = persisted["activities"][0]
             assert saved_activity == activity
+            assert (
+                persisted["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
     finally:
         app.dependency_overrides.clear()
 
@@ -414,10 +450,21 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             for request in captured_requests:
                 assert request["tools"] == expected_tools
 
+            first_request = captured_requests[0]
+            assert first_request["input"][1]["role"] == "developer"
+            assert (
+                first_request["input"][1]["content"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
+
             assert config_path.exists()
             persisted = json.loads(config_path.read_text(encoding="utf-8"))
             saved_activity = persisted["activities"][0]
             assert saved_activity == activity
+            assert (
+                persisted["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
     finally:
         app.dependency_overrides.clear()
 
@@ -542,9 +589,246 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             for request in captured_requests:
                 assert request["tools"] == expected_tools
 
+            first_request = captured_requests[0]
+            assert first_request["input"][1]["role"] == "developer"
+            assert (
+                first_request["input"][1]["content"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
+
             assert config_path.exists()
             persisted = json.loads(config_path.read_text(encoding="utf-8"))
             saved_activity = persisted["activities"][0]
             assert saved_activity == activity
+            assert (
+                persisted["activityGeneration"]["developerMessage"]
+                == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypatch) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    custom_message = "Consignes personnalisées pour la génération."
+
+    try:
+        with TestClient(app) as client:
+            save_response = client.post(
+                "/api/admin/activities",
+                json={
+                    "activities": [],
+                    "activityGeneration": {"developerMessage": custom_message},
+                },
+            )
+            assert save_response.status_code == 200, save_response.text
+
+        captured_requests: list[dict[str, object]] = []
+
+        class DummyResponse:
+            def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+                self.output = output
+
+        class FakeResponsesClient:
+            def __init__(self) -> None:
+                self._responses = [
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
+                                "name": "create_step_sequence_activity",
+                                "call_id": "call_1",
+                                "arguments": {"activityId": "atelier-intro"},
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
+                                "name": "create_rich_content_step",
+                                "call_id": "call_2",
+                                "arguments": {
+                                    "stepId": "intro",
+                                    "title": "Introduction",
+                                    "body": "Bienvenue",
+                                    "media": [],
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
+                                "name": "build_step_sequence_activity",
+                                "call_id": "call_3",
+                                "arguments": {
+                                    "activityId": "atelier-intro",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "component": "rich-content",
+                                            "config": None,
+                                            "composite": None,
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    ),
+                ]
+                self._index = 0
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                captured_requests.append(kwargs)
+                response = self._responses[self._index]
+                self._index += 1
+                return response
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.responses = FakeResponsesClient()
+
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        monkeypatch.setattr(
+            "backend.app.main._launch_activity_generation_job",
+            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        )
+        main._ACTIVITY_GENERATION_JOBS.clear()
+
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Introduction"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+
+        first_request = captured_requests[0]
+        assert first_request["input"][1]["role"] == "developer"
+        assert first_request["input"][1]["content"] == custom_message
+
+        persisted = json.loads(config_path.read_text(encoding="utf-8"))
+        assert (
+            persisted["activityGeneration"]["developerMessage"] == custom_message
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_admin_generate_activity_allows_request_developer_message_override(
+    tmp_path, monkeypatch
+) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    saved_message = "Consignes par défaut sauvegardées."
+    override_message = "Consignes envoyées avec la requête."
+
+    try:
+        with TestClient(app) as client:
+            save_response = client.post(
+                "/api/admin/activities",
+                json={
+                    "activities": [],
+                    "activityGeneration": {"developerMessage": saved_message},
+                },
+            )
+            assert save_response.status_code == 200, save_response.text
+
+        captured_requests: list[dict[str, object]] = []
+
+        class DummyResponse:
+            def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+                self.output = output
+
+        class FakeResponsesClient:
+            def __init__(self) -> None:
+                self._responses = [
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
+                                "name": "create_step_sequence_activity",
+                                "call_id": "call_1",
+                                "arguments": {"activityId": "atelier-intro"},
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
+                                "name": "build_step_sequence_activity",
+                                "call_id": "call_2",
+                                "arguments": {
+                                    "activityId": "atelier-intro",
+                                    "steps": [],
+                                },
+                            }
+                        ]
+                    ),
+                ]
+                self._index = 0
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                captured_requests.append(kwargs)
+                response = self._responses[self._index]
+                self._index += 1
+                return response
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.responses = FakeResponsesClient()
+
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        monkeypatch.setattr(
+            "backend.app.main._launch_activity_generation_job",
+            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        )
+        main._ACTIVITY_GENERATION_JOBS.clear()
+
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "developerMessage": override_message,
+                "details": {"theme": "Introduction"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+
+        first_request = captured_requests[0]
+        assert first_request["input"][1]["role"] == "developer"
+        assert first_request["input"][1]["content"] == override_message
+
+        persisted = json.loads(config_path.read_text(encoding="utf-8"))
+        assert (
+            persisted["activityGeneration"]["developerMessage"] == saved_message
+        )
     finally:
         app.dependency_overrides.clear()

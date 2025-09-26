@@ -362,9 +362,14 @@ export interface ActivitySelectorHeaderConfig {
   badge?: string;
 }
 
+export interface ActivityGenerationAdminConfig {
+  developerMessage: string;
+}
+
 export interface ActivityConfig {
   activities: any[];
   activitySelectorHeader?: ActivitySelectorHeaderConfig;
+  activityGeneration?: ActivityGenerationAdminConfig;
 }
 
 export interface ActivityConfigResponse extends ActivityConfig {
@@ -390,6 +395,7 @@ export interface GenerateActivityPayload {
   thinking: ThinkingChoice;
   details: ActivityGenerationDetailsPayload;
   existingActivityIds?: string[];
+  developerMessage?: string;
 }
 
 

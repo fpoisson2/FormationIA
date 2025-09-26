@@ -155,6 +155,20 @@ const ACTIVITY_GENERATION_FIELDS: Array<{
   },
 ];
 
+const DEFAULT_GENERATION_DEVELOPER_MESSAGE = [
+  "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente.",
+  "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète.",
+  "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header avec des formulations concises, inclusives et professionnelles.",
+  "",
+  "Exigences de conception :",
+  "- Génère 3 à 5 étapes maximum en privilégiant la progression pédagogique (accroche, exploration guidée, consolidation).",
+  "- Utilise uniquement les composants disponibles : rich-content, form, video, simulation-chat, info-cards, prompt-evaluation, ai-comparison, clarity-map, clarity-prompt, explorateur-world ou composite.",
+  "- Propose des identifiants d'étape courts en minuscules séparés par des tirets.",
+  "- Les formulaires doivent comporter des consignes explicites et des contraintes adaptées (nombre de mots, choix, etc.).",
+  "- Complète la carte d'activité (titre, description, highlights, CTA) et le header avec des textes synthétiques.",
+  "- Si aucun chemin spécifique n'est requis, oriente le CTA vers /activites/{activityId}.",
+].join("\n");
+
 function generateUniqueId(prefix: string): string {
   try {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -615,6 +629,9 @@ function ActivitySelector(): JSX.Element {
       deliverable: "",
       constraints: "",
     });
+  const [generationDeveloperMessage, setGenerationDeveloperMessage] = useState<string>(
+    DEFAULT_GENERATION_DEVELOPER_MESSAGE
+  );
   const [generationModel, setGenerationModel] = useState<ModelChoice>(
     DEFAULT_GENERATION_MODEL
   );
@@ -834,6 +851,15 @@ function ActivitySelector(): JSX.Element {
       );
       const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
       setHeaderOverrides(savedHeader ?? {});
+      const savedDeveloperMessage =
+        typeof response.activityGeneration?.developerMessage === "string"
+          ? response.activityGeneration.developerMessage
+          : undefined;
+      if (savedDeveloperMessage && savedDeveloperMessage.trim().length > 0) {
+        setGenerationDeveloperMessage(savedDeveloperMessage);
+      } else {
+        setGenerationDeveloperMessage(DEFAULT_GENERATION_DEVELOPER_MESSAGE);
+      }
     } catch (error) {
       console.warn(
         "Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut",
@@ -841,6 +867,7 @@ function ActivitySelector(): JSX.Element {
       );
       setEditableActivities(buildEditableActivities());
       setHeaderOverrides({});
+      setGenerationDeveloperMessage(DEFAULT_GENERATION_DEVELOPER_MESSAGE);
     } finally {
       setIsLoading(false);
       loadConfigMutexRef.current = false;
@@ -1407,13 +1434,18 @@ function ActivitySelector(): JSX.Element {
         ...headerOverrides,
       };
 
+      const developerMessage =
+        generationDeveloperMessage.trim() || DEFAULT_GENERATION_DEVELOPER_MESSAGE;
+
       await admin.activities.save(
         {
           activities: serializedActivities,
           activitySelectorHeader: headerConfig,
+          activityGeneration: { developerMessage },
         },
         token
       );
+      setGenerationDeveloperMessage(developerMessage);
       setEditMode(false);
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
@@ -1505,12 +1537,16 @@ function ActivitySelector(): JSX.Element {
         details.constraints = trimmedGenerationForm.constraints;
       }
 
+      const developerMessage =
+        generationDeveloperMessage.trim() || DEFAULT_GENERATION_DEVELOPER_MESSAGE;
+
       const payload: GenerateActivityPayload = {
         model: generationModel,
         verbosity: generationVerbosity,
         thinking: generationThinking,
         details,
         existingActivityIds,
+        developerMessage,
       };
 
       const job = await admin.activities.generate(payload, token, {
@@ -1573,6 +1609,7 @@ function ActivitySelector(): JSX.Element {
     generationModel,
     generationThinking,
     generationVerbosity,
+    generationDeveloperMessage,
     isGeneratingActivity,
     trimmedGenerationForm,
     token,
@@ -1637,20 +1674,44 @@ function ActivitySelector(): JSX.Element {
       beforeHeader={
         <>
           {isEditMode && (
-            <div className="animate-section rounded-3xl border border-orange-200/80 bg-orange-50/90 p-6 text-orange-900 shadow-sm backdrop-blur">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-orange-700/80">
-                    Mode édition activé
-                  </span>
-                  {isLoading && <span className="text-xs text-orange-600">Chargement de la configuration...</span>}
-                  {!isLoading && <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse"></span>}
+            <>
+              <div className="animate-section rounded-3xl border border-orange-200/80 bg-orange-50/90 p-6 text-orange-900 shadow-sm backdrop-blur">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-orange-700/80">
+                      Mode édition activé
+                    </span>
+                    {isLoading && <span className="text-xs text-orange-600">Chargement de la configuration...</span>}
+                    {!isLoading && <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse"></span>}
+                  </div>
+                  <p className="text-sm leading-relaxed text-orange-800">
+                    Vous pouvez maintenant modifier les textes, réorganiser les activités par glisser-déposer ou avec les flèches, ajouter ou supprimer des points clés et retirer des activités de la sélection.
+                  </p>
                 </div>
-                <p className="text-sm leading-relaxed text-orange-800">
-                  Vous pouvez maintenant modifier les textes, réorganiser les activités par glisser-déposer ou avec les flèches, ajouter ou supprimer des points clés et retirer des activités de la sélection.
-                </p>
               </div>
-            </div>
+              <div className="animate-section rounded-3xl border border-orange-200/80 bg-orange-50/80 p-6 text-orange-900 shadow-sm backdrop-blur">
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+                      Brief de conception pour la génération IA
+                    </h3>
+                    <p className="text-xs text-orange-800">
+                      Ajustez les consignes envoyées au modèle avant chaque génération. Le message est sauvegardé avec la configuration et appliqué à toutes les futures activités générées.
+                    </p>
+                  </div>
+                  <textarea
+                    value={generationDeveloperMessage}
+                    onChange={(event) => setGenerationDeveloperMessage(event.target.value)}
+                    rows={8}
+                    maxLength={6000}
+                    className="w-full resize-y rounded-2xl border border-orange-200/80 bg-white/90 p-3 text-sm leading-relaxed text-orange-900 shadow-inner focus:border-orange-400 focus:outline-none focus:ring-0"
+                  />
+                  <p className="text-xs text-orange-700/80">
+                    Ce texte est utilisé comme message développeur pour guider l'IA : il doit rester précis, professionnel et cohérent avec vos attentes.
+                  </p>
+                </div>
+              </div>
+            </>
           )}
           {completedActivity ? (
             <div className="animate-section flex flex-col gap-4 rounded-3xl border border-green-200/80 bg-green-50/90 p-6 text-green-900 shadow-sm backdrop-blur">
