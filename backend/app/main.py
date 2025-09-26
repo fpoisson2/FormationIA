@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import os
 import secrets
 from collections import deque
@@ -69,6 +70,7 @@ DEFAULT_PLAN_THINKING = "medium"
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 
 
+
 def _resolve_summary_heartbeat_interval() -> float:
     raw_value = os.getenv("SUMMARY_HEARTBEAT_INTERVAL")
     if raw_value is None:
@@ -82,6 +84,7 @@ def _resolve_summary_heartbeat_interval() -> float:
 
 SUMMARY_HEARTBEAT_INTERVAL = _resolve_summary_heartbeat_interval()
 
+logger = logging.getLogger(__nam__)
 
 def _resolve_activities_config_path() -> Path:
     raw_path = os.getenv("ACTIVITIES_CONFIG_PATH")
@@ -2505,6 +2508,13 @@ def admin_generate_activity(
     ]
     reasoning_summary: str | None = None
     cached_steps: dict[str, StepDefinition] = {}
+    tools = [
+        *STEP_SEQUENCE_TOOL_DEFINITIONS,
+        {
+            "type": "web_search",
+            "filters": {"allowed_domains": ["youtube.com", "youtu.be"]},
+        },
+    ]
 
     def _remember_step(result: Any) -> None:
         if not isinstance(result, dict):
@@ -2521,7 +2531,7 @@ def admin_generate_activity(
             response = client.responses.create(
                 model=model,
                 input=conversation,
-                tools=STEP_SEQUENCE_TOOL_DEFINITIONS,
+                tools=tools,
                 parallel_tool_calls=False,
                 text={"verbosity": payload.verbosity},
                 reasoning={"effort": payload.thinking, "summary": "auto"},
@@ -2534,9 +2544,19 @@ def admin_generate_activity(
         if not output_items:
             continue
 
-        conversation += list(output_items)
-
+        filtered_items: list[Any] = []
         for item in output_items:
+            item_type = getattr(item, "type", None) or (
+                item.get("type") if isinstance(item, dict) else None
+            )
+            if item_type == "web_search_call":
+                logger.debug("Ignoring web_search_call output: %r", item)
+                continue
+            filtered_items.append(item)
+
+        conversation += filtered_items
+
+        for item in filtered_items:
             item_type = getattr(item, "type", None) or (
                 item.get("type") if isinstance(item, dict) else None
             )

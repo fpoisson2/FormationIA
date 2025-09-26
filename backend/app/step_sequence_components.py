@@ -362,6 +362,21 @@ GUIDED_FIELD_SCHEMA: dict[str, Any] = _strict_object_schema(
 )
 
 
+SIMULATION_CHAT_STAGE_SCHEMA: dict[str, Any] = _strict_object_schema(
+    {
+        "prompt": {"type": "string"},
+        "fields": {
+            "type": "array",
+            "minItems": 1,
+            "items": GUIDED_FIELD_SCHEMA,
+        },
+        "allowEmpty": _nullable_schema({"type": "boolean"}),
+        "submitLabel": _nullable_schema({"type": "string"}),
+    },
+    required=("prompt", "fields", "allowEmpty", "submitLabel"),
+)
+
+
 def create_form_step(
     *,
     step_id: str | None = None,
@@ -1186,7 +1201,12 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "name": "create_simulation_chat_step",
-        "description": "Configure une simulation de chat guidée par étapes.",
+        "description": (
+            "Configure une simulation de chat guidée par plusieurs manches : "
+            "chaque manche propose un prompt contextualisé, les champs à "
+            "renseigner ainsi que les réponses prédéfinies attendues pour "
+            "conclure l'échange."
+        ),
         "strict": True,
         "parameters": _strict_object_schema(
             {
@@ -1195,12 +1215,11 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "helpText": {"type": "string"},
                 "missionId": _nullable_schema({"type": "string"}),
                 "roles": _nullable_schema(_any_object_schema()),
-                "stages": _nullable_schema(
-                    {
-                        "type": "array",
-                        "items": _any_object_schema(),
-                    }
-                ),
+                "stages": {
+                    "type": "array",
+                    "minItems": 3,
+                    "items": SIMULATION_CHAT_STAGE_SCHEMA,
+                },
             }
         ),
     },
