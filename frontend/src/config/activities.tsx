@@ -14,13 +14,13 @@ import { useAdminAuth } from "../providers/AdminAuthProvider";
 import ClarityPath from "../pages/ClarityPath";
 import ClarteDabord from "../pages/ClarteDabord";
 import PromptDojo from "../pages/PromptDojo";
+import { StepSequenceActivity } from "../modules/step-sequence/StepSequenceActivity";
+import { createDefaultExplorateurWorldConfig } from "../modules/step-sequence/modules/explorateur-world";
 import {
-  StepSequenceActivity,
-  createDefaultExplorateurWorldConfig,
   isCompositeStepDefinition,
   resolveStepComponentKey,
   type StepDefinition,
-} from "../modules/step-sequence";
+} from "../modules/step-sequence/types";
 import type { ModelConfig } from "../config";
 const WORKSHOP_DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
 

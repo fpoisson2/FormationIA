@@ -16,7 +16,7 @@ import {
   type VariantRequestParameters,
 } from "../runComparisonRequests";
 
-interface WorkshopComparisonStepConfig {
+export interface WorkshopComparisonStepConfig {
   contextStepId: string;
   defaultConfigA?: ModelConfig;
   defaultConfigB?: ModelConfig;

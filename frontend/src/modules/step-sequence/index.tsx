@@ -50,6 +50,7 @@ export {
 };
 
 export * from "./modules";
+export * from "./tools";
 
 export { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
 export type { CompositeStepConfig, CompositeStepModuleDefinition } from "./types";

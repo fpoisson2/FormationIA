@@ -13,7 +13,7 @@ import { useStepSequence } from "../..";
 import type { WorkshopComparisonStepState } from "./WorkshopComparisonStep";
 import type { WorkshopContextStepState } from "./WorkshopContextStep";
 
-interface WorkshopSynthesisStepConfig {
+export interface WorkshopSynthesisStepConfig {
   contextStepId: string;
   comparisonStepId: string;
 }
