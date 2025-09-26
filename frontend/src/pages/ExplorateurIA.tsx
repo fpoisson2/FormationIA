@@ -25,6 +25,30 @@ import {
 } from "../modules/step-sequence";
 import { isCompositeStepDefinition } from "../modules/step-sequence/types";
 import { createExplorateurExport } from "./explorateurIA/export";
+import { classNames } from "./explorateurIA/utils";
+import {
+  cloneQuarterStepMap,
+  cloneStepConfig,
+  cloneStepDefinition,
+  ensureStepHasQuarterPrefix,
+  sanitizeSteps,
+} from "./explorateurIA/configUtils";
+import {
+  cloneQuarter,
+  createDefaultQuarterDesignerSteps,
+  createDefaultQuarterDesignerStepMap,
+  createNewQuarterTemplate,
+  createSequenceStepFromTemplate,
+  extractQuarterStepsFromDesignerMap,
+  getDesignerStepMeta,
+  isQuarterDesignerMetaType,
+  resolveDesignerStepType,
+  sanitizeQuarterDesignerSteps,
+  syncDesignerStepWithQuarter,
+  type QuarterDesignerStepLibraryEntry,
+  type QuarterDesignerStepMap,
+  QUARTER_DESIGNER_STEP_LIBRARY,
+} from "./explorateurIA/designerUtils";
 import {
   createInitialProgress,
   updateClarteProgress,
@@ -69,6 +93,13 @@ import {
   createArrivalEffect,
   type ArrivalEffect,
 } from "./explorateurIA/audio/arrivalEffect";
+import { Modal } from "./explorateurIA/Modal";
+import {
+  TERRAIN_THEME_ORDER,
+  TERRAIN_THEMES,
+  isTerrainThemeId,
+  type TerrainThemeId,
+} from "./explorateurIA/terrainConfig";
 
 // ---
 // "Explorateur IA" — Frontend React (module web auto-portant)
@@ -81,10 +112,6 @@ import {
 type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
-
-const DEFAULT_QUARTER_MAP = new Map(
-  DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => [quarter.id, quarter])
-);
 
 const KNOWN_QUARTER_IDS = new Set<QuarterId>(
   Array.from(DEFAULT_QUARTER_IDS) as QuarterId[]
@@ -2447,68 +2474,6 @@ export interface ExplorateurIAConfig {
   quarters: ExplorateurIAQuarterConfig[];
 }
 
-function cloneStepConfig<T>(value: T): T {
-  if (value === null || value === undefined) {
-    return value;
-  }
-  if (typeof structuredClone === "function") {
-    return structuredClone(value);
-  }
-  try {
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.warn("[ExplorateurIA] Unable to clone step configuration", error);
-    }
-    return value;
-  }
-}
-
-function cloneStepDefinition(step: StepDefinition): StepDefinition {
-  if (isCompositeStepDefinition(step)) {
-    return {
-      id: step.id,
-      component: step.component,
-      config:
-        step.config === undefined ? undefined : cloneStepConfig(step.config),
-      composite: cloneStepConfig(step.composite),
-    } satisfies StepDefinition;
-  }
-  return {
-    id: step.id,
-    component: step.component,
-    config:
-      step.config === undefined ? undefined : cloneStepConfig(step.config),
-  } satisfies StepDefinition;
-}
-
-function cloneQuarterStepMap(map: QuarterSteps): QuarterSteps {
-  const result: Partial<QuarterSteps> = {};
-  for (const [quarterId, steps] of Object.entries(map) as Array<[
-    QuarterId,
-    StepDefinition[]
-  ]>) {
-    result[quarterId] = steps.map(cloneStepDefinition);
-  }
-  return result as QuarterSteps;
-}
-
-function ensureStepHasQuarterPrefix(
-  stepId: string,
-  quarterId: QuarterId
-): string {
-  if (!stepId) {
-    return `${quarterId}:step-1`;
-  }
-  const trimmed = stepId.trim();
-  if (trimmed.startsWith(`${quarterId}:`)) {
-    return trimmed;
-  }
-  const sanitized = trimmed.replace(/\s+/g, "-");
-  return `${quarterId}:${sanitized}`;
-}
-
 function sanitizeTerrainConfig(
   value: unknown
 ): ExplorateurIATerrainConfig {
@@ -2531,266 +2496,11 @@ function sanitizeTerrainConfig(
   return { themeId, seed } satisfies ExplorateurIATerrainConfig;
 }
 
-function sanitizeSteps(
-  value: unknown,
-  fallback?: StepDefinition[]
-): StepDefinition[] {
-  const source = Array.isArray(value)
-    ? value
-    : Array.isArray(fallback)
-    ? fallback
-    : [];
-  const steps: StepDefinition[] = [];
-  for (const item of source) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const candidate = item as Partial<StepDefinition> & {
-      id?: unknown;
-      component?: unknown;
-      config?: unknown;
-    };
-    if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) {
-      continue;
-    }
-    if (
-      typeof candidate.component !== "string" ||
-      candidate.component.trim().length === 0
-    ) {
-      continue;
-    }
-    steps.push({
-      id: candidate.id,
-      component: candidate.component,
-      config:
-        candidate.config === undefined
-          ? undefined
-          : cloneStepConfig(candidate.config),
-    });
-  }
-  return steps;
-}
-
 function getDefaultExplorateurSteps(): StepDefinition[] {
   return flattenQuarterSteps(
     WORLD1_QUARTER_STEPS,
     DEFAULT_DERIVED_QUARTERS.quarterOrder
   ).map(cloneStepDefinition);
-}
-
-type QuarterDesignerStepMap = Record<QuarterId, StepDefinition[]>;
-
-function ensureDesignerStepId(
-  quarterId: QuarterId,
-  step: StepDefinition,
-  index: number
-): StepDefinition {
-  const id =
-    typeof step.id === "string" && step.id.trim().length > 0
-      ? ensureStepHasQuarterPrefix(step.id, quarterId)
-      : `${quarterId}:designer:${index + 1}`;
-  const component =
-    typeof step.component === "string" && step.component.trim().length > 0
-      ? step.component
-      : "custom";
-  if (isCompositeStepDefinition(step)) {
-    return {
-      id,
-      component,
-      config:
-        step.config === undefined ? undefined : cloneStepConfig(step.config),
-      composite: cloneStepConfig(step.composite),
-    } satisfies StepDefinition;
-  }
-  const config =
-    step.config === undefined ? undefined : cloneStepConfig(step.config);
-  return { id, component, config } satisfies StepDefinition;
-}
-
-function createPlaceholderQuarterSteps(
-  quarter: ExplorateurIAQuarterConfig
-): StepDefinition[] {
-  const baseId = quarter.id;
-  const intro: StepDefinition = {
-    id: `${baseId}:introduction`,
-    component: "rich-content",
-    config: {
-      title: `${quarter.label || "Quartier"} — Introduction`,
-      body:
-        "Décrivez le contexte ou les objectifs de ce quartier dans cet encart.",
-    },
-  };
-  const synthesis: StepDefinition = {
-    id: `${baseId}:synthese`,
-    component: "form",
-    config: {
-      submitLabel: "Enregistrer",
-      allowEmpty: false,
-      fields: [
-        {
-          id: `${baseId}-objectif`,
-          type: "textarea_with_counter",
-          label: "Quels apprentissages retenir ?",
-          minWords: 10,
-          maxWords: 80,
-        },
-      ],
-    },
-  };
-  return [intro, synthesis];
-}
-
-function createBasicsDesignerStep(
-  quarter: ExplorateurIAQuarterConfig
-): StepDefinition {
-  const baseId = quarter.id;
-  return {
-    id: `${baseId}:designer:basics`,
-    component: "custom",
-    config: {
-      type: "explorateur-quarter-basics",
-      quarterId: baseId,
-      label: quarter.label,
-      color: quarter.color,
-      buildingNumber: quarter.buildingNumber ?? null,
-      isGoal: Boolean(quarter.isGoal),
-    },
-  } satisfies StepDefinition;
-}
-
-function createInventoryDesignerStep(
-  quarter: ExplorateurIAQuarterConfig
-): StepDefinition {
-  const baseId = quarter.id;
-  return {
-    id: `${baseId}:designer:inventory`,
-    component: "custom",
-    config: {
-      type: "explorateur-quarter-inventory",
-      quarterId: baseId,
-      enabled: Boolean(quarter.inventory) && !quarter.isGoal,
-      title: quarter.inventory?.title ?? "",
-      description: quarter.inventory?.description ?? "",
-      hint: quarter.inventory?.hint ?? "",
-      icon: quarter.inventory?.icon ?? "🎁",
-    },
-  } satisfies StepDefinition;
-}
-
-function createDefaultQuarterDesignerSteps(
-  quarter: ExplorateurIAQuarterConfig,
-  quarterSteps: StepDefinition[] = []
-): StepDefinition[] {
-  const designerSteps: StepDefinition[] = [createBasicsDesignerStep(quarter)];
-
-  const effectiveQuarterSteps = (
-    quarterSteps.length > 0
-      ? quarterSteps
-      : createPlaceholderQuarterSteps(quarter)
-  ).map((step) => ({
-    ...cloneStepDefinition(step),
-    id: ensureStepHasQuarterPrefix(step.id, quarter.id),
-  }));
-
-  for (const step of effectiveQuarterSteps) {
-    designerSteps.push(step);
-  }
-
-  if (!quarter.isGoal) {
-    designerSteps.push(createInventoryDesignerStep(quarter));
-  }
-
-  return designerSteps;
-}
-
-function createDefaultQuarterDesignerStepMap(
-  quarters: ExplorateurIAQuarterConfig[],
-  quarterSteps: QuarterSteps
-): QuarterDesignerStepMap {
-  const map: Partial<QuarterSteps> = {};
-  for (const quarter of quarters) {
-    const sequence = quarterSteps[quarter.id] ?? [];
-    map[quarter.id] = createDefaultQuarterDesignerSteps(
-      quarter,
-      sequence
-    ).map((step, index) => ensureDesignerStepId(quarter.id, step, index));
-  }
-  return map as QuarterDesignerStepMap;
-}
-
-function extractQuarterStepsFromDesignerMap(
-  designerMap: QuarterSteps,
-  quarters: ExplorateurIAQuarterConfig[]
-): QuarterSteps {
-  const result: Partial<QuarterSteps> = {};
-  for (const quarter of quarters) {
-    const steps = designerMap[quarter.id] ?? [];
-    const actual = steps
-      .filter(
-        (step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step))
-      )
-      .map((step) => ensureQuarterSequenceStep(step, quarter.id));
-    result[quarter.id] = actual.map(cloneStepDefinition);
-  }
-  return result as QuarterSteps;
-}
-
-function sanitizeQuarterDesignerSteps(
-  value: unknown,
-  quarters: ExplorateurIAQuarterConfig[],
-  fallbackQuarterSteps: QuarterSteps
-): {
-  designerSteps: QuarterDesignerStepMap;
-  quarterSteps: QuarterSteps;
-} {
-  const rawMap =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  const result: Partial<QuarterSteps> = {};
-  const quarterResult: Partial<QuarterSteps> = {};
-
-  for (const quarter of quarters) {
-    const rawSteps = rawMap[quarter.id];
-    const fallbackDesignerSteps = createDefaultQuarterDesignerSteps(
-      quarter,
-      fallbackQuarterSteps[quarter.id] ?? []
-    );
-    const sanitized = sanitizeSteps(rawSteps, fallbackDesignerSteps);
-    const normalized = (sanitized.length ? sanitized : fallbackDesignerSteps).map(
-      (step, index) => ensureDesignerStepId(quarter.id, step, index)
-    );
-
-    const fallbackActualSteps = fallbackDesignerSteps
-      .filter(
-        (step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step))
-      )
-      .map(cloneStepDefinition);
-
-    const synced = normalized.map((step) =>
-      syncDesignerStepWithQuarter(step, quarter)
-    );
-
-    const actualSteps = synced
-      .filter(
-        (step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step))
-      )
-      .map((step) => ensureQuarterSequenceStep(step, quarter.id));
-
-    quarterResult[quarter.id] = (actualSteps.length
-      ? actualSteps
-      : fallbackActualSteps.length
-      ? fallbackActualSteps
-      : createPlaceholderQuarterSteps(quarter)
-    ).map(cloneStepDefinition);
-
-    result[quarter.id] = synced.map(cloneStepDefinition);
-  }
-
-  return {
-    designerSteps: result as QuarterDesignerStepMap,
-    quarterSteps: quarterResult as QuarterSteps,
-  };
 }
 
 export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
@@ -3341,10 +3051,6 @@ function regenerateWorldInPlace(seed: number = randomWorldSeed()): {
   }
 
   return { seed, start: { x: START.x, y: START.y } };
-}
-
-function classNames(...values: Array<string | false | null | undefined>) {
-  return values.filter(Boolean).join(" ");
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -4158,56 +3864,6 @@ function TileWithTs({
           />
         </div>
       ))}
-    </div>
-  );
-}
-
-function Modal({
-  open,
-  onClose,
-  title,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: ReactNode;
-}) {
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const node = scrollContainerRef.current;
-    if (node) {
-      node.scrollTop = 0;
-    }
-  }, [open]);
-
-  if (!open) return null;
-  return (
-    <div
-      ref={scrollContainerRef}
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-6 md:items-center"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <button
-            className="rounded-lg bg-slate-100 px-3 py-1 hover:bg-slate-200"
-            onClick={onClose}
-            aria-label="Fermer"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="p-5">{children}</div>
-      </div>
     </div>
   );
 }
@@ -6146,189 +5802,6 @@ interface ConfigDesignerProps {
   onReset: () => void;
 }
 
-function cloneQuarter(
-  quarter: ExplorateurIAQuarterConfig
-): ExplorateurIAQuarterConfig {
-  return {
-    id: quarter.id,
-    label: quarter.label,
-    color: quarter.color,
-    buildingNumber:
-      quarter.buildingNumber === undefined
-        ? undefined
-        : quarter.buildingNumber === null
-        ? null
-        : Number(quarter.buildingNumber),
-    isGoal: Boolean(quarter.isGoal),
-    inventory: quarter.inventory
-      ? {
-          title: quarter.inventory.title,
-          description: quarter.inventory.description,
-          hint: quarter.inventory.hint,
-          icon: quarter.inventory.icon,
-        }
-      : null,
-  } satisfies ExplorateurIAQuarterConfig;
-}
-
-function getDefaultInventory(
-  quarterId: QuarterId
-): ExplorateurIAInventoryConfig | null {
-  const defaults = DEFAULT_QUARTER_MAP.get(quarterId);
-  if (!defaults || !defaults.inventory) {
-    return null;
-  }
-  return {
-    title: defaults.inventory.title,
-    description: defaults.inventory.description,
-    hint: defaults.inventory.hint,
-    icon: defaults.inventory.icon,
-  } satisfies ExplorateurIAInventoryConfig;
-}
-
-const FALLBACK_CUSTOM_COLOR_PALETTE = [
-  "#f97316",
-  "#0ea5e9",
-  "#22c55e",
-  "#a855f7",
-  "#ec4899",
-];
-
-function createNewQuarterTemplate(
-  existing: readonly ExplorateurIAQuarterConfig[]
-): ExplorateurIAQuarterConfig {
-  const usedIds = new Set(existing.map((quarter) => quarter.id));
-  const nonGoalCount = existing.filter((quarter) => !quarter.isGoal).length;
-  const baseLabel = `Nouveau quartier ${nonGoalCount + 1}`;
-  const normalized =
-    normalizeQuarterId(baseLabel) ??
-    (`quartier-${nonGoalCount + 1}` as QuarterId);
-  let id = normalized as QuarterId;
-  let suffix = 2;
-  while (usedIds.has(id)) {
-    id = `${normalized}-${suffix}` as QuarterId;
-    suffix += 1;
-  }
-
-  const palette = DEFAULT_EXPLORATEUR_QUARTERS.filter(
-    (quarter) => !quarter.isGoal && typeof quarter.color === "string"
-  ).map((quarter) => quarter.color);
-  const colorPalette = palette.length ? palette : FALLBACK_CUSTOM_COLOR_PALETTE;
-  const color =
-    colorPalette[nonGoalCount % colorPalette.length] ??
-    FALLBACK_CUSTOM_COLOR_PALETTE[0];
-
-  return {
-    id,
-    label: baseLabel,
-    color,
-    buildingNumber: nonGoalCount + 1,
-    isGoal: false,
-    inventory: null,
-  } satisfies ExplorateurIAQuarterConfig;
-}
-
-
-function resolveDesignerStepType(step: StepDefinition): string {
-  if (step.config && typeof step.config === "object") {
-    const candidate = (step.config as { type?: unknown }).type;
-    if (typeof candidate === "string" && candidate.length > 0) {
-      return candidate;
-    }
-  }
-  return step.component;
-}
-
-function getDesignerStepMeta(type: string) {
-  return QUARTER_DESIGNER_STEP_LIBRARY.find((entry) => entry.type === type);
-}
-
-function isQuarterDesignerMetaType(type: string): boolean {
-  return (
-    type === "explorateur-quarter-basics" ||
-    type === "explorateur-quarter-inventory"
-  );
-}
-
-function ensureQuarterSequenceStep(
-  step: StepDefinition,
-  quarterId: QuarterId
-): StepDefinition {
-  const id = ensureStepHasQuarterPrefix(step.id, quarterId);
-  const component =
-    typeof step.component === "string" && step.component.trim().length > 0
-      ? step.component
-      : "custom";
-
-  if (isCompositeStepDefinition(step)) {
-    return {
-      id,
-      component,
-      config:
-        step.config === undefined ? undefined : cloneStepConfig(step.config),
-      composite: cloneStepConfig(step.composite),
-    } satisfies StepDefinition;
-  }
-
-  return {
-    id,
-    component,
-    config:
-      step.config === undefined ? undefined : cloneStepConfig(step.config),
-  } satisfies StepDefinition;
-}
-
-function syncDesignerStepWithQuarter(
-  step: StepDefinition,
-  quarter: ExplorateurIAQuarterConfig
-): StepDefinition {
-  const type = resolveDesignerStepType(step);
-  if (type === "explorateur-quarter-basics") {
-    const config =
-      step.config && typeof step.config === "object"
-        ? (step.config as Record<string, unknown>)
-        : {};
-    return {
-      id: ensureStepHasQuarterPrefix(step.id, quarter.id),
-      component: step.component,
-      config: {
-        ...config,
-        type,
-        quarterId: quarter.id,
-        label: quarter.label,
-        color: quarter.color,
-        buildingNumber: quarter.isGoal
-          ? null
-          : quarter.buildingNumber ?? null,
-        isGoal: Boolean(quarter.isGoal),
-      },
-    } satisfies StepDefinition;
-  }
-  if (type === "explorateur-quarter-inventory") {
-    const config =
-      step.config && typeof step.config === "object"
-        ? (step.config as Record<string, unknown>)
-        : {};
-    const enabled = Boolean(quarter.inventory) && !quarter.isGoal;
-    return {
-      id: ensureStepHasQuarterPrefix(step.id, quarter.id),
-      component: step.component,
-      config: {
-        ...config,
-        type,
-        quarterId: quarter.id,
-        enabled,
-        title: enabled ? quarter.inventory?.title ?? "" : "",
-        description: enabled ? quarter.inventory?.description ?? "" : "",
-        hint: enabled ? quarter.inventory?.hint ?? "" : "",
-        icon: enabled ? quarter.inventory?.icon ?? "🎁" : "🎁",
-      },
-    } satisfies StepDefinition;
-  }
-
-  return ensureQuarterSequenceStep(step, quarter.id);
-}
-
 function buildSequenceTemplateLibrary(
   map: QuarterSteps
 ): Map<string, StepDefinition> {
@@ -6408,96 +5881,6 @@ function DesignerStepStateTracker({
   }, [context, onConsumed, pendingStepId]);
   return null;
 }
-interface QuarterDesignerStepLibraryEntry {
-  type: string;
-  label: string;
-  description?: string;
-  icon: string;
-  isMeta?: boolean;
-  allowGoal?: boolean;
-  create: (
-    quarter: ExplorateurIAQuarterConfig,
-    existingSteps: StepDefinition[]
-  ) => StepDefinition | null;
-}
-
-const QUARTER_DESIGNER_STEP_LIBRARY: QuarterDesignerStepLibraryEntry[] = [
-  {
-    type: "explorateur-quarter-basics",
-    label: "Informations générales",
-    description:
-      "Nom, couleur principale, numéro de défi et statut d'objectif final.",
-    icon: "🏙️",
-    isMeta: true,
-    create: (quarter) => createBasicsDesignerStep(quarter),
-  },
-  {
-    type: "explorateur-quarter-inventory",
-    label: "Objet d'inventaire",
-    description: "Configurer la récompense associée à ce quartier.",
-    icon: "🎒",
-    isMeta: true,
-    allowGoal: false,
-    create: (quarter) => createInventoryDesignerStep(quarter),
-  },
-  {
-    type: "rich-content",
-    label: "Contenu enrichi",
-    description: "Texte, médias et encadrés pédagogiques.",
-    icon: "📰",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "rich-content", steps),
-  },
-  {
-    type: "video",
-    label: "Vidéo",
-    description: "Lecture vidéo avec suivi de progression.",
-    icon: "🎬",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "video", steps),
-  },
-  {
-    type: "form",
-    label: "Formulaire",
-    description: "Collecte de réponses structurées ou réflexion guidée.",
-    icon: "📝",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "form", steps),
-  },
-  {
-    type: "clarte-quiz",
-    label: "Quiz Clarté",
-    description: "Question à choix multiple avec score.",
-    icon: "❓",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "clarte-quiz", steps),
-  },
-  {
-    type: "creation-builder",
-    label: "Atelier Création",
-    description: "Assembler une consigne créative étape par étape.",
-    icon: "🎨",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "creation-builder", steps),
-  },
-  {
-    type: "decision-path",
-    label: "Parcours Décision",
-    description: "Comparer différentes stratégies décisionnelles.",
-    icon: "🧭",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "decision-path", steps),
-  },
-  {
-    type: "ethics-dilemmas",
-    label: "Dilemmes Éthique",
-    description: "Scénarios à choix pour explorer les enjeux éthiques.",
-    icon: "⚖️",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "ethics-dilemmas", steps),
-  },
-];
-
 type QuarterDesignerStepType = QuarterDesignerStepLibraryEntry["type"];
 
 function ExplorateurIAConfigDesigner({
