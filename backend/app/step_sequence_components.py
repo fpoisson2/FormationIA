@@ -106,6 +106,16 @@ VIDEO_CAPTION_SCHEMA = _strict_object_schema(
 )
 
 
+COMPOSITE_MODULE_SCHEMA = _strict_object_schema(
+    {
+        "id": _nullable_schema({"type": "string"}),
+        "component": {"type": "string"},
+        "slot": {"type": "string"},
+        "config": _nullable_schema(_any_object_schema()),
+    }
+)
+
+
 def create_step_sequence_activity(
     *,
     activity_id: str,
@@ -948,6 +958,9 @@ def create_composite_step(
             }
         )
 
+    if not normalized_modules:
+        raise ValueError("Au moins un module est requis pour create_composite_step.")
+
     return {
         "id": str(step_id),
         "component": "composite",
@@ -1322,7 +1335,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "modules": {
                     "type": "array",
                     "minItems": 1,
-                    "items": _any_object_schema(),
+                    "items": COMPOSITE_MODULE_SCHEMA,
                 },
                 "autoAdvance": _nullable_schema({"type": "boolean"}),
                 "continueLabel": _nullable_schema({"type": "string"}),
