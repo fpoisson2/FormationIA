@@ -17,7 +17,9 @@ import type {
   MultipleChoiceFieldSpec,
   SingleChoiceFieldSpec,
   StageAnswer,
+  TableMenuDayFieldSpec,
   TableMenuDayValue,
+  TableMenuFullFieldSpec,
   TableMenuFullValue,
   TextareaWithCounterFieldSpec,
   TwoBulletsFieldSpec,
@@ -755,17 +757,23 @@ function DesignerField({
 interface ChoiceFieldEditorProps {
   field: ChoiceFieldSpec;
   onOptionLabelChange: (optionIndex: number, value: string) => void;
+  onOptionValueChange: (optionIndex: number, value: string) => void;
   onOptionDescriptionChange: (optionIndex: number, value: string | undefined) => void;
   onAddOption: () => void;
   onRemoveOption: (optionIndex: number) => void;
+  onMinSelectionsChange?: (value: number | undefined) => void;
+  onMaxSelectionsChange?: (value: number | undefined) => void;
 }
 
 function ChoiceFieldEditor({
   field,
   onOptionLabelChange,
+  onOptionValueChange,
   onOptionDescriptionChange,
   onAddOption,
   onRemoveOption,
+  onMinSelectionsChange,
+  onMaxSelectionsChange,
 }: ChoiceFieldEditorProps): JSX.Element {
   const canRemoveOption = field.options.length > 1;
 
@@ -794,6 +802,18 @@ function ChoiceFieldEditor({
                 Supprimer
               </button>
             </div>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+              Identifiant technique
+              <input
+                type="text"
+                value={option.value}
+                onChange={(event) =>
+                  onOptionValueChange(index, event.target.value)
+                }
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                placeholder="Valeur retournée lors de la sélection"
+              />
+            </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
               Intitulé
               <input
@@ -828,6 +848,68 @@ function ChoiceFieldEditor({
       >
         Ajouter une option
       </button>
+      {field.type === "multiple_choice" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+            Sélections minimales
+            <input
+              type="number"
+              min={0}
+              max={field.options.length}
+              value={
+                typeof field.minSelections === "number"
+                  ? field.minSelections
+                  : ""
+              }
+              onChange={(event) => {
+                if (!onMinSelectionsChange) {
+                  return;
+                }
+                const raw = event.target.value.trim();
+                if (raw.length === 0) {
+                  onMinSelectionsChange(undefined);
+                  return;
+                }
+                const parsed = Number.parseInt(raw, 10);
+                if (Number.isNaN(parsed)) {
+                  return;
+                }
+                onMinSelectionsChange(parsed);
+              }}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+            Sélections maximales
+            <input
+              type="number"
+              min={1}
+              max={field.options.length}
+              value={
+                typeof field.maxSelections === "number"
+                  ? field.maxSelections
+                  : ""
+              }
+              onChange={(event) => {
+                if (!onMaxSelectionsChange) {
+                  return;
+                }
+                const raw = event.target.value.trim();
+                if (raw.length === 0) {
+                  onMaxSelectionsChange(undefined);
+                  return;
+                }
+                const parsed = Number.parseInt(raw, 10);
+                if (Number.isNaN(parsed)) {
+                  return;
+                }
+                onMaxSelectionsChange(parsed);
+              }}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+            />
+          </label>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1010,6 +1092,82 @@ export function FormStep({
     [updateChoiceField]
   );
 
+  const handleChoiceOptionValueChange = useCallback(
+    (fieldIndex: number, optionIndex: number, value: string) => {
+      updateChoiceField(fieldIndex, (field) => {
+        const trimmed = value.trim();
+        if (trimmed.length === 0) {
+          return field;
+        }
+        return {
+          ...field,
+          options: field.options.map((option, idx) =>
+            idx === optionIndex ? { ...option, value: trimmed } : option
+          ),
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
+  const handleMultipleChoiceMinSelectionsChange = useCallback(
+    (fieldIndex: number, value: number | undefined) => {
+      updateChoiceField(fieldIndex, (field) => {
+        if (field.type !== "multiple_choice") {
+          return field;
+        }
+        let minSelections = value;
+        if (typeof minSelections === "number") {
+          const capped = Math.max(0, Math.min(minSelections, field.options.length));
+          minSelections = capped;
+        }
+        let maxSelections = field.maxSelections;
+        if (
+          typeof maxSelections === "number" &&
+          typeof minSelections === "number" &&
+          maxSelections < minSelections
+        ) {
+          maxSelections = minSelections;
+        }
+        return {
+          ...field,
+          minSelections,
+          maxSelections,
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
+  const handleMultipleChoiceMaxSelectionsChange = useCallback(
+    (fieldIndex: number, value: number | undefined) => {
+      updateChoiceField(fieldIndex, (field) => {
+        if (field.type !== "multiple_choice") {
+          return field;
+        }
+        let maxSelections = value;
+        if (typeof maxSelections === "number") {
+          const upperBound = Math.max(1, field.options.length);
+          maxSelections = Math.max(1, Math.min(maxSelections, upperBound));
+        }
+        let minSelections = field.minSelections;
+        if (
+          typeof maxSelections === "number" &&
+          typeof minSelections === "number" &&
+          maxSelections < minSelections
+        ) {
+          minSelections = maxSelections;
+        }
+        return {
+          ...field,
+          minSelections,
+          maxSelections,
+        };
+      });
+    },
+    [updateChoiceField]
+  );
+
   const handleAddChoiceOption = useCallback(
     (fieldIndex: number) => {
       updateChoiceField(fieldIndex, (field) => {
@@ -1086,6 +1244,220 @@ export function FormStep({
     [pushConfigChange]
   );
 
+  const handleFieldLabelChange = useCallback(
+    (index: number, value: string) => {
+      updateFieldAtIndex(index, (field) => ({
+        ...field,
+        label: value,
+      }));
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleBulletedListMinChange = useCallback(
+    (index: number, value: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "bulleted_list") {
+          return field;
+        }
+        const minBullets = Math.max(1, value);
+        const maxBullets = Math.max(minBullets, field.maxBullets);
+        return {
+          ...field,
+          minBullets,
+          maxBullets,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleBulletedListMaxChange = useCallback(
+    (index: number, value: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "bulleted_list") {
+          return field;
+        }
+        const maxBullets = Math.max(field.minBullets, value);
+        return {
+          ...field,
+          maxBullets,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleBulletedListMaxWordsChange = useCallback(
+    (index: number, value: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "bulleted_list") {
+          return field;
+        }
+        return {
+          ...field,
+          maxWordsPerBullet: Math.max(1, value),
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleBulletedListMustContainAnyChange = useCallback(
+    (index: number, raw: string) => {
+      const items = raw
+        .split("\n")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "bulleted_list") {
+          return field;
+        }
+        return {
+          ...field,
+          mustContainAny: items.length > 0 ? items : undefined,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleTableMealLabelChange = useCallback(
+    (index: number, mealIndex: number, value: string) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "table_menu_day" && field.type !== "table_menu_full") {
+          return field;
+        }
+        const meals = field.meals.map((meal, idx) =>
+          idx === mealIndex ? value : meal
+        );
+        return {
+          ...field,
+          meals,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleAddTableMeal = useCallback(
+    (index: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "table_menu_day" && field.type !== "table_menu_full") {
+          return field;
+        }
+        const nextLabel = `Ligne ${field.meals.length + 1}`;
+        return {
+          ...field,
+          meals: [...field.meals, nextLabel],
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleRemoveTableMeal = useCallback(
+    (index: number, mealIndex: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (
+          (field.type !== "table_menu_day" && field.type !== "table_menu_full") ||
+          field.meals.length <= 1
+        ) {
+          return field;
+        }
+        return {
+          ...field,
+          meals: field.meals.filter((_, idx) => idx !== mealIndex),
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleTextareaMinWordsChange = useCallback(
+    (index: number, value: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "textarea_with_counter") {
+          return field;
+        }
+        const minWords = Math.max(0, value);
+        const maxWords = Math.max(minWords, field.maxWords);
+        return {
+          ...field,
+          minWords,
+          maxWords,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleTextareaMaxWordsChange = useCallback(
+    (index: number, value: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "textarea_with_counter") {
+          return field;
+        }
+        const maxWords = Math.max(field.minWords, value);
+        return {
+          ...field,
+          maxWords,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleTextareaForbidWordsChange = useCallback(
+    (index: number, raw: string) => {
+      const items = raw
+        .split("\n")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "textarea_with_counter") {
+          return field;
+        }
+        return {
+          ...field,
+          forbidWords: items.length > 0 ? items : undefined,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleTextareaToneChange = useCallback(
+    (index: number, value: string) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "textarea_with_counter") {
+          return field;
+        }
+        const trimmed = value.trim();
+        return {
+          ...field,
+          tone: trimmed.length > 0 ? trimmed : undefined,
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
+  const handleTwoBulletsMaxWordsChange = useCallback(
+    (index: number, value: number) => {
+      updateFieldAtIndex(index, (field) => {
+        if (field.type !== "two_bullets") {
+          return field;
+        }
+        return {
+          ...field,
+          maxWordsPerBullet: Math.max(1, value),
+        };
+      });
+    },
+    [updateFieldAtIndex]
+  );
+
   const handleSubmitLabelChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       const value = event.target.value;
@@ -1104,8 +1476,6 @@ export function FormStep({
 
   const selectedField =
     selectedFieldIndex !== null ? activeConfig.fields[selectedFieldIndex] : null;
-  const selectedChoiceField =
-    selectedField && isChoiceField(selectedField) ? selectedField : null;
 
   return (
     <div className="flex flex-col gap-8 lg:flex-row">
@@ -1190,33 +1560,307 @@ export function FormStep({
                 </li>
               )}
             </ul>
-            {activeConfig.fields.length > 0 && (
-              selectedFieldIndex !== null ? (
-                selectedChoiceField ? (
-                  <ChoiceFieldEditor
-                    field={selectedChoiceField}
-                    onOptionLabelChange={(optionIndex, value) =>
-                      handleChoiceOptionLabelChange(selectedFieldIndex, optionIndex, value)
+            {activeConfig.fields.length > 0 ? (
+              selectedFieldIndex !== null && selectedField ? (
+                <div className="space-y-3 rounded-xl border border-slate-200 p-3">
+                  <h4 className="text-sm font-semibold text-[color:var(--brand-black)]">
+                    Configuration du champ
+                  </h4>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    Libellé affiché
+                    <input
+                      type="text"
+                      value={selectedField.label}
+                      onChange={(event) =>
+                        handleFieldLabelChange(selectedFieldIndex, event.target.value)
+                      }
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                      placeholder="Texte visible dans le formulaire"
+                    />
+                  </label>
+                  {(() => {
+                    switch (selectedField.type) {
+                      case "bulleted_list": {
+                        const field = selectedField as BulletedListFieldSpec;
+                        return (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                                Nombre minimum de puces
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={field.minBullets}
+                                  onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value, 10);
+                                    if (Number.isNaN(parsed)) {
+                                      return;
+                                    }
+                                    handleBulletedListMinChange(selectedFieldIndex, parsed);
+                                  }}
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                                Nombre maximum de puces
+                                <input
+                                  type="number"
+                                  min={field.minBullets}
+                                  value={field.maxBullets}
+                                  onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value, 10);
+                                    if (Number.isNaN(parsed)) {
+                                      return;
+                                    }
+                                    handleBulletedListMaxChange(selectedFieldIndex, parsed);
+                                  }}
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                                Mots max par puce
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={field.maxWordsPerBullet}
+                                  onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value, 10);
+                                    if (Number.isNaN(parsed)) {
+                                      return;
+                                    }
+                                    handleBulletedListMaxWordsChange(selectedFieldIndex, parsed);
+                                  }}
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                />
+                              </label>
+                            </div>
+                            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                              Expressions obligatoires (1 par ligne)
+                              <textarea
+                                value={field.mustContainAny?.join("\n") ?? ""}
+                                onChange={(event) =>
+                                  handleBulletedListMustContainAnyChange(
+                                    selectedFieldIndex,
+                                    event.target.value
+                                  )
+                                }
+                                className="min-h-[88px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                placeholder="Termes à retrouver dans la réponse"
+                              />
+                            </label>
+                          </div>
+                        );
+                      }
+                      case "table_menu_day":
+                      case "table_menu_full": {
+                        const field = selectedField as TableMenuDayFieldSpec | TableMenuFullFieldSpec;
+                        const canRemove = field.meals.length > 1;
+                        return (
+                          <div className="space-y-3">
+                            <h5 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                              Lignes du tableau
+                            </h5>
+                            <ul className="space-y-2">
+                              {field.meals.map((meal, mealIndex) => (
+                                <li key={`${mealIndex}-${meal}`} className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={meal}
+                                    onChange={(event) =>
+                                      handleTableMealLabelChange(
+                                        selectedFieldIndex,
+                                        mealIndex,
+                                        event.target.value
+                                      )
+                                    }
+                                    className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                    placeholder={`Titre de la ligne ${mealIndex + 1}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    className={`text-xs font-semibold ${
+                                      canRemove
+                                        ? "text-red-600 hover:underline"
+                                        : "cursor-not-allowed text-slate-300"
+                                    }`}
+                                    onClick={() =>
+                                      canRemove &&
+                                      handleRemoveTableMeal(selectedFieldIndex, mealIndex)
+                                    }
+                                    disabled={!canRemove}
+                                  >
+                                    Retirer
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                            <button
+                              type="button"
+                              className="cta-button cta-button--light w-full"
+                              onClick={() => handleAddTableMeal(selectedFieldIndex)}
+                            >
+                              Ajouter une ligne
+                            </button>
+                          </div>
+                        );
+                      }
+                      case "textarea_with_counter": {
+                        const field = selectedField as TextareaWithCounterFieldSpec;
+                        return (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                                Mots minimum
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={field.minWords}
+                                  onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value, 10);
+                                    if (Number.isNaN(parsed)) {
+                                      return;
+                                    }
+                                    handleTextareaMinWordsChange(selectedFieldIndex, parsed);
+                                  }}
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                                Mots maximum
+                                <input
+                                  type="number"
+                                  min={field.minWords}
+                                  value={field.maxWords}
+                                  onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value, 10);
+                                    if (Number.isNaN(parsed)) {
+                                      return;
+                                    }
+                                    handleTextareaMaxWordsChange(selectedFieldIndex, parsed);
+                                  }}
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                />
+                              </label>
+                            </div>
+                            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                              Mots interdits (1 par ligne)
+                              <textarea
+                                value={field.forbidWords?.join("\n") ?? ""}
+                                onChange={(event) =>
+                                  handleTextareaForbidWordsChange(
+                                    selectedFieldIndex,
+                                    event.target.value
+                                  )
+                                }
+                                className="min-h-[88px] rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                placeholder="Termes à exclure"
+                              />
+                            </label>
+                            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                              Ton attendu (optionnel)
+                              <input
+                                type="text"
+                                value={field.tone ?? ""}
+                                onChange={(event) =>
+                                  handleTextareaToneChange(
+                                    selectedFieldIndex,
+                                    event.target.value
+                                  )
+                                }
+                                className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                                placeholder="Ex. enthousiaste, professionnel…"
+                              />
+                            </label>
+                          </div>
+                        );
+                      }
+                      case "two_bullets": {
+                        const field = selectedField as TwoBulletsFieldSpec;
+                        return (
+                          <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                            Mots max par puce
+                            <input
+                              type="number"
+                              min={1}
+                              value={field.maxWordsPerBullet}
+                              onChange={(event) => {
+                                const parsed = Number.parseInt(event.target.value, 10);
+                                if (Number.isNaN(parsed)) {
+                                  return;
+                                }
+                                handleTwoBulletsMaxWordsChange(selectedFieldIndex, parsed);
+                              }}
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-[color:var(--brand-black)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                            />
+                          </label>
+                        );
+                      }
+                      case "reference_line": {
+                        return (
+                          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-[color:var(--brand-charcoal)]/80">
+                            Ce champ affiche uniquement une consigne statique.
+                          </p>
+                        );
+                      }
+                      case "single_choice": {
+                        const field = selectedField as SingleChoiceFieldSpec;
+                        return (
+                          <ChoiceFieldEditor
+                            field={field}
+                            onOptionLabelChange={(optionIndex, value) =>
+                              handleChoiceOptionLabelChange(selectedFieldIndex, optionIndex, value)
+                            }
+                            onOptionValueChange={(optionIndex, value) =>
+                              handleChoiceOptionValueChange(selectedFieldIndex, optionIndex, value)
+                            }
+                            onOptionDescriptionChange={(optionIndex, value) =>
+                              handleChoiceOptionDescriptionChange(selectedFieldIndex, optionIndex, value)
+                            }
+                            onAddOption={() => handleAddChoiceOption(selectedFieldIndex)}
+                            onRemoveOption={(optionIndex) =>
+                              handleRemoveChoiceOption(selectedFieldIndex, optionIndex)
+                            }
+                          />
+                        );
+                      }
+                      case "multiple_choice": {
+                        const field = selectedField as MultipleChoiceFieldSpec;
+                        return (
+                          <ChoiceFieldEditor
+                            field={field}
+                            onOptionLabelChange={(optionIndex, value) =>
+                              handleChoiceOptionLabelChange(selectedFieldIndex, optionIndex, value)
+                            }
+                            onOptionValueChange={(optionIndex, value) =>
+                              handleChoiceOptionValueChange(selectedFieldIndex, optionIndex, value)
+                            }
+                            onOptionDescriptionChange={(optionIndex, value) =>
+                              handleChoiceOptionDescriptionChange(selectedFieldIndex, optionIndex, value)
+                            }
+                            onAddOption={() => handleAddChoiceOption(selectedFieldIndex)}
+                            onRemoveOption={(optionIndex) =>
+                              handleRemoveChoiceOption(selectedFieldIndex, optionIndex)
+                            }
+                            onMinSelectionsChange={(value) =>
+                              handleMultipleChoiceMinSelectionsChange(selectedFieldIndex, value)
+                            }
+                            onMaxSelectionsChange={(value) =>
+                              handleMultipleChoiceMaxSelectionsChange(selectedFieldIndex, value)
+                            }
+                          />
+                        );
+                      }
+                      default:
+                        return null;
                     }
-                    onOptionDescriptionChange={(optionIndex, value) =>
-                      handleChoiceOptionDescriptionChange(selectedFieldIndex, optionIndex, value)
-                    }
-                    onAddOption={() => handleAddChoiceOption(selectedFieldIndex)}
-                    onRemoveOption={(optionIndex) =>
-                      handleRemoveChoiceOption(selectedFieldIndex, optionIndex)
-                    }
-                  />
-                ) : (
-                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-[color:var(--brand-charcoal)]/80">
-                    Ce type de champ n'a pas d'options configurables.
-                  </p>
-                )
+                  })()}
+                </div>
               ) : (
                 <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-[color:var(--brand-charcoal)]/80">
                   Sélectionne un champ pour modifier ses options.
                 </p>
               )
-            )}
+            ) : null}
           </div>
         </aside>
       )}
