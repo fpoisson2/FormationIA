@@ -11,9 +11,6 @@ import { useNavigate } from "react-router-dom";
 import ActivityLayout from "../components/ActivityLayout";
 import { admin, activities as activitiesClient } from "../api";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
-import ClarityPath from "../pages/ClarityPath";
-import ClarteDabord from "../pages/ClarteDabord";
-import PromptDojo from "../pages/PromptDojo";
 import { StepSequenceActivity } from "../modules/step-sequence/StepSequenceActivity";
 import { createDefaultExplorateurWorldConfig } from "../modules/step-sequence/modules/explorateur-world";
 import {
@@ -23,6 +20,399 @@ import {
 } from "../modules/step-sequence/types";
 import type { ModelConfig } from "../config";
 const WORKSHOP_DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
+
+const PROMPT_DOJO_MISSIONS = [
+  {
+    id: "brief-clarity",
+    title: "Mission 1 · Atelier campus",
+    badge: "🎯 Clarté",
+    level: "Débutant",
+    description:
+      "Préparer un atelier de révision pour aider la cohorte de Techniques de l’informatique à réussir l’intra.",
+    targetScore: 75,
+    objective:
+      "Construire un plan d’atelier d’une heure incluant une activité d’ouverture, un segment pratique et une conclusion claire.",
+    context:
+      "Tu es pair-aidant au centre d’aide. L’atelier aura lieu en fin de journée avec 18 collègues un peu fatigués.",
+    checkpoints: [
+      "Mentionner les trois segments clés (départ, activités, clôture).",
+      "Garder un ton motivant et concret pour un groupe collégial.",
+      "Indiquer comment recueillir les questions de dernière minute.",
+    ],
+    starterPrompt:
+      "Rôle: Tu es un tuteur pair qui anime un atelier dynamique.\nTâche: Proposer un plan d’atelier de 60 minutes pour revoir les structures de données avant l’intra.\nPublic: Étudiantes et étudiants de première année au cégep.\nContraintes: Prévoir trois segments (accroche, pratique guidée, conclusion). Mentionner un outil collaboratif utilisé.\nFormat attendu: Liste numérotée avec durées estimées.\nRéponds uniquement avec le plan.",
+  },
+  {
+    id: "audience-adapt",
+    title: "Mission 2 · Résumé associatif",
+    badge: "🧭 Adaptation",
+    level: "Intermédiaire",
+    description:
+      "Rédiger un résumé pour l’infolettre de l’association étudiante à partir d’un article sur le sommeil et les écrans.",
+    targetScore: 82,
+    objective:
+      "Synthétiser l’article en trois points faciles à lire et proposer une mini-action pour la vie de campus.",
+    context:
+      "Le résumé sera envoyé par courriel à des étudiantes et étudiants de première année. Temps de lecture cible : 4 minutes.",
+    checkpoints: [
+      "Employer un ton bienveillant et accessible.",
+      "Inclure une analogie liée à la routine collégiale (ex: soirée d’étude).",
+      "Avertir d’un point de vigilance ou d’une limite de l’étude.",
+    ],
+    starterPrompt:
+      "Rôle: Tu écris pour l’infolettre de l’association étudiante.\nTâche: Résumer un article du service de psychologie sur l’impact des écrans tard le soir.\nPublic: Collégiennes et collégiens de première année.\nContraintes: 130 mots maximum, analogie liée à la vie de campus, mentionner une limite.\nFormat attendu: trois paragraphes courts (idée clé, analogie, action proposée).\nRéponds uniquement avec le résumé.",
+  },
+  {
+    id: "creative-brief",
+    title: "Mission 3 · Courriel de stage",
+    badge: "🚀 Créativité",
+    level: "Avancé",
+    description:
+      "Annonce un léger retard à ton superviseur de stage tout en proposant un plan d’action crédible.",
+    targetScore: 88,
+    objective:
+      "Informer d’un retard de trois jours sur le rapport de stage en rassurant sur les étapes suivantes.",
+    context:
+      "Tu es en Techniques de laboratoire. L’accès au labo a été restreint, d’où le retard.",
+    checkpoints: [
+      "Rester professionnel·le et factuel·le.",
+      "Proposer deux mesures compensatoires et un nouveau jalon précis.",
+      "Inviter à un court point Teams pour valider le plan.",
+    ],
+    starterPrompt:
+      "Rôle: Tu es un·e stagiaire transparent·e et proactif·ve.\nTâche: Rédiger un courriel à ton superviseur pour annoncer un retard de 3 jours sur le rapport de stage et proposer un plan B.\nPublic: Superviseur de stage en entreprise.\nContraintes: Rester factuel, proposer deux mesures d’atténuation, fixer un nouveau jalon et proposer une rencontre Teams de 15 minutes.\nFormat attendu: Objet + courriel structuré en 4 paragraphes.\nRéponds uniquement avec le courriel.",
+  },
+] as const;
+
+const PROMPT_DOJO_EVALUATOR_PROMPT =
+  "Tu es un évaluateur pédagogique spécialisé dans la rédaction de prompts. Analyse le prompt suivant et attribue un score global ainsi que quatre sous-scores (0-100). Réponds uniquement avec un JSON strict, sans commentaire supplémentaire.\n\nFormat attendu (JSON strict): {\"total\":int,\"clarity\":int,\"specificity\":int,\"structure\":int,\"length\":int,\"comments\":\"string\",\"advice\":[\"string\",...]}.\n- \"comments\" : synthèse en 2 phrases max.\n- \"advice\" : pistes concrètes (3 max).\n- Utilise des entiers pour les scores.\n- Pas d’autre texte hors du JSON.";
+
+const PROMPT_DOJO_STEP_SEQUENCE: StepDefinition[] = [
+  {
+    id: "prompt-dojo:introduction",
+    component: "rich-content",
+    config: {
+      title: "Affûte ta consigne mission par mission",
+      body: `Chaque mission te plonge dans un contexte différent. Tu disposes d’un briefing, de points de contrôle et d’un score cible à atteindre. Parcours les cartes ci-dessous, choisis la mission qui te motive puis prépare ton brief dans la zone guidée avant d’évaluer ton prompt final.`,
+      sidebar: {
+        type: "tips",
+        title: "Comment progresser ?",
+        tips: [
+          "Observe les objectifs et contraintes propres à chaque mission.",
+          "Note les points à vérifier dans ton prompt avant l’évaluation IA.",
+          "Révise ton texte jusqu’à dépasser le score cible indiqué.",
+        ],
+      },
+    },
+  },
+  {
+    id: "prompt-dojo:missions",
+    component: "info-cards",
+    config: {
+      eyebrow: "Sélectionne un défi",
+      title: "Trois missions inspirées du Prompt Dojo",
+      description:
+        "Compare les badges et niveaux pour choisir le défi correspondant à ta maîtrise actuelle. Les cibles de score te donnent un repère pour itérer.",
+      columns: 3,
+      cards: PROMPT_DOJO_MISSIONS.map((mission) => ({
+        title: `${mission.badge} ${mission.title}`,
+        description: mission.description,
+        tone: "sand",
+        items: [
+          `Objectif : ${mission.objective}`,
+          `Contexte : ${mission.context}`,
+          `Score cible : ${mission.targetScore}%`,
+        ],
+      })),
+    },
+  },
+  {
+    id: "prompt-dojo:draft",
+    component: "form",
+    config: {
+      submitLabel: "Enregistrer mon brief",
+      allowEmpty: false,
+      fields: [
+        {
+          id: "mission",
+          label: "Choisis la mission que tu veux relever",
+          type: "single_choice",
+          options: PROMPT_DOJO_MISSIONS.map((mission) => ({
+            value: mission.id,
+            label: `${mission.title} (${mission.level})`,
+            description: mission.description,
+          })),
+        },
+        {
+          id: "objectif",
+          label: "Formule ton objectif en 40 à 90 mots",
+          type: "textarea_with_counter",
+          minWords: 40,
+          maxWords: 90,
+          tone: "professionnel et motivant",
+        },
+        {
+          id: "checklist",
+          label: "Checklist du prompt final (3 à 5 puces)",
+          type: "bulleted_list",
+          minBullets: 3,
+          maxBullets: 5,
+          maxWordsPerBullet: 12,
+          mustContainAny: ["ton", "format", "contrainte", "objectif"],
+        },
+      ],
+    },
+  },
+  {
+    id: "prompt-dojo:evaluate",
+    component: "prompt-evaluation",
+    config: {
+      defaultText: PROMPT_DOJO_MISSIONS[0]?.starterPrompt ?? "",
+      developerMessage: PROMPT_DOJO_EVALUATOR_PROMPT,
+      model: "gpt-5-mini",
+      verbosity: "medium",
+      thinking: "medium",
+    },
+  },
+  {
+    id: "prompt-dojo:debrief",
+    component: "rich-content",
+    config: {
+      title: "Analyse ton score IA",
+      body: `Utilise le rapport pour comprendre où ton prompt excelle et où il reste flou. Ajuste ensuite ton brief : reformule les consignes manquantes, précise les contraintes ou ajoute un exemple. Quand tu dépasses la cible de la mission, exporte ton prompt gagnant pour ton portfolio.`,
+      sidebar: {
+        type: "tips",
+        title: "Prochaines étapes",
+        tips: [
+          "Refais la mission avec un autre niveau pour varier les contextes.",
+          "Compare deux prompts différents dans l’atelier pour voir l’impact des paramètres.",
+          "Note les tournures qui te donnent systématiquement de bons scores.",
+        ],
+      },
+    },
+  },
+];
+
+const EXPLORATEUR_INTRODUCTION_STEP: StepDefinition = {
+  id: "explorateur:introduction",
+  component: "rich-content",
+  config: {
+    title: "Prépare ton exploration pixelisée",
+    body: `Bienvenue dans Tiny Town, une mini-ville en pixel art où chaque quartier correspond à une compétence IA.
+
+• Déplace-toi avec les flèches du clavier ou les touches WASD. Sur mobile, utilise le joystick flottant.
+• Clique sur un bâtiment pour lancer la mission associée et suis les consignes à l'écran.
+• Termine les quatre quartiers thématiques pour débloquer la mairie et valider ton parcours.`,
+    sidebar: {
+      type: "tips",
+      title: "Astuces de navigation",
+      tips: [
+        "Observe les couleurs des bâtiments : elles rappellent la compétence évaluée.",
+        "Rouvre un quartier quand tu veux pour compléter un objectif manquant.",
+        "L’inventaire en haut à droite conserve tes objets de mission.",
+      ],
+    },
+  },
+};
+
+const EXPLORATEUR_DEBRIEF_STEP: StepDefinition = {
+  id: "explorateur:debrief",
+  component: "rich-content",
+  config: {
+    title: "Capture ton bilan d’explorateur ou d’exploratrice",
+    body: `Bravo pour cette exploration !
+
+Depuis la ville, ouvre la mairie pour afficher ta carte de compétences. Utilise les boutons JSON et PDF pour exporter ton rapport, l’ajouter à ton portfolio ou le partager avec ton équipe.
+
+Tu peux revenir dans n’importe quel quartier pour améliorer un score ou récolter les idées à transformer en prompts.`,
+    sidebar: {
+      type: "tips",
+      title: "Et après ?",
+      tips: [
+        "Note trois apprentissages clés dans ton portfolio.",
+        "Transforme les meilleures stratégies en consignes prêtes à réutiliser.",
+        "Anime un atelier en montrant comment tu as débloqué la mairie.",
+      ],
+    },
+  },
+};
+
+const CLARITY_TARGET = { x: 7, y: 3 } as const;
+
+const CLARITY_PATH_STEP_SEQUENCE: StepDefinition[] = [
+  {
+    id: "clarity:introduction",
+    component: "rich-content",
+    config: {
+      title: "Écris une consigne limpide pour guider le personnage",
+      body: `Observe la grille 10×10. Ta mission consiste à formuler une instruction assez claire pour que l’IA trace un trajet optimal sans se cogner aux obstacles. Utilise les étapes suivantes pour positionner la cible, visualiser un plan puis rédiger ta consigne finale.`,
+      sidebar: {
+        type: "tips",
+        title: "Conseils express",
+        tips: [
+          "Indique la direction et la distance plutôt que de vagues intentions.",
+          "Mentionne les obstacles importants afin d’éviter les collisions.",
+          "Utilise un vocabulaire simple : haut, bas, gauche, droite, nombre de cases.",
+        ],
+      },
+    },
+  },
+  {
+    id: "clarity:map",
+    component: "clarity-map",
+    config: {
+      obstacleCount: 6,
+      initialTarget: CLARITY_TARGET,
+      promptStepId: "clarity:instruction",
+      allowInstructionInput: true,
+      instructionLabel: "Consigne transmise à l’IA",
+      instructionPlaceholder:
+        "Depuis le départ, avance de deux cases vers le bas, contourne l’obstacle par la droite puis remonte jusqu’à la cible…",
+    },
+  },
+  {
+    id: "clarity:instruction",
+    component: "clarity-prompt",
+    config: {
+      promptLabel: "Rédige ta consigne finale",
+      promptPlaceholder:
+        "Exemple : ‘Depuis la case de départ, descends de trois cases, va deux cases à droite, monte de deux cases puis avance une case à droite pour atteindre la cible.’",
+      model: "gpt-5-mini",
+      verbosity: "medium",
+      thinking: "medium",
+      settingsMode: "read-only",
+    },
+  },
+  {
+    id: "clarity:debrief",
+    component: "rich-content",
+    config: {
+      title: "Débrief et pistes d’amélioration",
+      body: `Analyse les statistiques générées : nombre d’essais, surcoût de parcours et fidélité au plan. Si le personnage se bloque, identifie les zones ambiguës de ta consigne (direction manquante, distance imprécise, obstacle oublié). Réécris ensuite l’instruction et relance une exécution jusqu’à atteindre la cible sans détour.`,
+      sidebar: {
+        type: "tips",
+        title: "Pour aller plus loin",
+        tips: [
+          "Teste une version plus concise de ta consigne pour voir l’impact sur le plan.",
+          "Ajoute des contraintes bonus (ex : passer par une case particulière) et vérifie le comportement.",
+          "Compare deux consignes différentes dans l’atelier pour voir laquelle est la plus efficace.",
+        ],
+      },
+    },
+  },
+];
+
+const CLARTE_MENU_REVELATION =
+  "Ce qui aurait dû être demandé dès le départ :\n- Crée un menu complet de 2 jours.\n- Chaque jour doit comporter 3 repas : déjeuner, dîner, souper.\n- Chaque repas doit inclure un plat, une boisson et un dessert.\n- Utilise uniquement les aliments listés : pain, pâtes, tomates, pommes, lait, poulet.\n- Présente le tout en JSON structuré : jour → repas → {plat, boisson, dessert}.";
+
+const CLARTE_DABORD_STEP_SEQUENCE: StepDefinition[] = [
+  {
+    id: "clarte-dabord:introduction",
+    component: "rich-content",
+    config: {
+      title: "Clarifie la demande dès la première manche",
+      body: `Tu joues l’IA : l’usager formule une requête incomplète pour préparer un menu étudiant. Trois manches successives apportent des précisions. Ton objectif est d’améliorer ta réponse à chaque étape tout en notant ce qu’il aurait fallu demander dès le départ.`,
+      sidebar: {
+        type: "tips",
+        title: "Approche recommandée",
+        tips: [
+          "Repère les informations manquantes dès la première manche.",
+          "Structure tes réponses dans les tableaux proposés pour éviter les oublis.",
+          "À la fin, rédige ta checklist idéale pour guider l’usager la prochaine fois.",
+        ],
+      },
+    },
+  },
+  {
+    id: "clarte-dabord:stage-1",
+    component: "form",
+    config: {
+      submitLabel: "Valider la manche 1",
+      allowEmpty: false,
+      fields: [
+        {
+          id: "menu_jour1_idees",
+          label: "Jour 1 — Idées de plats (1–3 puces)",
+          type: "bulleted_list",
+          minBullets: 1,
+          maxBullets: 3,
+          maxWordsPerBullet: 6,
+          mustContainAny: ["pain", "pâtes", "tomates", "pommes", "lait", "poulet"],
+        },
+        {
+          id: "menu_jour2_idees",
+          label: "Jour 2 — Idées de plats (1–3 puces)",
+          type: "bulleted_list",
+          minBullets: 1,
+          maxBullets: 3,
+          maxWordsPerBullet: 6,
+          mustContainAny: ["pain", "pâtes", "tomates", "pommes", "lait", "poulet"],
+        },
+      ],
+    },
+  },
+  {
+    id: "clarte-dabord:stage-2",
+    component: "form",
+    config: {
+      submitLabel: "Valider la manche 2",
+      allowEmpty: false,
+      fields: [
+        {
+          id: "menu_jour1_table",
+          label: "Jour 1 — 3 repas (plat uniquement)",
+          type: "table_menu_day",
+          meals: ["Déjeuner", "Dîner", "Souper"],
+        },
+        {
+          id: "menu_jour2_table",
+          label: "Jour 2 — 3 repas (plat uniquement)",
+          type: "table_menu_day",
+          meals: ["Déjeuner", "Dîner", "Souper"],
+        },
+      ],
+    },
+  },
+  {
+    id: "clarte-dabord:stage-3",
+    component: "form",
+    config: {
+      submitLabel: "Valider la manche 3",
+      allowEmpty: false,
+      fields: [
+        {
+          id: "menu_jour1_complet",
+          label: "Jour 1 — plat / boisson / dessert",
+          type: "table_menu_full",
+          meals: ["Déjeuner", "Dîner", "Souper"],
+        },
+        {
+          id: "menu_jour2_complet",
+          label: "Jour 2 — plat / boisson / dessert",
+          type: "table_menu_full",
+          meals: ["Déjeuner", "Dîner", "Souper"],
+        },
+      ],
+    },
+  },
+  {
+    id: "clarte-dabord:debrief",
+    component: "rich-content",
+    config: {
+      title: "Révèle la checklist idéale",
+      body: CLARTE_MENU_REVELATION,
+      sidebar: {
+        type: "tips",
+        title: "À retenir",
+        tips: [
+          "Une bonne consigne précise le format (ici : tableau JSON structuré).",
+          "Mentionne les contraintes incontournables (ingrédients, nombre de repas, éléments à inclure).",
+          "Teste ta checklist sur un autre scénario pour vérifier qu’elle fonctionne vraiment.",
+        ],
+      },
+    },
+  },
+];
 
 const WORKSHOP_DEFAULT_CONFIG_A: ModelConfig = {
   model: "gpt-5-nano",
@@ -93,9 +483,9 @@ export interface ActivityProps {
 
 export const COMPONENT_REGISTRY = {
   "workshop-experience": StepSequenceActivity,
-  "prompt-dojo": PromptDojo,
-  "clarity-path": ClarityPath,
-  "clarte-dabord": ClarteDabord,
+  "prompt-dojo": StepSequenceActivity,
+  "clarity-path": StepSequenceActivity,
+  "clarte-dabord": StepSequenceActivity,
   "explorateur-ia": StepSequenceActivity,
   "step-sequence": StepSequenceActivity,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
@@ -208,6 +598,7 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
           to: "/prompt-dojo",
         },
       },
+      stepSequence: PROMPT_DOJO_STEP_SEQUENCE,
     },
   },
   clarity: {
@@ -241,6 +632,7 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
           to: "/parcours-clarte",
         },
       },
+      stepSequence: CLARITY_PATH_STEP_SEQUENCE,
     },
   },
   "clarte-dabord": {
@@ -273,10 +665,11 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
           to: "/clarte-dabord",
         },
       },
+      stepSequence: CLARTE_DABORD_STEP_SEQUENCE,
     },
   },
   "explorateur-ia": {
-    componentKey: "step-sequence",
+    componentKey: "explorateur-ia",
     path: "/explorateur-ia",
     defaults: {
       completionId: "explorateur-ia",
@@ -317,11 +710,13 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
         },
       },
       stepSequence: [
+        EXPLORATEUR_INTRODUCTION_STEP,
         {
           id: "explorateur:world",
           component: "explorateur-world",
           config: createDefaultExplorateurWorldConfig(),
         },
+        EXPLORATEUR_DEBRIEF_STEP,
       ],
     },
   },

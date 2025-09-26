@@ -30,9 +30,25 @@ import {
 function createExplorateurSteps(): StepDefinition[] {
   return [
     {
+      id: "explorateur:introduction",
+      component: "rich-content",
+      config: {
+        title: "Bienvenue",
+        body: "Découvre la ville IA pas à pas.",
+      },
+    },
+    {
       id: "explorateur:world",
       component: "explorateur-world",
       config: createDefaultExplorateurWorldConfig(),
+    },
+    {
+      id: "explorateur:debrief",
+      component: "rich-content",
+      config: {
+        title: "Bilan",
+        body: "Exportez votre badge pour valider l’activité.",
+      },
     },
   ];
 }
@@ -117,6 +133,11 @@ describe("Explorateur IA", () => {
 
     const setStepSequence = vi.fn();
     renderExplorateurIA({ setStepSequence });
+
+    const introContinueButton = await screen.findByRole("button", {
+      name: /Continuer/i,
+    });
+    fireEvent.click(introContinueButton);
 
     vi.useFakeTimers();
 
