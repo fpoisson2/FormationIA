@@ -9,6 +9,8 @@ from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Thread
 from typing import Any, Generator, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -65,6 +67,21 @@ DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
 
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
+
+
+def _resolve_summary_heartbeat_interval() -> float:
+    raw_value = os.getenv("SUMMARY_HEARTBEAT_INTERVAL")
+    if raw_value is None:
+        return 5.0
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        return 5.0
+    return parsed if parsed > 0 else 5.0
+
+
+SUMMARY_HEARTBEAT_INTERVAL = _resolve_summary_heartbeat_interval()
+
 
 def _resolve_activities_config_path() -> Path:
     raw_path = os.getenv("ACTIVITIES_CONFIG_PATH")
@@ -2782,12 +2799,49 @@ def _handle_plan(payload: PlanRequest) -> StreamingResponse:
     client = _ensure_client()
 
     def plan_stream() -> Generator[str, None, None]:
+        heartbeat_interval = SUMMARY_HEARTBEAT_INTERVAL if SUMMARY_HEARTBEAT_INTERVAL > 0 else 5.0
+        event_queue: Queue[Any] = Queue()
+        sentinel = object()
+
+        def _run_generation() -> None:
+            try:
+                plan_payload = _request_plan_from_llm(client, payload)
+                event_queue.put(plan_payload)
+            except PlanGenerationError as exc:
+                event_queue.put(exc)
+            except Exception as exc:  # pragma: no cover - defensive catch
+                event_queue.put(PlanGenerationError(str(exc)))
+            finally:
+                event_queue.put(sentinel)
+
+        worker = Thread(target=_run_generation, daemon=True)
+        worker.start()
+
         yield _sse_comment("keep-alive")
 
-        try:
-            plan_payload = _request_plan_from_llm(client, payload)
-        except PlanGenerationError as exc:
-            yield _sse_event("error", {"message": str(exc)})
+        plan_payload: PlanModel | None = None
+        plan_error: PlanGenerationError | None = None
+
+        while True:
+            try:
+                item = event_queue.get(timeout=heartbeat_interval)
+            except Empty:
+                yield _sse_comment("keep-alive")
+                continue
+
+            if item is sentinel:
+                break
+            if isinstance(item, PlanGenerationError):
+                plan_error = item
+                continue
+            plan_payload = item  # type: ignore[assignment]
+
+        if plan_error is not None:
+            yield _sse_event("error", {"message": str(plan_error)})
+            return
+
+        if plan_payload is None:
+            yield _sse_event("error", {"message": "Plan manquant."})
             return
 
         attempts = _RUN_ATTEMPTS.get(payload.run_id, 0) + 1
