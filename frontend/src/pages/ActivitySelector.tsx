@@ -816,6 +816,37 @@ function ActivitySelector(): JSX.Element {
     };
   }, []);
 
+  const loadSavedConfig = useCallback(async () => {
+    if (loadConfigMutexRef.current) {
+      return;
+    }
+
+    loadConfigMutexRef.current = true;
+    setIsLoading(true);
+    try {
+      const response = await activitiesClient.getConfig();
+      const rawActivities = Array.isArray(response.activities)
+        ? (response.activities as ActivityConfigEntry[])
+        : undefined;
+      const includeMissingDefaults = response.usesDefaultFallback !== false;
+      setEditableActivities(
+        buildEditableActivities(rawActivities, { includeMissingDefaults })
+      );
+      const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
+      setHeaderOverrides(savedHeader ?? {});
+    } catch (error) {
+      console.warn(
+        "Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut",
+        error
+      );
+      setEditableActivities(buildEditableActivities());
+      setHeaderOverrides({});
+    } finally {
+      setIsLoading(false);
+      loadConfigMutexRef.current = false;
+    }
+  }, [buildEditableActivities]);
+
   useEffect(() => {
     void loadSavedConfig();
   }, [loadSavedConfig]);
@@ -1514,34 +1545,6 @@ function ActivitySelector(): JSX.Element {
     trimmedGenerationForm,
     token,
   ]);
-
-  const loadSavedConfig = useCallback(async () => {
-    if (loadConfigMutexRef.current) {
-      return;
-    }
-
-    loadConfigMutexRef.current = true;
-    setIsLoading(true);
-    try {
-      const response = await activitiesClient.getConfig();
-      const rawActivities = Array.isArray(response.activities)
-        ? (response.activities as ActivityConfigEntry[])
-        : undefined;
-      const includeMissingDefaults = response.usesDefaultFallback !== false;
-      setEditableActivities(
-        buildEditableActivities(rawActivities, { includeMissingDefaults })
-      );
-      const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
-      setHeaderOverrides(savedHeader ?? {});
-    } catch (error) {
-      console.warn('Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut');
-      setEditableActivities(buildEditableActivities());
-      setHeaderOverrides({});
-    } finally {
-      setIsLoading(false);
-      loadConfigMutexRef.current = false;
-    }
-  }, []);
 
   const refreshGeneratedActivity = useCallback(
     async (activityId: string | null) => {
