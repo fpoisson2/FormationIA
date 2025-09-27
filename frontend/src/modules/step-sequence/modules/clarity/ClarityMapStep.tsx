@@ -548,10 +548,6 @@ export function ClarityMapStep({
     }
   }, [effectiveStatus]);
 
-  const shouldShowInstructionPanel = Boolean(
-    normalizedConfig.allowInstructionInput && promptInstruction === null
-  );
-
   const blockedSignature = useMemo(
     () => blocked.map((cell) => gridKey(cell)).sort().join("|"),
     [blocked]
@@ -606,13 +602,6 @@ export function ClarityMapStep({
   const handlePromptIdChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       applyConfigPatch({ promptStepId: event.target.value });
-    },
-    [applyConfigPatch]
-  );
-
-  const handleAllowInputToggle = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      applyConfigPatch({ allowInstructionInput: event.target.checked });
     },
     [applyConfigPatch]
   );
@@ -839,17 +828,6 @@ export function ClarityMapStep({
                 />
               </label>
             </div>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={normalizedConfig.allowInstructionInput}
-                onChange={handleAllowInputToggle}
-                className="h-4 w-4 rounded border-white/60 text-[color:var(--brand-red)] focus:ring-[color:var(--brand-red)]"
-              />
-              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                Autoriser la saisie manuelle
-              </span>
-            </label>
           </div>
         </fieldset>
       )}
@@ -877,27 +855,6 @@ export function ClarityMapStep({
           </div>
         </div>
         <div className="space-y-3">
-          {shouldShowInstructionPanel && (
-            <div className="flex flex-col gap-3">
-              <label className="flex flex-col gap-2">
-                <span className="text-sm font-semibold text-[color:var(--brand-black)]">
-                  {normalizedConfig.instructionLabel}
-                </span>
-                <textarea
-                  rows={6}
-                  value={instruction}
-                  onChange={(event) => setInstruction(event.target.value)}
-                  placeholder={normalizedConfig.instructionPlaceholder}
-                  readOnly={!normalizedConfig.allowInstructionInput && promptInstruction !== null}
-                  className={`min-h-[160px] rounded-2xl border border-white/60 px-4 py-3 text-base text-[color:var(--brand-charcoal)] shadow-sm placeholder:text-[color:var(--brand-charcoal)]/50 focus:border-[color:var(--brand-red)] focus:outline-none ${
-                    !normalizedConfig.allowInstructionInput && promptInstruction !== null
-                      ? "bg-white/70 text-[color:var(--brand-charcoal)]/80"
-                      : "bg-white"
-                  }`}
-                />
-              </label>
-            </div>
-          )}
           {(isExecuting || effectiveMessage) && (
             <p className={`text-sm ${messageToneClass}`}>
               {effectiveMessage || "L’IA calcule le trajet…"}
@@ -911,7 +868,7 @@ export function ClarityMapStep({
         <p className="text-sm text-white/70">
           {shouldAutoPublish
             ? "Le module carte met à jour son payload automatiquement dans le composite."
-            : "Valide cette configuration pour continuer et transmettre la commande."}
+            : "Valide cette configuration pour continuer."}
         </p>
         {!shouldAutoPublish && (
           <button
