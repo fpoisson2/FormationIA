@@ -93,12 +93,6 @@ import {
   type ArrivalEffect,
 } from "./explorateurIA/audio/arrivalEffect";
 import { Modal } from "./explorateurIA/Modal";
-import {
-  TERRAIN_THEME_ORDER,
-  TERRAIN_THEMES,
-  isTerrainThemeId,
-  type TerrainThemeId,
-} from "./explorateurIA/terrainConfig";
 
 // ---
 // "Explorateur IA" — Frontend React (module web auto-portant)
@@ -5838,62 +5832,6 @@ interface ConfigDesignerProps {
   onUpdateQuarterDesignerSteps: (steps: QuarterSteps) => void;
   onUpdateTerrain: (patch: Partial<ExplorateurIATerrainConfig>) => void;
   onReset: () => void;
-}
-
-function buildSequenceTemplateLibrary(
-  map: QuarterSteps
-): Map<string, StepDefinition> {
-  const templates = new Map<string, StepDefinition>();
-  for (const steps of Object.values(map)) {
-    for (const step of steps) {
-      const type = resolveDesignerStepType(step);
-      if (!templates.has(type)) {
-        templates.set(type, cloneStepDefinition(step));
-      }
-    }
-  }
-  return templates;
-}
-
-const SEQUENCE_TEMPLATE_BY_TYPE = buildSequenceTemplateLibrary(
-  WORLD1_QUARTER_STEPS
-);
-
-function createSequenceStepFromTemplate(
-  quarter: ExplorateurIAQuarterConfig,
-  type: string,
-  existingSteps: StepDefinition[]
-): StepDefinition {
-  const template = SEQUENCE_TEMPLATE_BY_TYPE.get(type);
-  const baseFragment = template?.id
-    ? template.id.split(":").slice(1).join(":")
-    : `${type}-${existingSteps.length + 1}`;
-  const sanitizedBase =
-    baseFragment && baseFragment.trim().length > 0
-      ? baseFragment.trim().replace(/\s+/g, "-")
-      : `${type}-step`;
-  const existingIds = new Set(existingSteps.map((step) => step.id));
-  let candidateId = `${quarter.id}:${sanitizedBase}`;
-  let suffix = 2;
-  while (existingIds.has(candidateId)) {
-    candidateId = `${quarter.id}:${sanitizedBase}-${suffix}`;
-    suffix += 1;
-  }
-
-  if (template) {
-    const cloned = cloneStepDefinition(template);
-    cloned.id = candidateId;
-    return ensureQuarterSequenceStep(cloned, quarter.id);
-  }
-
-  return ensureQuarterSequenceStep(
-    {
-      id: candidateId,
-      component: type,
-      config: {},
-    },
-    quarter.id
-  );
 }
 
 function DesignerStepStateTracker({

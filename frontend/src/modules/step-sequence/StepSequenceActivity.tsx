@@ -10,7 +10,6 @@ import type {
   StepSequenceActivityContextBridge,
   StepSequenceWrapperPreference,
 } from "./types";
-import type { StepDefinition } from "./types";
 import { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
 import { useActivityCompletion } from "../../hooks/useActivityCompletion";
 
