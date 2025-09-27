@@ -1358,15 +1358,6 @@ export function buildActivityElement(
       user: adminUser,
     } = useAdminAuth();
 
-    const baseDefinition = useMemo(
-      () => resolveActivityDefinition({ id: configEntry.id }),
-      [configEntry.id]
-    );
-    const baseLayout = useMemo(
-      () => buildBaseLayout(baseDefinition),
-      [baseDefinition]
-    );
-
     const [overrides, setOverrides] =
       useState<Partial<ActivityLayoutConfig>>({});
     const [currentDefinition, setCurrentDefinition] = useState<ActivityDefinition>(
@@ -1445,29 +1436,6 @@ export function buildActivityElement(
     const mergedLayout: ActivityLayoutConfig = {
       ...currentBaseLayout,
       ...overrides,
-      actions: canShowAdminButton
-        ? (
-            <div className="flex items-center gap-2">
-              {isEditMode ? (
-                <>
-                  <button
-                    onClick={() => setEditMode(false)}
-                    className="inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100"
-                  >
-                    Quitter l'édition
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setEditMode(true)}
-                  className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100"
-                >
-                  Mode édition
-                </button>
-              )}
-            </div>
-          )
-        : baseLayout.actions,
     };
     const mergedBeforeHeader = mergedLayout.beforeHeader;
 
@@ -1507,6 +1475,21 @@ export function buildActivityElement(
       },
       []
     );
+
+    const editButtonClassName = isEditMode
+      ? "inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100"
+      : "inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100";
+
+    const adminEditButton = canShowAdminButton ? (
+      <div className="mt-12 flex justify-center">
+        <button
+          onClick={() => setEditMode(!isEditMode)}
+          className={editButtonClassName}
+        >
+          {isEditMode ? "Quitter l'édition" : "Mode édition"}
+        </button>
+      </div>
+    ) : null;
 
     const handleSaveActivity = useCallback(async () => {
       const headerOverrides = extractHeaderOverrides(overrides);
@@ -1621,6 +1604,7 @@ export function buildActivityElement(
             </p>
           </div>
         )}
+        {adminEditButton}
       </ActivityLayout>
     );
   };
