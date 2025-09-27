@@ -60,6 +60,7 @@ export interface ClarityMapStepConfig {
   instructionPlaceholder?: string;
   showPlanPlaceholder?: boolean;
   planPlaceholderMessage?: string;
+  hideInstructionInEditMode?: boolean;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -72,6 +73,7 @@ interface NormalizedClarityMapConfig {
   instructionPlaceholder: string;
   showPlanPlaceholder: boolean;
   planPlaceholderMessage: string;
+  hideInstructionInEditMode: boolean;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -248,6 +250,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
       instructionPlaceholder: "La consigne reçue s'affichera ici…",
       showPlanPlaceholder: true,
       planPlaceholderMessage: "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.",
+      hideInstructionInEditMode: false,
     };
   }
 
@@ -273,6 +276,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     typeof raw.planPlaceholderMessage === "string" && raw.planPlaceholderMessage.trim()
       ? raw.planPlaceholderMessage.trim()
       : "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.";
+  const hideInstructionInEditMode = raw.hideInstructionInEditMode === true;
 
   return {
     obstacleCount,
@@ -283,6 +287,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     instructionPlaceholder,
     showPlanPlaceholder,
     planPlaceholderMessage,
+    hideInstructionInEditMode,
     onChange: raw.onChange,
   };
 }
@@ -501,6 +506,7 @@ export function ClarityMapStep({
   const obstacleCount = normalizedConfig.obstacleCount;
   const planPlaceholderMessage = normalizedConfig.planPlaceholderMessage;
   const showPlanPlaceholder = normalizedConfig.showPlanPlaceholder;
+  const shouldShowInstructionPanel = !(isEditMode && normalizedConfig.hideInstructionInEditMode);
 
   useEffect(() => {
     if (mapPayload || !targetFromConfig) {
@@ -593,6 +599,10 @@ export function ClarityMapStep({
             ? patch.showPlanPlaceholder
             : normalizedConfig.showPlanPlaceholder,
         planPlaceholderMessage: patch.planPlaceholderMessage ?? normalizedConfig.planPlaceholderMessage,
+        hideInstructionInEditMode:
+          typeof patch.hideInstructionInEditMode === "boolean"
+            ? patch.hideInstructionInEditMode
+            : normalizedConfig.hideInstructionInEditMode,
       };
 
       normalizedConfig.onChange?.(nextConfig);
@@ -852,6 +862,17 @@ export function ClarityMapStep({
                 Autoriser la saisie manuelle de la commande
               </span>
             </label>
+            <label className="flex items-center gap-2 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={normalizedConfig.hideInstructionInEditMode}
+                onChange={(event) => applyConfigPatch({ hideInstructionInEditMode: event.target.checked })}
+                className="h-4 w-4 rounded border border-white/60 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Cacher le bloc commande transmise en mode édition
+              </span>
+            </label>
             <label className="flex flex-col gap-1 md:col-span-2">
               <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
                 Libellé du champ commande
@@ -958,30 +979,32 @@ export function ClarityMapStep({
             placeholderMessage={planPlaceholderMessage}
             showPlaceholder={showPlanPlaceholder}
           />
-          <div className="space-y-2 rounded-2xl border border-white/40 bg-white/30 p-4 shadow-inner">
-            <label
-              htmlFor={instructionFieldId}
-              className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70"
-            >
-              {normalizedConfig.instructionLabel}
-            </label>
-            {normalizedConfig.allowInstructionInput && promptInstruction === null ? (
-              <textarea
-                id={instructionFieldId}
-                value={instruction}
-                onChange={handleInstructionChange}
-                placeholder={normalizedConfig.instructionPlaceholder}
-                rows={3}
-                className="w-full rounded-xl border border-white/60 bg-white/80 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none"
-              />
-            ) : (
-              <p className="whitespace-pre-wrap rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-sm text-[color:var(--brand-charcoal)]/90">
-                {instruction.trim()
-                  ? instruction
-                  : normalizedConfig.instructionPlaceholder || "La consigne reçue s'affichera ici…"}
-              </p>
-            )}
-          </div>
+          {shouldShowInstructionPanel && (
+            <div className="space-y-2 rounded-2xl border border-white/40 bg-white/30 p-4 shadow-inner">
+              <label
+                htmlFor={instructionFieldId}
+                className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70"
+              >
+                {normalizedConfig.instructionLabel}
+              </label>
+              {normalizedConfig.allowInstructionInput && promptInstruction === null ? (
+                <textarea
+                  id={instructionFieldId}
+                  value={instruction}
+                  onChange={handleInstructionChange}
+                  placeholder={normalizedConfig.instructionPlaceholder}
+                  rows={3}
+                  className="w-full rounded-xl border border-white/60 bg-white/80 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                />
+              ) : (
+                <p className="whitespace-pre-wrap rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-sm text-[color:var(--brand-charcoal)]/90">
+                  {instruction.trim()
+                    ? instruction
+                    : normalizedConfig.instructionPlaceholder || "La consigne reçue s'affichera ici…"}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
