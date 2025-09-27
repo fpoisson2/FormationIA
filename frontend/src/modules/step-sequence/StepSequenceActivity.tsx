@@ -173,6 +173,9 @@ export function StepSequenceActivity({
         }
       }
 
+      const shouldShowHeaderTitle =
+        StepComponent.stepSequenceHideTitleInHeader !== true;
+
       return (
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
           <header className="space-y-3 text-center">
@@ -185,7 +188,7 @@ export function StepSequenceActivity({
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            {stepTitle ? (
+            {shouldShowHeaderTitle && stepTitle ? (
               <h2 className="text-2xl font-semibold text-slate-900">
                 {stepTitle}
               </h2>

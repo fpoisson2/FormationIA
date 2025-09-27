@@ -77,6 +77,7 @@ export interface StepSequenceActivityContextBridge {
 export type StepComponentWithMetadata = ComponentType<StepComponentProps> & {
   stepSequenceWrapper?: StepSequenceWrapperPreference;
   stepSequenceLayoutOverrides?: StepSequenceLayoutOverrides;
+  stepSequenceHideTitleInHeader?: boolean;
 };
 
 export type StepRegistry = Record<string, StepComponentWithMetadata>;
