@@ -38,32 +38,29 @@ import {
 } from "../config";
 import {
   getStepComponent,
-  STEP_COMPONENT_REGISTRY,
   StepSequenceContext,
   isCompositeStepDefinition,
   resolveStepComponentKey,
   type CompositeStepConfig,
   type StepDefinition,
+  type StepSequenceModuleMetadata,
 } from "../modules/step-sequence";
 import "../modules/step-sequence/modules";
 import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
+import { StepSequenceModuleLibraryModal } from "../components/admin/StepSequenceModuleLibraryModal";
+import {
+  getStepSequenceModuleLabel,
+  getStepSequenceModuleLibraryEntry,
+  listRegisteredStepSequenceModuleKeys,
+  sanitizeStepSequenceModuleConfigList,
+  type StepSequenceModuleConfig,
+  type StepSequenceModuleLibraryEntry,
+} from "../modules/step-sequence/moduleLibrary";
 
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
 
 const STEP_SEQUENCE_COMPONENT_KEY = "step-sequence";
-
-const STEP_TYPE_LABELS: Record<string, string> = {
-  composite: "Étape composite",
-  form: "Formulaire",
-  "rich-content": "Contenu riche",
-  video: "Vidéo",
-  "workshop-context": "Atelier · Contexte",
-  "workshop-comparison": "Atelier · Comparaison",
-  "workshop-synthesis": "Atelier · Synthèse",
-};
-
-const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
 
 const NOOP = () => {};
 
@@ -169,13 +166,17 @@ function generateUniqueId(prefix: string): string {
 }
 
 function getStepTypeLabel(key: string): string {
-  return STEP_TYPE_LABELS[key] ?? key;
+  return getStepSequenceModuleLabel(key);
 }
 
-function createDefaultStepSequenceTemplate(): StepDefinition[] {
+function createDefaultStepSequenceTemplate(
+  resolveEntry: (key: string) => StepSequenceModuleLibraryEntry
+): StepDefinition[] {
   const introStepId = generateUniqueId("step");
   const formStepId = generateUniqueId("step");
   const formFieldId = generateUniqueId("field");
+  const richContentLibrary = resolveEntry("rich-content");
+  const formLibrary = resolveEntry("form");
 
   return [
     {
@@ -192,6 +193,11 @@ function createDefaultStepSequenceTemplate(): StepDefinition[] {
             "Partage une ressource ou un exemple inspirant.",
           ],
         },
+      },
+      metadata: {
+        title: richContentLibrary.metadata.title ?? null,
+        description: richContentLibrary.metadata.description ?? null,
+        coverImage: richContentLibrary.metadata.coverImage ?? null,
       },
     },
     {
@@ -210,6 +216,11 @@ function createDefaultStepSequenceTemplate(): StepDefinition[] {
           },
         ],
       },
+      metadata: {
+        title: formLibrary.metadata.title ?? null,
+        description: formLibrary.metadata.description ?? null,
+        coverImage: formLibrary.metadata.coverImage ?? null,
+      },
     },
   ];
 }
@@ -218,7 +229,12 @@ interface StepSequenceEditorProps {
   activityTitle: string;
   steps: StepDefinition[];
   stepTypeOptions: string[];
-  onAddStep: (component: string) => void;
+  moduleLibraryEntries: StepSequenceModuleLibraryEntry[];
+  getModuleLabel: (key: string) => string;
+  onAddStep: (
+    component: string,
+    metadata?: StepSequenceModuleMetadata | null
+  ) => void;
   onRemoveStep: (stepId: string) => void;
   onMoveStep: (fromIndex: number, toIndex: number) => void;
   onChangeStepType: (stepId: string, component: string) => void;
@@ -229,6 +245,7 @@ interface StepSequenceStepCardProps {
   step: StepDefinition;
   index: number;
   stepTypeOptions: string[];
+  getModuleLabel: (key: string) => string;
   onRemove: (stepId: string) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -242,6 +259,7 @@ function StepSequenceStepCard({
   step,
   index,
   stepTypeOptions,
+  getModuleLabel,
   onRemove,
   onMoveUp,
   onMoveDown,
@@ -251,23 +269,24 @@ function StepSequenceStepCard({
   onUpdateConfig,
 }: StepSequenceStepCardProps): JSX.Element {
   const componentKey = resolveStepComponentKey(step);
+  const metadata = step.metadata ?? null;
   const selectOptions = useMemo(() => {
     const mapped = stepTypeOptions.map((type) => ({
       value: type,
-      label: getStepTypeLabel(type),
+      label: getModuleLabel(type),
       disabled: false,
     }));
 
     if (componentKey && !stepTypeOptions.includes(componentKey)) {
       mapped.unshift({
         value: componentKey,
-        label: getStepTypeLabel(componentKey),
+        label: getModuleLabel(componentKey),
         disabled: true,
       });
     }
 
     return mapped;
-  }, [componentKey, stepTypeOptions]);
+  }, [componentKey, getModuleLabel, stepTypeOptions]);
   const StepComponent = useMemo(
     () => (componentKey ? getStepComponent(componentKey) : undefined),
     [componentKey]
@@ -356,6 +375,40 @@ function StepSequenceStepCard({
             ))}
           </select>
         </label>
+        {metadata ? (
+          <div className="grid gap-3 rounded-2xl border border-orange-200/60 bg-white/80 p-3 sm:grid-cols-[140px,1fr]">
+            {metadata.coverImage ? (
+              <div className="overflow-hidden rounded-xl bg-orange-100">
+                <img
+                  src={metadata.coverImage}
+                  alt={`Illustration associée au module ${getModuleLabel(
+                    componentKey ?? step.component ?? "module"
+                  )}`}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-xl bg-orange-100 px-3 text-center text-xs font-semibold uppercase tracking-wide text-orange-700">
+                {metadata.title ??
+                  getModuleLabel(componentKey ?? step.component ?? "module")}
+              </div>
+            )}
+            <div className="space-y-1 text-sm text-orange-700">
+              {metadata.title ? (
+                <p className="font-semibold text-orange-800">{metadata.title}</p>
+              ) : null}
+              {metadata.description ? (
+                <p className="leading-relaxed text-orange-700/80">
+                  {metadata.description}
+                </p>
+              ) : (
+                <p className="text-orange-700/70">
+                  Ajoutez une description personnalisée depuis la bibliothèque de modules.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-sm">
           {StepComponent ? (
             <StepSequenceContext.Provider value={contextValue}>
@@ -384,28 +437,42 @@ function StepSequenceEditor({
   activityTitle,
   steps,
   stepTypeOptions,
+  moduleLibraryEntries,
+  getModuleLabel,
   onAddStep,
   onRemoveStep,
   onMoveStep,
   onChangeStepType,
   onUpdateStepConfig,
 }: StepSequenceEditorProps): JSX.Element {
-  const [nextStepType, setNextStepType] = useState<string>("");
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+
+  const hasAvailableModules = moduleLibraryEntries.length > 0;
 
   useEffect(() => {
-    if (stepTypeOptions.length === 0) {
-      setNextStepType("");
+    if (!hasAvailableModules && isLibraryOpen) {
+      setIsLibraryOpen(false);
+    }
+  }, [hasAvailableModules, isLibraryOpen]);
+
+  const handleOpenLibrary = useCallback(() => {
+    if (!hasAvailableModules) {
       return;
     }
-    setNextStepType((prev) =>
-      prev && stepTypeOptions.includes(prev) ? prev : stepTypeOptions[0]
-    );
-  }, [stepTypeOptions]);
+    setIsLibraryOpen(true);
+  }, [hasAvailableModules]);
 
-  const handleAddStep = useCallback(() => {
-    if (!nextStepType) return;
-    onAddStep(nextStepType);
-  }, [nextStepType, onAddStep]);
+  const handleCloseLibrary = useCallback(() => {
+    setIsLibraryOpen(false);
+  }, []);
+
+  const handleImportModule = useCallback(
+    (component: string, metadata: StepSequenceModuleMetadata) => {
+      onAddStep(component, metadata);
+      setIsLibraryOpen(false);
+    },
+    [onAddStep]
+  );
 
   return (
     <section
@@ -434,6 +501,7 @@ function StepSequenceEditor({
               step={step}
               index={index}
               stepTypeOptions={stepTypeOptions}
+              getModuleLabel={getModuleLabel}
               onRemove={onRemoveStep}
               onMoveUp={() => onMoveStep(index, Math.max(0, index - 1))}
               onMoveDown={() =>
@@ -447,35 +515,32 @@ function StepSequenceEditor({
           ))
         )}
       </div>
-      <div className="space-y-2 rounded-2xl border border-dashed border-orange-200 bg-white/70 p-4">
-        <label className="flex flex-col gap-1 text-xs font-semibold text-orange-700">
-          Type d'étape à ajouter
-          <select
-            value={nextStepType}
-            onChange={(event) => setNextStepType(event.target.value)}
-            className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
-            disabled={stepTypeOptions.length === 0}
-          >
-            {stepTypeOptions.length === 0 ? (
-              <option value="">Aucun module disponible</option>
-            ) : (
-              stepTypeOptions.map((type) => (
-                <option key={type} value={type}>
-                  {getStepTypeLabel(type)}
-                </option>
-              ))
-            )}
-          </select>
-        </label>
+      <div className="space-y-3 rounded-2xl border border-dashed border-orange-200 bg-white/70 p-4 text-sm text-orange-700">
+        <p>
+          Parcourez la bibliothèque des modules StepSequence pour ajouter une nouvelle étape à
+          cette activité.
+        </p>
         <button
           type="button"
-          onClick={handleAddStep}
-          disabled={stepTypeOptions.length === 0 || !nextStepType}
+          onClick={handleOpenLibrary}
+          disabled={!hasAvailableModules}
           className="inline-flex items-center justify-center rounded-full border border-orange-300 bg-white px-4 py-2 text-xs font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Ajouter une étape
+          Ouvrir la bibliothèque de modules
         </button>
+        {!hasAvailableModules ? (
+          <p className="text-xs text-orange-700/70">
+            Aucun module StepSequence n'est actuellement enregistré. Ajoutez-en via le registre
+            pour enrichir la bibliothèque.
+          </p>
+        ) : null}
       </div>
+      <StepSequenceModuleLibraryModal
+        open={isLibraryOpen && hasAvailableModules}
+        entries={moduleLibraryEntries}
+        onClose={handleCloseLibrary}
+        onImport={handleImportModule}
+      />
     </section>
   );
 }
@@ -529,17 +594,48 @@ function ActivitySelector(): JSX.Element {
     () => new Map(defaultActivities.map((activity) => [activity.id, activity])),
     [defaultActivities]
   );
-  const stepComponentKeys = useMemo(
-    () =>
-      Object.keys(STEP_COMPONENT_REGISTRY)
-        .filter(
-          (key) =>
-            !HIDDEN_STEP_COMPONENT_PREFIXES.some((prefix) =>
-              key.startsWith(prefix)
-            )
-        )
-        .sort((a, b) => a.localeCompare(b)),
+  const registeredModuleKeys = useMemo(
+    () => listRegisteredStepSequenceModuleKeys(),
     []
+  );
+  const [moduleConfigs, setModuleConfigs] = useState<StepSequenceModuleConfig[]>([]);
+  const moduleConfigMap = useMemo(() => {
+    const map = new Map<string, StepSequenceModuleConfig>();
+    for (const config of moduleConfigs) {
+      map.set(config.key, config);
+    }
+    return map;
+  }, [moduleConfigs]);
+  const enabledModuleKeys = useMemo(
+    () =>
+      registeredModuleKeys.filter((key) => {
+        const config = moduleConfigMap.get(key);
+        if (!config) {
+          return true;
+        }
+        return config.enabled !== false;
+      }),
+    [moduleConfigMap, registeredModuleKeys]
+  );
+  const resolveModuleLibraryEntry = useCallback(
+    (key: string) =>
+      getStepSequenceModuleLibraryEntry(
+        key,
+        getStepSequenceModuleLabel(key),
+        moduleConfigMap.get(key)
+      ),
+    [moduleConfigMap]
+  );
+  const moduleLibraryEntries = useMemo(
+    () => enabledModuleKeys.map((key) => resolveModuleLibraryEntry(key)),
+    [enabledModuleKeys, resolveModuleLibraryEntry]
+  );
+  const resolveModuleLabel = useCallback(
+    (key: string) => {
+      const entry = resolveModuleLibraryEntry(key);
+      return entry.title || getStepSequenceModuleLabel(key);
+    },
+    [resolveModuleLibraryEntry]
   );
 
   const buildEditableActivities = useCallback(
@@ -681,7 +777,7 @@ function ActivitySelector(): JSX.Element {
     [generationModel]
   );
 
-  const canUseStepSequenceShortcut = stepComponentKeys.length > 0;
+  const canUseStepSequenceShortcut = enabledModuleKeys.length > 0;
   const newSequenceButtonClasses = `group flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition ${
     canUseStepSequenceShortcut
       ? "border-orange-300 bg-white/70 text-orange-600 hover:border-orange-400 hover:bg-orange-50 hover:text-orange-700"
@@ -827,36 +923,41 @@ function ActivitySelector(): JSX.Element {
 
     loadConfigMutexRef.current = true;
     setIsLoading(true);
-    try {
-      const response = await activitiesClient.getConfig();
-      const rawActivities = Array.isArray(response.activities)
-        ? (response.activities as ActivityConfigEntry[])
-        : undefined;
-      const includeMissingDefaults = response.usesDefaultFallback !== false;
-      setEditableActivities(
-        buildEditableActivities(rawActivities, { includeMissingDefaults })
-      );
-      const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
-      setHeaderOverrides(savedHeader ?? {});
-      const savedGenerationConfig =
-        response.activityGeneration &&
-        typeof response.activityGeneration === "object"
-          ? (response.activityGeneration as ActivityGenerationAdminConfig)
-          : null;
-      setSavedActivityGenerationConfig(savedGenerationConfig);
-    } catch (error) {
-      console.warn(
-        "Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut",
-        error
-      );
-      setEditableActivities(buildEditableActivities());
-      setHeaderOverrides({});
-      setSavedActivityGenerationConfig(null);
-    } finally {
-      setIsLoading(false);
-      loadConfigMutexRef.current = false;
-    }
-  }, [buildEditableActivities]);
+      try {
+        const response = await activitiesClient.getConfig();
+        const rawActivities = Array.isArray(response.activities)
+          ? (response.activities as ActivityConfigEntry[])
+          : undefined;
+        const includeMissingDefaults = response.usesDefaultFallback !== false;
+        setEditableActivities(
+          buildEditableActivities(rawActivities, { includeMissingDefaults })
+        );
+        const savedHeader = sanitizeHeaderConfig(response.activitySelectorHeader);
+        setHeaderOverrides(savedHeader ?? {});
+        const savedGenerationConfig =
+          response.activityGeneration &&
+          typeof response.activityGeneration === "object"
+            ? (response.activityGeneration as ActivityGenerationAdminConfig)
+            : null;
+        setSavedActivityGenerationConfig(savedGenerationConfig);
+        const savedModules = sanitizeStepSequenceModuleConfigList(
+          response.stepSequenceModules
+        );
+        setModuleConfigs(savedModules);
+      } catch (error) {
+        console.warn(
+          "Aucune configuration sauvegardée trouvée, utilisation de la configuration par défaut",
+          error
+        );
+        setEditableActivities(buildEditableActivities());
+        setHeaderOverrides({});
+        setSavedActivityGenerationConfig(null);
+        setModuleConfigs([]);
+      } finally {
+        setIsLoading(false);
+        loadConfigMutexRef.current = false;
+      }
+    }, [buildEditableActivities]);
 
   useEffect(() => {
     void loadSavedConfig();
@@ -873,6 +974,10 @@ function ActivitySelector(): JSX.Element {
         const rawActivities = Array.isArray(response.activities)
           ? (response.activities as ActivityConfigEntry[])
           : [];
+        const refreshedModules = sanitizeStepSequenceModuleConfigList(
+          response.stepSequenceModules
+        );
+        setModuleConfigs(refreshedModules);
         const target = rawActivities.find((activity) => activity.id === activityId);
         if (!target) {
           return null;
@@ -1142,7 +1247,11 @@ function ActivitySelector(): JSX.Element {
   };
 
   const handleAddStepToActivity = useCallback(
-    (activityId: string, component: string) => {
+    (
+      activityId: string,
+      component: string,
+      metadata: StepSequenceModuleMetadata | null | undefined
+    ) => {
       if (!isEditMode) return;
 
       setEditableActivities((prev) =>
@@ -1156,6 +1265,13 @@ function ActivitySelector(): JSX.Element {
           while (existingIds.has(stepId)) {
             stepId = generateUniqueId("step");
           }
+          const metadataCopy = metadata
+            ? {
+                title: metadata.title ?? null,
+                description: metadata.description ?? null,
+                coverImage: metadata.coverImage ?? null,
+              }
+            : null;
           const nextStep: StepDefinition =
             component === "composite"
               ? {
@@ -1166,10 +1282,12 @@ function ActivitySelector(): JSX.Element {
                     autoAdvance: null,
                     continueLabel: null,
                   },
+                  metadata: metadataCopy,
                 }
               : {
                   id: stepId,
                   component,
+                  metadata: metadataCopy,
                 };
           const nextSteps: StepDefinition[] = [
             ...baseSteps.map((step) => ({ ...step })),
@@ -1259,6 +1377,12 @@ function ActivitySelector(): JSX.Element {
               return { ...step };
             }
             updated = true;
+            const libraryEntry = resolveModuleLibraryEntry(component);
+            const metadataCopy: StepSequenceModuleMetadata | null = {
+              title: libraryEntry.metadata.title ?? null,
+              description: libraryEntry.metadata.description ?? null,
+              coverImage: libraryEntry.metadata.coverImage ?? null,
+            };
             if (component === "composite") {
               const existingComposite = isCompositeStepDefinition(step)
                 ? step.composite
@@ -1272,12 +1396,14 @@ function ActivitySelector(): JSX.Element {
                     autoAdvance: null,
                     continueLabel: null,
                   },
+                metadata: metadataCopy,
               };
             }
             return {
               id: step.id,
               component,
               config: undefined,
+              metadata: metadataCopy,
             };
           });
           if (!updated) {
@@ -1290,7 +1416,7 @@ function ActivitySelector(): JSX.Element {
         })
       );
     },
-    [isEditMode]
+    [isEditMode, resolveModuleLibraryEntry]
   );
 
   const handleUpdateStepConfig = useCallback(
@@ -1374,7 +1500,9 @@ function ActivitySelector(): JSX.Element {
         candidateId = generateUniqueId("sequence");
       }
 
-      const templateSteps = createDefaultStepSequenceTemplate();
+      const templateSteps = createDefaultStepSequenceTemplate(
+        resolveModuleLibraryEntry
+      );
 
       const baseEntry: ActivityConfigEntry = {
         id: candidateId,
@@ -1424,6 +1552,11 @@ function ActivitySelector(): JSX.Element {
       };
       if (savedActivityGenerationConfig) {
         payload.activityGeneration = savedActivityGenerationConfig;
+      }
+      if (moduleConfigs.length > 0) {
+        payload.stepSequenceModules = moduleConfigs;
+      } else {
+        payload.stepSequenceModules = [];
       }
 
       await admin.activities.save(payload, token);
@@ -1991,9 +2124,11 @@ function ActivitySelector(): JSX.Element {
               <StepSequenceEditor
                 activityTitle={activity.card.title}
                 steps={activity.stepSequence ?? []}
-                stepTypeOptions={stepComponentKeys}
-                onAddStep={(component) =>
-                  handleAddStepToActivity(activity.id, component)
+                stepTypeOptions={enabledModuleKeys}
+                moduleLibraryEntries={moduleLibraryEntries}
+                getModuleLabel={resolveModuleLabel}
+                onAddStep={(component, metadata) =>
+                  handleAddStepToActivity(activity.id, component, metadata)
                 }
                 onRemoveStep={(stepId) =>
                   handleRemoveStepFromActivity(activity.id, stepId)

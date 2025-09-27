@@ -6,6 +6,7 @@ import { useAdminAuth } from "../../providers/AdminAuthProvider";
 
 const NAV_LINKS = [
   { to: "/admin/activity-generation", label: "Conception d'activités IA" },
+  { to: "/admin/step-sequence-modules", label: "Modules StepSequence" },
   { to: "/admin/platforms", label: "Plateformes LTI" },
   { to: "/admin/lti-users", label: "Utilisateurs LTI" },
   { to: "/admin/local-users", label: "Comptes internes" },

@@ -14,11 +14,18 @@ export interface CompositeStepConfig {
   continueLabel: string | null;
 }
 
+export interface StepSequenceModuleMetadata {
+  title?: string | null;
+  description?: string | null;
+  coverImage?: string | null;
+}
+
 export interface ComponentStepDefinition {
   id: string;
   component: string;
   config?: unknown | null;
   composite?: null;
+  metadata?: StepSequenceModuleMetadata | null;
 }
 
 export interface CompositeStepDefinition {
@@ -26,6 +33,7 @@ export interface CompositeStepDefinition {
   component?: string;
   config?: unknown | null;
   composite: CompositeStepConfig;
+  metadata?: StepSequenceModuleMetadata | null;
 }
 
 export type StepDefinition =

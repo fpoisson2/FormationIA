@@ -18,6 +18,7 @@ import { AdminLtiUsersPage } from "./pages/admin/AdminLtiUsersPage";
 import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
 import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
+import { AdminStepSequenceModulesPage } from "./pages/admin/AdminStepSequenceModulesPage";
 import { activities as activitiesClient } from "./api";
 
 function App(): JSX.Element {
@@ -103,6 +104,10 @@ function App(): JSX.Element {
           <Route
             path="activity-generation"
             element={<AdminActivityGenerationPage />}
+          />
+          <Route
+            path="step-sequence-modules"
+            element={<AdminStepSequenceModulesPage />}
           />
           <Route path="platforms" element={<AdminPlatformsPage />} />
           <Route path="lti-users" element={<AdminLtiUsersPage />} />

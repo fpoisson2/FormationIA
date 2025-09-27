@@ -1,6 +1,7 @@
 import { API_BASE_URL, API_AUTH_KEY } from "./config";
 import type { ModelChoice, VerbosityChoice, ThinkingChoice } from "./config";
 import type { StepSequenceToolDefinition } from "./modules/step-sequence";
+import type { StepSequenceModuleConfig } from "./modules/step-sequence/moduleLibrary";
 
 export type FieldType =
   | "bulleted_list"
@@ -373,6 +374,7 @@ export interface ActivityConfig {
   activities: any[];
   activitySelectorHeader?: ActivitySelectorHeaderConfig;
   activityGeneration?: ActivityGenerationAdminConfig;
+  stepSequenceModules?: StepSequenceModuleConfig[];
 }
 
 export interface ActivityConfigResponse extends ActivityConfig {

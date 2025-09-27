@@ -180,6 +180,11 @@ export function AdminActivityGenerationPage(): JSX.Element {
         developerMessage: trimmedDeveloper,
       },
     };
+    if (Array.isArray(baseConfig.stepSequenceModules)) {
+      payload.stepSequenceModules = baseConfig.stepSequenceModules;
+    } else {
+      payload.stepSequenceModules = [];
+    }
 
     try {
       await admin.activities.save(payload, token);
@@ -193,6 +198,7 @@ export function AdminActivityGenerationPage(): JSX.Element {
           systemMessage: trimmedSystem,
           developerMessage: trimmedDeveloper,
         },
+        stepSequenceModules: payload.stepSequenceModules,
       };
       setFormState(updatedForm);
       setInitialState(updatedForm);

@@ -657,6 +657,7 @@ def _load_activities_config() -> dict[str, Any]:
             "usesDefaultFallback": True,
             "activityGeneration": ActivityGenerationConfig()
             .model_dump(by_alias=True, exclude_none=True),
+            "stepSequenceModules": [],
         }
 
     try:
@@ -668,6 +669,7 @@ def _load_activities_config() -> dict[str, Any]:
     activities: list[dict[str, Any]]
     activity_selector_header: dict[str, Any] | None = None
     activity_generation_data: dict[str, Any] | None = None
+    modules_data: list[dict[str, Any]] | None = None
 
     if isinstance(raw_data, list):
         activities = raw_data
@@ -695,6 +697,25 @@ def _load_activities_config() -> dict[str, Any]:
                     detail="activityGeneration doit être un objet JSON.",
                 )
             activity_generation_data = generation_data
+        modules_raw = raw_data.get("stepSequenceModules")
+        if modules_raw is not None:
+            if not isinstance(modules_raw, list):
+                raise HTTPException(
+                    status_code=500,
+                    detail="stepSequenceModules doit être un tableau de modules.",
+                )
+            try:
+                modules_data = [
+                    StepSequenceModuleConfig.model_validate(entry).model_dump(
+                        by_alias=True, exclude_none=True
+                    )
+                    for entry in modules_raw
+                ]
+            except ValidationError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="stepSequenceModules contient un module invalide.",
+                ) from exc
     else:
         raise HTTPException(
             status_code=500,
@@ -722,6 +743,8 @@ def _load_activities_config() -> dict[str, Any]:
     }
     if activity_selector_header is not None:
         config["activitySelectorHeader"] = activity_selector_header
+    if modules_data is not None:
+        config["stepSequenceModules"] = modules_data
 
     return config
 
@@ -772,6 +795,40 @@ def _save_activities_config(config: dict[str, Any]) -> None:
             )
         payload["activitySelectorHeader"] = header
 
+    modules_config = config.get("stepSequenceModules")
+    if modules_config is not None:
+        if not isinstance(modules_config, list):
+            raise HTTPException(
+                status_code=400,
+                detail="stepSequenceModules doit être un tableau de modules.",
+            )
+        validated_modules: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for index, entry in enumerate(modules_config, start=1):
+            try:
+                module = StepSequenceModuleConfig.model_validate(entry)
+            except ValidationError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "stepSequenceModules contient une configuration invalide "
+                        f"à l'index {index}."
+                    ),
+                ) from exc
+            if module.key in seen_keys:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "stepSequenceModules contient plusieurs entrées pour la "
+                        f"clé « {module.key} »."
+                    ),
+                )
+            seen_keys.add(module.key)
+            validated_modules.append(
+                module.model_dump(by_alias=True, exclude_none=True)
+            )
+        payload["stepSequenceModules"] = validated_modules
+
     try:
         with ACTIVITIES_CONFIG_PATH.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
@@ -806,6 +863,7 @@ def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
         existing = list(current_config.get("activities", []))
         header = current_config.get("activitySelectorHeader")
         generation = current_config.get("activityGeneration")
+        modules = current_config.get("stepSequenceModules")
 
         filtered: list[dict[str, Any]] = []
         target_id = normalized_activity.get("id")
@@ -820,6 +878,8 @@ def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
             payload["activitySelectorHeader"] = header
         if generation is not None:
             payload["activityGeneration"] = generation
+        if modules is not None:
+            payload["stepSequenceModules"] = modules
 
         _save_activities_config(payload)
 
@@ -1582,6 +1642,25 @@ class StepDefinitionPayload(BaseModel):
     type: str = Field(..., min_length=1)
 
 
+class StepSequenceModuleConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    key: str = Field(..., min_length=1, max_length=120)
+    enabled: bool = Field(default=True)
+    title: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=1200)
+    cover_image: str | None = Field(default=None, alias="coverImage", max_length=2000)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "StepSequenceModuleConfig":
+        for field_name in ("title", "description", "cover_image"):
+            value = getattr(self, field_name)
+            if isinstance(value, str):
+                trimmed = value.strip()
+                object.__setattr__(self, field_name, trimmed or None)
+        return self
+
+
 class ActivityPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="allow")
 
@@ -1624,6 +1703,9 @@ class ActivityConfigRequest(BaseModel):
     )
     activity_generation: ActivityGenerationConfig | None = Field(
         default=None, alias="activityGeneration"
+    )
+    step_sequence_modules: list[StepSequenceModuleConfig] | None = Field(
+        default=None, alias="stepSequenceModules"
     )
 
 class LTIScoreRequest(BaseModel):

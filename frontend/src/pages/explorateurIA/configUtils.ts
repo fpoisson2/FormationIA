@@ -30,6 +30,8 @@ export function cloneStepDefinition(step: StepDefinition): StepDefinition {
       config:
         step.config == null ? step.config : cloneStepConfig(step.config),
       composite: cloneStepConfig(step.composite),
+      metadata:
+        step.metadata == null ? step.metadata : cloneStepConfig(step.metadata),
     } satisfies StepDefinition;
   }
   return {
@@ -38,6 +40,8 @@ export function cloneStepDefinition(step: StepDefinition): StepDefinition {
     config:
       step.config == null ? step.config : cloneStepConfig(step.config),
     composite: null,
+    metadata:
+      step.metadata == null ? step.metadata : cloneStepConfig(step.metadata),
   } satisfies StepDefinition;
 }
 
@@ -85,6 +89,7 @@ export function sanitizeSteps(
       id?: unknown;
       component?: unknown;
       config?: unknown;
+      metadata?: unknown;
     };
     if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) {
       continue;
@@ -103,6 +108,12 @@ export function sanitizeSteps(
           ? candidate.config
           : cloneStepConfig(candidate.config),
       composite: null,
+      metadata:
+        candidate.metadata == null
+          ? null
+          : typeof candidate.metadata === "object"
+          ? cloneStepConfig(candidate.metadata)
+          : null,
     });
   }
   return steps;

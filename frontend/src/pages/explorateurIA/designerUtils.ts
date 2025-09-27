@@ -127,11 +127,20 @@ export function ensureDesignerStepId(
       config:
         step.config == null ? step.config : cloneStepConfig(step.config),
       composite: cloneStepConfig(step.composite),
+      metadata:
+        step.metadata == null ? step.metadata : cloneStepConfig(step.metadata),
     } satisfies StepDefinition;
   }
   const config =
     step.config == null ? step.config : cloneStepConfig(step.config);
-  return { id, component, config, composite: null } satisfies StepDefinition;
+  return {
+    id,
+    component,
+    config,
+    composite: null,
+    metadata:
+      step.metadata == null ? step.metadata : cloneStepConfig(step.metadata),
+  } satisfies StepDefinition;
 }
 
 export function createPlaceholderQuarterSteps(
