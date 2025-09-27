@@ -626,15 +626,6 @@ export function ClarityMapStep({
     [applyConfigPatch]
   );
 
-  const handleShuffleTarget = useCallback(() => {
-    setTarget((previous) => {
-      const next = createRandomTarget(previous);
-      setBlocked(createRandomObstacles(next, obstacleCount));
-      setRunId(createRunId());
-      return next;
-    });
-  }, [obstacleCount]);
-
   const handleShuffleObstacles = useCallback(() => {
     setBlocked(createRandomObstacles(target, obstacleCount));
     setRunId(createRunId());
@@ -881,13 +872,6 @@ export function ClarityMapStep({
             <ClarityGrid player={playerPosition} target={target} blocked={blocked} visited={visited} />
           </div>
           <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleShuffleTarget}
-              className="inline-flex items-center justify-center rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-[color:var(--brand-red)] shadow-sm transition hover:bg-white"
-            >
-              Nouvelle cible
-            </button>
             <button
               type="button"
               onClick={handleShuffleObstacles}

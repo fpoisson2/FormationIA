@@ -44,20 +44,22 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                 return (
                   <div
                     key={key}
-                    className={`relative border border-white/40 ${
+                    className={`relative overflow-hidden border border-white/40 ${
                       isVisited ? "bg-[color:var(--brand-yellow)]/30" : "bg-white/60"
                     }`}
                   >
                     {isBlocked && (
-                      <span className="absolute inset-0 flex items-center justify-center text-xs text-[color:var(--brand-red)]">🧱</span>
+                      <span className="absolute inset-0 flex items-center justify-center bg-[color:var(--brand-red)]/70 text-sm font-semibold text-white">
+                        🧱
+                      </span>
                     )}
                     {isStart && (
-                      <span className="absolute left-1 top-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]">
+                      <span className="absolute left-1 top-1 z-[1] text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]">
                         Start
                       </span>
                     )}
                     {isTarget && (
-                      <span className="absolute right-1 top-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
+                      <span className="absolute right-1 top-1 z-[1] text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
                         Goal
                       </span>
                     )}
