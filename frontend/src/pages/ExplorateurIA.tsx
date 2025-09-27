@@ -6539,25 +6539,6 @@ function ExplorateurIAConfigDesigner({
           })}
         </div>
       </section>
-      {canToggleEditMode ? (
-        <div className="px-4 pb-6 pt-6 sm:px-6">
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={handleToggleEditMode}
-              className={classNames(
-                "inline-flex items-center justify-center rounded-full border px-5 py-2 text-sm font-semibold transition",
-                isEditMode
-                  ? "border-red-500/30 bg-red-50 text-red-700 hover:border-red-500/50 hover:bg-red-100"
-                  : "border-orange-400/30 bg-orange-50 text-orange-700 hover:border-orange-400/50 hover:bg-orange-100"
-              )}
-              aria-pressed={isEditMode}
-            >
-              {isEditMode ? "Quitter l'édition" : "Mode édition"}
-            </button>
-          </div>
-        </div>
-      ) : null}
       <Modal
         open={Boolean(openQuarter)}
         onClose={handleCloseDesigner}
