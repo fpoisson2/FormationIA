@@ -99,16 +99,23 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
 export interface PlanPreviewProps {
   plan: PlanAction[];
   notes: string;
+  placeholderMessage?: string;
+  showPlaceholder?: boolean;
 }
 
-export function PlanPreview({ plan, notes }: PlanPreviewProps): JSX.Element {
+export function PlanPreview({
+  plan,
+  notes,
+  placeholderMessage = "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.",
+  showPlaceholder = true,
+}: PlanPreviewProps): JSX.Element {
   if (!plan.length && !notes) {
     return (
       <div className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm">
         <h3 className="text-lg font-semibold text-[color:var(--brand-black)]">Plan</h3>
-        <p className="mt-2 text-sm text-[color:var(--brand-charcoal)]/80">
-          Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.
-        </p>
+        {showPlaceholder && placeholderMessage.trim().length > 0 ? (
+          <p className="mt-2 text-sm text-[color:var(--brand-charcoal)]/80">{placeholderMessage}</p>
+        ) : null}
       </div>
     );
   }
