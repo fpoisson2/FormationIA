@@ -52,6 +52,21 @@ type HlsModule = {
   Hls?: typeof Hls;
 };
 
+type HlsModuleLoader = () => Promise<HlsModule>;
+
+const HLS_DIST_GLOB = import.meta.glob<HlsModule>([
+  "/node_modules/hls.js/dist/hls.mjs",
+  "/node_modules/hls.js/dist/hls.min.mjs",
+  "/node_modules/hls.js/dist/hls.light.mjs",
+]);
+
+const HLS_MODULE_LOADERS: HlsModuleLoader[] = [
+  ...Object.values(HLS_DIST_GLOB),
+  () => import("hls.js") as Promise<HlsModule>,
+  () =>
+    import(/* @vite-ignore */ "hls.js/dist/hls.mjs") as Promise<HlsModule>,
+];
+
 let cachedHlsConstructor: typeof Hls | null | undefined;
 
 async function loadHlsConstructor(): Promise<typeof Hls | null> {
@@ -76,12 +91,7 @@ async function loadHlsConstructor(): Promise<typeof Hls | null> {
     }
   };
 
-  const loaderCandidates: Array<() => Promise<HlsModule>> = [
-    () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>,
-    () => import("hls.js") as Promise<HlsModule>,
-  ];
-
-  for (const loader of loaderCandidates) {
+  for (const loader of HLS_MODULE_LOADERS) {
     const constructor = await attemptImport(loader);
     if (constructor) {
       cachedHlsConstructor = constructor;

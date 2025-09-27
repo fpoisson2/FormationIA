@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import ActivitySelector from "./pages/ActivitySelector";
 import LandingPage from "./pages/LandingPage";
@@ -19,6 +19,33 @@ import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
 import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
 import { activities as activitiesClient } from "./api";
+
+function AdminLoginRedirect(): JSX.Element {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const queryRedirect = params.get("redirect");
+
+  const locationState = location.state as { from?: string } | null;
+  const stateRedirect =
+    typeof locationState?.from === "string" ? locationState.from : null;
+
+  const resolveTarget = (candidate: string | null): string | null => {
+    if (typeof candidate !== "string") {
+      return null;
+    }
+    if (!candidate.startsWith("/")) {
+      return null;
+    }
+    return candidate.startsWith("/admin") ? candidate : null;
+  };
+
+  const desiredRedirect =
+    resolveTarget(queryRedirect) ?? resolveTarget(stateRedirect) ?? "/admin";
+
+  return (
+    <Navigate to="/connexion" replace state={{ from: desiredRedirect }} />
+  );
+}
 
 function App(): JSX.Element {
   const [configEntries, setConfigEntries] = useState<ActivityConfigEntry[] | null>(
@@ -96,6 +123,7 @@ function App(): JSX.Element {
           </ActivityAccessGuard>
         }
       />
+      <Route path="/admin/connexion" element={<AdminLoginRedirect />} />
       <Route path="/connexion" element={<LoginPage />} />
       <Route element={<AdminGuard />}>
         <Route path="/admin" element={<AdminLayout />}>
