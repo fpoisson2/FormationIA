@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import logoPrincipal from "../assets/logo_principal.svg";
@@ -12,7 +12,19 @@ import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
+const USER_ROLES = [
+  "usager",
+  "user",
+  "participant",
+  "learner",
+  "etudiant",
+  "étudiant",
+] as const;
 const ADMIN_ROLE_SET = new Set(ADMIN_ROLES);
+const ACTIVITY_ROLE_SET = new Set<string>([
+  ...ADMIN_ROLES,
+  ...USER_ROLES,
+]);
 
 const DEFAULT_LANDING_PAGE_CONTENT: LandingPageContent = {
   brandTagline: "Studio pédagogique IA",
@@ -184,14 +196,21 @@ function LandingPage(): JSX.Element {
   const { isLTISession, loading: ltiLoading } = useLTI();
   const { status: adminStatus, user: adminUser, token, isEditMode, setEditMode } =
     useAdminAuth();
-  const normalizedAdminRoles = Array.isArray(adminUser?.roles)
-    ? adminUser.roles
-        .map((role) => (typeof role === "string" ? role.toLowerCase() : ""))
-        .filter((role): role is string => role.length > 0)
-    : [];
+  const normalizedAdminRoles = useMemo(() => {
+    if (!Array.isArray(adminUser?.roles)) {
+      return [] as string[];
+    }
+    return adminUser.roles
+      .map((role) => (typeof role === "string" ? role.toLowerCase() : ""))
+      .filter((role): role is string => role.length > 0);
+  }, [adminUser?.roles]);
   const canEdit =
     adminStatus === "authenticated" &&
     normalizedAdminRoles.some((role) => ADMIN_ROLE_SET.has(role));
+  const canAccessActivities = useMemo(
+    () => normalizedAdminRoles.some((role) => ACTIVITY_ROLE_SET.has(role)),
+    [normalizedAdminRoles]
+  );
 
   const [content, setContent] = useState<LandingPageContent>(() =>
     cloneLandingContent(DEFAULT_LANDING_PAGE_CONTENT)
@@ -204,10 +223,21 @@ function LandingPage(): JSX.Element {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (!ltiLoading && isLTISession) {
+    if (ltiLoading || adminStatus === "loading") {
+      return;
+    }
+
+    if (isLTISession || (adminStatus === "authenticated" && canAccessActivities && !canEdit)) {
       navigate("/activites", { replace: true });
     }
-  }, [isLTISession, ltiLoading, navigate]);
+  }, [
+    adminStatus,
+    canAccessActivities,
+    canEdit,
+    isLTISession,
+    ltiLoading,
+    navigate,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
