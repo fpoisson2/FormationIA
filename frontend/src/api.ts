@@ -379,6 +379,16 @@ export interface ActivityConfigResponse extends ActivityConfig {
   usesDefaultFallback?: boolean;
 }
 
+export interface ActivityImportPayload {
+  activity: Record<string, unknown>;
+}
+
+export interface ActivityImportResponse {
+  ok: boolean;
+  activity: Record<string, unknown>;
+  replaced: boolean;
+}
+
 export interface SaveActivityConfigResponse {
   ok: boolean;
   message: string;
@@ -498,6 +508,31 @@ export const admin = {
       fetchJson<ActivityConfigResponse>(
         `${API_BASE_URL}/admin/activities`,
         withAdminCredentials({}, token)
+      ),
+    export: async (
+      activityId: string,
+      token?: string | null
+    ): Promise<Record<string, unknown>> =>
+      fetchJson<Record<string, unknown>>(
+        `${API_BASE_URL}/admin/activities/${encodeURIComponent(activityId)}`,
+        withAdminCredentials({}, token)
+      ),
+    import: async (
+      payload: ActivityImportPayload,
+      token?: string | null
+    ): Promise<ActivityImportResponse> =>
+      fetchJson<ActivityImportResponse>(
+        `${API_BASE_URL}/admin/activities/import`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+          token
+        )
       ),
     save: async (
       payload: ActivityConfig,

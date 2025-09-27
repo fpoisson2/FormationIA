@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 
 import {
   admin,
@@ -15,6 +22,66 @@ import { useAdminAuth } from "../../providers/AdminAuthProvider";
 interface FormState {
   systemMessage: string;
   developerMessage: string;
+}
+
+type ActivityJson = Record<string, unknown>;
+
+interface ActivityOption {
+  id: string;
+  label: string;
+}
+
+function isActivityJson(value: unknown): value is ActivityJson {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function resolveActivityLabel(activity: ActivityJson | null | undefined): string {
+  if (!activity) {
+    return "activité";
+  }
+  const rawLabel = activity["label"];
+  if (typeof rawLabel === "string" && rawLabel.trim().length > 0) {
+    return rawLabel.trim();
+  }
+  const rawTitle = activity["title"];
+  if (typeof rawTitle === "string" && rawTitle.trim().length > 0) {
+    return rawTitle.trim();
+  }
+  const rawId = activity["id"];
+  if (typeof rawId === "string" && rawId.trim().length > 0) {
+    return rawId.trim();
+  }
+  return "activité";
+}
+
+function extractActivityId(activity: ActivityJson | null | undefined): string | null {
+  if (!activity) {
+    return null;
+  }
+  const rawId = activity["id"];
+  if (typeof rawId === "string") {
+    const trimmed = rawId.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function extractActivityFromPayload(payload: unknown): ActivityJson {
+  if (!isActivityJson(payload)) {
+    throw new Error("Le fichier JSON doit contenir un objet d'activité valide.");
+  }
+  const candidate = payload["activity"];
+  if (candidate !== undefined) {
+    if (!isActivityJson(candidate)) {
+      throw new Error(
+        "Le champ \"activity\" doit contenir un objet JSON représentant une activité."
+      );
+    }
+    return candidate;
+  }
+  return payload;
 }
 
 function sanitizeMessage(input: string): string {
@@ -55,6 +122,7 @@ function getErrorMessage(error: unknown): string {
 export function AdminActivityGenerationPage(): JSX.Element {
   const { token } = useAdminAuth();
   const configRef = useRef<ActivityConfigResponse | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [formState, setFormState] = useState<FormState>(() =>
     resolveInitialForm(null)
   );
@@ -63,8 +131,12 @@ export function AdminActivityGenerationPage(): JSX.Element {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [availableActivities, setAvailableActivities] = useState<ActivityJson[]>([]);
+  const [selectedActivityId, setSelectedActivityId] = useState<string>("");
 
   const hasChanges = useMemo(() => {
     return (
@@ -72,6 +144,27 @@ export function AdminActivityGenerationPage(): JSX.Element {
       formState.developerMessage !== initialState.developerMessage
     );
   }, [formState, initialState]);
+
+  const activityOptions = useMemo<ActivityOption[]>(() => {
+    return availableActivities.reduce<ActivityOption[]>((acc, activity) => {
+      const id = extractActivityId(activity);
+      if (!id) {
+        return acc;
+      }
+      acc.push({ id, label: resolveActivityLabel(activity) });
+      return acc;
+    }, []);
+  }, [availableActivities]);
+
+  useEffect(() => {
+    setSelectedActivityId((previous) => {
+      if (activityOptions.length === 0) {
+        return "";
+      }
+      const exists = activityOptions.some((option) => option.id === previous);
+      return exists ? previous : activityOptions[0]?.id ?? "";
+    });
+  }, [activityOptions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,8 +176,16 @@ export function AdminActivityGenerationPage(): JSX.Element {
         if (cancelled) {
           return;
         }
-        configRef.current = response;
-        const nextForm = resolveInitialForm(response.activityGeneration);
+        const activities = Array.isArray(response.activities)
+          ? response.activities.filter(isActivityJson)
+          : [];
+        const sanitizedResponse: ActivityConfigResponse = {
+          ...response,
+          activities,
+        };
+        configRef.current = sanitizedResponse;
+        setAvailableActivities(activities);
+        const nextForm = resolveInitialForm(sanitizedResponse.activityGeneration);
         setFormState(nextForm);
         setInitialState(nextForm);
       } catch (loadError) {
@@ -119,6 +220,120 @@ export function AdminActivityGenerationPage(): JSX.Element {
       window.clearTimeout(timeout);
     };
   }, [success]);
+
+  const handleTriggerImport = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImportFile = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+      setIsImporting(true);
+      setError(null);
+      setSuccess(null);
+      try {
+        const text = await file.text();
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          throw new Error("Le fichier sélectionné n'est pas un JSON valide.");
+        }
+        const activityPayload = extractActivityFromPayload(parsed);
+        const response = await admin.activities.import(
+          { activity: activityPayload },
+          token
+        );
+        const importedActivity = response.activity;
+        if (!isActivityJson(importedActivity)) {
+          throw new Error(
+            "La réponse du serveur ne contient pas une activité valide."
+          );
+        }
+        const importedId = extractActivityId(importedActivity);
+        const baseActivitiesSource: unknown[] = Array.isArray(
+          configRef.current?.activities
+        )
+          ? [...(configRef.current?.activities as unknown[])]
+          : [...availableActivities];
+        const nextActivities: ActivityJson[] = baseActivitiesSource.filter(
+          isActivityJson
+        ) as ActivityJson[];
+        if (importedId) {
+          const existingIndex = nextActivities.findIndex(
+            (item) => extractActivityId(item) === importedId
+          );
+          if (existingIndex >= 0) {
+            nextActivities[existingIndex] = importedActivity;
+          } else {
+            nextActivities.push(importedActivity);
+          }
+        } else {
+          nextActivities.push(importedActivity);
+        }
+        configRef.current = {
+          ...(configRef.current ?? {}),
+          activities: nextActivities,
+        } as ActivityConfigResponse;
+        setAvailableActivities(nextActivities);
+        if (importedId) {
+          setSelectedActivityId(importedId);
+        }
+        const actionLabel = response.replaced ? "mise à jour" : "ajoutée";
+        setSuccess(
+          `Activité « ${resolveActivityLabel(importedActivity)} » ${actionLabel} avec succès.`
+        );
+      } catch (importError) {
+        setError(getErrorMessage(importError));
+      } finally {
+        setIsImporting(false);
+      }
+    },
+    [token, availableActivities]
+  );
+
+  const handleExportActivity = useCallback(async () => {
+    if (!selectedActivityId) {
+      setSuccess(null);
+      setError("Sélectionnez une activité à exporter.");
+      return;
+    }
+    setIsExporting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const activity = await admin.activities.export(selectedActivityId, token);
+      if (!isActivityJson(activity)) {
+        throw new Error(
+          "Le serveur a renvoyé un JSON d'activité invalide pour l'export."
+        );
+      }
+      const payload = { activity };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const filenameId = extractActivityId(activity) ?? selectedActivityId;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `activite-${filenameId}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setSuccess(
+        `Export de l'activité « ${resolveActivityLabel(activity)} » réussi.`
+      );
+    } catch (exportError) {
+      setError(getErrorMessage(exportError));
+    } finally {
+      setIsExporting(false);
+    }
+  }, [selectedActivityId, token]);
 
   const handleChange = useCallback(
     (field: keyof FormState, value: string) => {
@@ -225,6 +440,8 @@ export function AdminActivityGenerationPage(): JSX.Element {
     );
   }
 
+  const hasActivities = activityOptions.length > 0;
+
   return (
     <div className="space-y-8">
       <header className="space-y-3">
@@ -253,6 +470,76 @@ export function AdminActivityGenerationPage(): JSX.Element {
           {success}
         </div>
       ) : null}
+
+      <section className="space-y-4 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-sm backdrop-blur">
+        <header className="space-y-2">
+          <h3 className="text-base font-semibold text-[color:var(--brand-black)]">
+            Bibliothèque des activités
+          </h3>
+          <p className="text-sm text-[color:var(--brand-charcoal)]/70">
+            Exportez le JSON complet d'une activité existante ou importez un nouveau fichier pour l'ajouter ou la remplacer.
+          </p>
+        </header>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <div className="flex flex-1 flex-col gap-2">
+            <label
+              htmlFor="admin-activity-export-select"
+              className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70"
+            >
+              Activité à exporter
+            </label>
+            {hasActivities ? (
+              <select
+                id="admin-activity-export-select"
+                value={selectedActivityId}
+                onChange={(event) => setSelectedActivityId(event.target.value)}
+                disabled={isExporting}
+                className="rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white/90 px-4 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {activityOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-[color:var(--brand-charcoal)]/20 bg-white/80 px-4 py-3 text-sm text-[color:var(--brand-charcoal)]/70">
+                Aucune activité n'est disponible pour le moment.
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                void handleExportActivity();
+              }}
+              disabled={!hasActivities || isExporting}
+              className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+            >
+              {isExporting ? "Export en cours..." : "Exporter le JSON"}
+            </button>
+            <button
+              type="button"
+              onClick={handleTriggerImport}
+              disabled={isImporting}
+              className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isImporting ? "Import en cours..." : "Importer un JSON"}
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-[color:var(--brand-charcoal)]/60">
+          Les fichiers exportés conservent l'intégralité de la séquence d'étapes et peuvent être réimportés tels quels pour rétablir une activité.
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="space-y-3 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-sm backdrop-blur">
