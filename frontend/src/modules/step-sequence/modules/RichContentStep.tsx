@@ -1,6 +1,6 @@
 import { ChangeEvent, useCallback, useContext, useMemo } from "react";
 
-import type { StepComponentProps } from "../types";
+import type { StepComponentProps, StepComponentWithMetadata } from "../types";
 import { StepSequenceContext } from "../types";
 
 export interface RichContentMediaItem {
@@ -608,3 +608,5 @@ export function RichContentStep({
     </div>
   );
 }
+
+(RichContentStep as StepComponentWithMetadata).stepSequenceHideTitleInHeader = true;
