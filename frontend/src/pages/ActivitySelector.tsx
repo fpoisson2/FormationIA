@@ -727,8 +727,16 @@ function ActivitySelector(): JSX.Element {
     useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
-  const { context, isLTISession, loading: ltiLoading } = useLTI();
-  const { status: adminStatus, user: adminUser, isEditMode, setEditMode, token } = useAdminAuth();
+  const { context, isLTISession, loading: ltiLoading, logout: ltiLogout } = useLTI();
+  const {
+    status: adminStatus,
+    user: adminUser,
+    isEditMode,
+    setEditMode,
+    token,
+    logout: adminLogout,
+    isProcessing: isAdminProcessing,
+  } = useAdminAuth();
   const displayName =
     context?.user?.name?.trim() ||
     context?.user?.email?.trim() ||
@@ -742,6 +750,40 @@ function ActivitySelector(): JSX.Element {
   const isAdminAuthenticated = adminStatus === "authenticated";
   const userRoles = normaliseRoles(adminUser?.roles);
   const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
+  const canLogout = isLTISession || isAdminAuthenticated;
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = useCallback(async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setIsLoggingOut(true);
+    try {
+      if (isLTISession) {
+        await ltiLogout();
+      }
+
+      if (isAdminAuthenticated) {
+        await adminLogout();
+      }
+
+      setEditMode(false);
+      navigate("/", { replace: true });
+    } catch (error) {
+      console.error("Erreur lors de la déconnexion:", error);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [
+    adminLogout,
+    isAdminAuthenticated,
+    isLoggingOut,
+    isLTISession,
+    ltiLogout,
+    navigate,
+    setEditMode,
+  ]);
 
   const existingActivityIds = useMemo(
     () => editableActivities.map((activity) => activity.id),
@@ -1728,58 +1770,78 @@ function ActivitySelector(): JSX.Element {
 
   const currentHeader = {
     ...DEFAULT_ACTIVITY_SELECTOR_HEADER,
-    ...headerOverrides
+    ...headerOverrides,
   };
+
+  const isLogoutDisabled = isLoggingOut || isAdminProcessing;
+  const adminActionControls = canShowAdminButton ? (
+    <>
+      {isEditMode ? (
+        <>
+          <button
+            onClick={handleSaveChanges}
+            disabled={isSaving}
+            className="inline-flex items-center justify-center rounded-full border border-green-600/20 bg-green-50 px-4 py-2 text-xs font-medium text-green-700 transition hover:border-green-600/40 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSaving ? "Sauvegarde..." : "Sauvegarder"}
+          </button>
+          <button
+            onClick={handleCancelChanges}
+            disabled={isSaving}
+            className="inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Annuler
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => setEditMode(true)}
+          disabled={isLoading}
+          className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isLoading ? "Chargement..." : "Mode édition"}
+        </button>
+      )}
+      <Link
+        to="/admin"
+        className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+      >
+        Administration
+      </Link>
+    </>
+  ) : null;
+
+  const headerActions =
+    adminActionControls || canLogout ? (
+      <div className="flex flex-wrap items-center gap-2">
+        {adminActionControls}
+        {canLogout ? (
+          <button
+            type="button"
+            onClick={() => {
+              void handleLogout();
+            }}
+            disabled={isLogoutDisabled}
+            className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-xs font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+          >
+            {isLogoutDisabled ? "Déconnexion..." : "Se déconnecter"}
+          </button>
+        ) : null}
+      </div>
+    ) : null;
 
   return (
     <>
       <ActivityLayout
-      activityId="activity-selector"
-      eyebrow={currentHeader.eyebrow}
-      title={currentHeader.title}
-      subtitle={currentHeader.subtitle}
-      badge={currentHeader.badge}
-      onHeaderEdit={isEditMode ? handleHeaderEdit : undefined}
-      actions={
-        canShowAdminButton ? (
-          <div className="flex items-center gap-2">
-            {isEditMode ? (
-              <>
-                <button
-                  onClick={handleSaveChanges}
-                  disabled={isSaving}
-                  className="inline-flex items-center justify-center rounded-full border border-green-600/20 bg-green-50 px-4 py-2 text-xs font-medium text-green-700 transition hover:border-green-600/40 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSaving ? 'Sauvegarde...' : 'Sauvegarder'}
-                </button>
-                <button
-                  onClick={handleCancelChanges}
-                  disabled={isSaving}
-                  className="inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Annuler
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => setEditMode(true)}
-                disabled={isLoading}
-                className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? 'Chargement...' : 'Mode édition'}
-              </button>
-            )}
-            <Link
-              to="/admin"
-              className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
-            >
-              Administration
-            </Link>
-          </div>
-        ) : null
-      }
-      beforeHeader={
-        <>
+        activityId="activity-selector"
+        eyebrow={currentHeader.eyebrow}
+        title={currentHeader.title}
+        subtitle={currentHeader.subtitle}
+        badge={currentHeader.badge}
+        onHeaderEdit={isEditMode ? handleHeaderEdit : undefined}
+        actions={headerActions}
+        beforeHeader={
+          <>
           {isEditMode && (
             <>
               <div className="animate-section rounded-3xl border border-orange-200/80 bg-orange-50/90 p-6 text-orange-900 shadow-sm backdrop-blur">
@@ -1854,12 +1916,12 @@ function ActivitySelector(): JSX.Element {
               </p>
             </div>
           ) : null}
-        </>
-      }
-      headerClassName="space-y-6 animate-section"
-      contentClassName="animate-section-delayed"
-      contentAs="div"
-    >
+          </>
+        }
+        headerClassName="space-y-6 animate-section"
+        contentClassName="animate-section-delayed"
+        contentAs="div"
+      >
       {activeGenerationJobId ? (
         <div className="animate-section mb-6 space-y-3 rounded-3xl border border-sky-200/60 bg-sky-50/80 p-6 text-sky-900 shadow-sm backdrop-blur">
           <div className="space-y-2">
