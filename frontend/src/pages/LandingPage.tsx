@@ -11,15 +11,18 @@ import {
 import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
+const ADMIN_ROLES = ["admin", "superadmin", "administrator"] as const;
+const ADMIN_ROLE_SET = new Set(ADMIN_ROLES);
+
 const DEFAULT_LANDING_PAGE_CONTENT: LandingPageContent = {
-  brandTagline: "Formation IA",
+  brandTagline: "Studio pédagogique IA",
   navActivitiesLabel: "Studio d'activités",
   navIntegrationsLabel: "Intégrations",
   navLoginLabel: "Se connecter",
   heroEyebrow: "Créateur d'activités",
   heroTitle: "Concevez des activités pédagogiques autoportantes alimentées par l'IA.",
   heroDescription:
-    "Formation IA devient votre studio de conception : décrivez vos objectifs, laissez l'IA générer le parcours, publiez-le en Deep Link dans votre LMS et suivez l'engagement sans friction.",
+    "Ce studio devient votre espace de conception : décrivez vos objectifs, laissez l'IA générer le parcours, publiez-le en Deep Link dans votre LMS et suivez l'engagement sans friction.",
   heroPrimaryCtaLabel: "Accéder au studio",
   heroSecondaryCtaLabel: "Déployer via LTI Deep Link",
   heroHighlights: [
@@ -94,7 +97,7 @@ const DEFAULT_LANDING_PAGE_CONTENT: LandingPageContent = {
     {
       title: "Configurer le studio",
       description:
-        "Ajoutez le connecteur LTI et partagez la clé publique fournie par Formation IA.",
+        "Ajoutez le connecteur LTI et partagez la clé publique fournie par votre équipe numérique.",
     },
     {
       title: "Générer l'activité",
@@ -113,12 +116,8 @@ const DEFAULT_LANDING_PAGE_CONTENT: LandingPageContent = {
     "Nos spécialistes vous accompagnent pour configurer le studio, cadrer les usages responsables de l'IA et déployer vos activités via LTI Deep Linking.",
   closingPrimaryCtaLabel: "Lancer le studio",
   closingSecondaryCtaLabel: "Planifier une démonstration",
-  footerNote: "Formation IA – Studio autoportant du Cégep Limoilou.",
-  footerLinks: [
-    { label: "Studio", href: "/activites" },
-    { label: "Connexion", href: "/connexion" },
-    { label: "LTI Deep Link", href: "#integrations" },
-  ],
+  footerNote: "Studio pédagogique – Plateforme autoportante dédiée à l'enseignement.",
+  footerLinks: [{ label: "Se connecter", href: "/connexion" }],
 };
 
 function cloneLandingContent(content: LandingPageContent): LandingPageContent {
@@ -185,8 +184,14 @@ function LandingPage(): JSX.Element {
   const { isLTISession, loading: ltiLoading } = useLTI();
   const { status: adminStatus, user: adminUser, token, isEditMode, setEditMode } =
     useAdminAuth();
+  const normalizedAdminRoles = Array.isArray(adminUser?.roles)
+    ? adminUser.roles
+        .map((role) => (typeof role === "string" ? role.toLowerCase() : ""))
+        .filter((role): role is string => role.length > 0)
+    : [];
   const canEdit =
-    adminStatus === "authenticated" && (adminUser?.roles?.includes("admin") ?? false);
+    adminStatus === "authenticated" &&
+    normalizedAdminRoles.some((role) => ADMIN_ROLE_SET.has(role));
 
   const [content, setContent] = useState<LandingPageContent>(() =>
     cloneLandingContent(DEFAULT_LANDING_PAGE_CONTENT)
@@ -380,6 +385,8 @@ function LandingPage(): JSX.Element {
     multiline?: boolean;
     rows?: number;
     type?: string;
+    inputClassName?: string;
+    textareaClassName?: string;
   }
 
   const EditableText = ({
@@ -391,6 +398,8 @@ function LandingPage(): JSX.Element {
     multiline = false,
     rows = 3,
     type = "text",
+    inputClassName,
+    textareaClassName,
   }: EditableTextProps): JSX.Element => {
     if (isEditMode) {
       if (multiline) {
@@ -399,7 +408,7 @@ function LandingPage(): JSX.Element {
             value={value}
             onChange={(event) => onChange(event.target.value)}
             rows={rows}
-            className={`w-full resize-none rounded border border-orange-300 bg-white/90 p-2 focus:border-orange-500 focus:outline-none focus:ring-0 ${className}`}
+            className={`${textareaClassName ?? "w-full"} resize-none rounded border border-orange-300 bg-white/90 p-2 focus:border-orange-500 focus:outline-none focus:ring-0 ${className}`}
             placeholder={placeholder}
           />
         );
@@ -409,7 +418,7 @@ function LandingPage(): JSX.Element {
           type={type}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className={`w-full rounded border border-orange-300 bg-white/90 px-2 py-1 focus:border-orange-500 focus:outline-none focus:ring-0 ${className}`}
+          className={`${inputClassName ?? "w-full"} rounded border border-orange-300 bg-white/90 px-2 py-1 focus:border-orange-500 focus:outline-none focus:ring-0 ${className}`}
           placeholder={placeholder}
         />
       );
@@ -471,55 +480,22 @@ function LandingPage(): JSX.Element {
         <header className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm backdrop-blur">
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <Link to="/" className="flex items-center gap-3">
-              <img src={logoPrincipal} alt="Formation IA" className="h-10 w-auto md:h-12" />
-              {isEditMode ? (
-                <input
-                  type="text"
-                  value={draft.brandTagline}
-                  onChange={(event) => handleStringChange("brandTagline")(event.target.value)}
-                  className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/80"
-                  placeholder="Nom de la plateforme"
-                />
-              ) : (
-                <span className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/80">
-                  {displayContent.brandTagline}
-                </span>
-              )}
+              <img
+                src={logoPrincipal}
+                alt={`Logo ${displayContent.brandTagline}`}
+                className="h-10 w-auto md:h-12"
+              />
+              <EditableText
+                value={displayContent.brandTagline}
+                onChange={handleStringChange("brandTagline")}
+                as="span"
+                className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/80"
+                placeholder="Nom de la plateforme"
+                inputClassName="w-auto min-w-[160px]"
+              />
             </Link>
             <div className="flex flex-col gap-3 md:items-end">
               <nav className="flex flex-wrap items-center gap-3 text-sm font-semibold text-[color:var(--brand-charcoal)]/80 md:justify-end">
-                {isEditMode ? (
-                  <input
-                    type="text"
-                    value={draft.navActivitiesLabel}
-                    onChange={(event) => handleStringChange("navActivitiesLabel")(event.target.value)}
-                    className="min-w-[160px] rounded-full border border-orange-300 bg-white/90 px-4 py-2 focus:border-orange-500 focus:outline-none"
-                    placeholder="Libellé du studio"
-                  />
-                ) : (
-                  <Link
-                    to="/activites"
-                    className="rounded-full border border-white/60 bg-white/60 px-4 py-2 transition hover:bg-white"
-                  >
-                    {displayContent.navActivitiesLabel}
-                  </Link>
-                )}
-                {isEditMode ? (
-                  <input
-                    type="text"
-                    value={draft.navIntegrationsLabel}
-                    onChange={(event) => handleStringChange("navIntegrationsLabel")(event.target.value)}
-                    className="min-w-[140px] rounded-full border border-orange-300 bg-white/90 px-4 py-2 focus:border-orange-500 focus:outline-none"
-                    placeholder="Libellé des intégrations"
-                  />
-                ) : (
-                  <a
-                    href="#integrations"
-                    className="rounded-full border border-white/60 bg-white/60 px-4 py-2 transition hover:bg-white"
-                  >
-                    {displayContent.navIntegrationsLabel}
-                  </a>
-                )}
                 {isEditMode ? (
                   <input
                     type="text"
