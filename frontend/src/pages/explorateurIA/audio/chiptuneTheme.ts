@@ -5,14 +5,17 @@ export interface ChiptuneTheme {
   dispose(): void;
 }
 
-const DEFAULT_VOLUME = 0.35;
-const TEMPO = 120;
+const DEFAULT_VOLUME = 0.18;
+const TEMPO = 76;
 const BEAT_DURATION = 60 / TEMPO;
 const LOOP_BEATS = 8;
 const LOOKAHEAD_SECONDS = 0.25;
 const SCHEDULER_INTERVAL_MS = 90;
-const ATTACK = 0.01;
-const RELEASE = 0.08;
+const ATTACK = 0.04;
+const RELEASE = 0.4;
+const MELODY_VELOCITY_SCALE = 0.65;
+const BASS_VELOCITY_SCALE = 0.55;
+const NOISE_VELOCITY_SCALE = 0.35;
 
 const NOTE_REGEX = /^(?<note>[A-Ga-g])(?<accidental>#|b)?(?<octave>-?\d)$/;
 const NOTE_OFFSETS: Record<string, number> = {
@@ -75,8 +78,9 @@ function createNoiseWave(context: AudioContext): PeriodicWave {
     // Valeurs pseudo-aléatoires déterministes pour un bruit léger.
     const seed = Math.sin(i * 43758.5453) * 1_0000;
     const value = (seed - Math.floor(seed)) * 2 - 1;
-    real[i] = value;
-    imag[i] = value * 0.6;
+    const softened = value * 0.45;
+    real[i] = softened;
+    imag[i] = softened * 0.6;
   }
   return context.createPeriodicWave(real, imag, { disableNormalization: true });
 }
@@ -290,15 +294,15 @@ export function createChiptuneTheme(): ChiptuneTheme {
   masterGain.connect(context.destination);
 
   const melodyGain = context.createGain();
-  melodyGain.gain.value = 0.8;
+  melodyGain.gain.value = 0.55;
   melodyGain.connect(masterGain);
 
   const bassGain = context.createGain();
-  bassGain.gain.value = 0.55;
+  bassGain.gain.value = 0.38;
   bassGain.connect(masterGain);
 
   const noiseGain = context.createGain();
-  noiseGain.gain.value = 0.25;
+  noiseGain.gain.value = 0.12;
   noiseGain.connect(masterGain);
 
   const noiseWave = createNoiseWave(context);
@@ -314,13 +318,17 @@ export function createChiptuneTheme(): ChiptuneTheme {
     );
     lastMelodyVariantIndex = variantIndex;
     const sequence = MELODY_VARIANTS[variantIndex];
-    const velocityJitter = 0.08;
+    const velocityJitter = 0.05;
     return sequence.map(([time, duration, note, baseVelocity = 1]) => ({
       time,
       duration,
-      velocity: clamp(jitterValue(baseVelocity, velocityJitter), 0.1, 1),
+      velocity: clamp(
+        jitterValue(baseVelocity * MELODY_VELOCITY_SCALE, velocityJitter),
+        0.05,
+        0.7
+      ),
       frequency: noteToFrequency(note),
-      waveform: "square",
+      waveform: "triangle",
     }));
   };
 
@@ -331,14 +339,18 @@ export function createChiptuneTheme(): ChiptuneTheme {
     );
     lastBassVariantIndex = variantIndex;
     const sequence = BASS_VARIANTS[variantIndex];
-    const velocityJitter = 0.07;
+    const velocityJitter = 0.05;
     return sequence.map(
       ([time, duration, note, baseVelocity = 0.8, waveform = "square"]) => ({
         time,
         duration,
-        velocity: clamp(jitterValue(baseVelocity, velocityJitter), 0.08, 0.95),
+        velocity: clamp(
+          jitterValue(baseVelocity * BASS_VELOCITY_SCALE, velocityJitter),
+          0.04,
+          0.6
+        ),
         frequency: noteToFrequency(note),
-        waveform,
+        waveform: waveform === "square" ? "sine" : waveform,
       })
     );
   };
@@ -350,16 +362,20 @@ export function createChiptuneTheme(): ChiptuneTheme {
     );
     lastNoiseVariantIndex = variantIndex;
     const sequence = NOISE_VARIANTS[variantIndex];
-    const velocityJitter = 0.1;
+    const velocityJitter = 0.04;
     return sequence.map(([time, baseDuration, baseVelocity = 0.6]) => ({
       time,
       duration: clamp(
-        jitterValue(baseDuration, baseDuration * 0.15),
+        jitterValue(baseDuration, baseDuration * 0.1),
         baseDuration * 0.7,
         baseDuration * 1.3
       ),
-      velocity: clamp(jitterValue(baseVelocity, velocityJitter), 0.05, 0.9),
-      frequency: 220,
+      velocity: clamp(
+        jitterValue(baseVelocity * NOISE_VELOCITY_SCALE, velocityJitter),
+        0.02,
+        0.45
+      ),
+      frequency: 180,
       waveform: "custom",
       periodicWave: noiseWave,
     }));
