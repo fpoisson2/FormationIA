@@ -16,9 +16,14 @@ import { createDefaultExplorateurWorldConfig } from "../modules/step-sequence/mo
 import {
   isCompositeStepDefinition,
   resolveStepComponentKey,
+  type CompositeStepConfig,
   type StepDefinition,
 } from "../modules/step-sequence/types";
 import type { ModelConfig } from "../config";
+
+type PersistedStepDefinition = StepDefinition & {
+  __replaceSequence?: boolean;
+};
 const WORKSHOP_DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
 
 const PROMPT_DOJO_MISSIONS = [
@@ -733,7 +738,7 @@ export interface ActivityConfigOverrides {
   layout?: Partial<ActivityLayoutOptions>;
   card?: ActivityCardOverrides;
   completionId?: string;
-  stepSequence?: StepDefinition[];
+  stepSequence?: PersistedStepDefinition[];
 }
 
 export interface ActivityConfigEntry {
@@ -745,7 +750,7 @@ export interface ActivityConfigEntry {
   header?: ActivityHeaderConfig;
   layout?: ActivityLayoutOptions;
   card?: ActivityCardDefinition;
-  stepSequence?: StepDefinition[];
+  stepSequence?: PersistedStepDefinition[];
   overrides?: ActivityConfigOverrides | null;
 }
 
@@ -810,18 +815,51 @@ function cloneCard(card: ActivityCardDefinition): ActivityCardDefinition {
   };
 }
 
+function cloneCompositeConfig(
+  composite: CompositeStepConfig
+): CompositeStepConfig {
+  return {
+    ...composite,
+    modules: composite.modules.map((module) => ({ ...module })),
+  };
+}
+
+function cloneStepDefinition(step: StepDefinition): StepDefinition {
+  if (isCompositeStepDefinition(step)) {
+    return {
+      ...step,
+      composite: cloneCompositeConfig(step.composite),
+    };
+  }
+
+  const cloned: StepDefinition = { ...step };
+  if (Object.prototype.hasOwnProperty.call(step, "config")) {
+    (cloned as { config?: unknown }).config = step.config;
+  }
+  return cloned;
+}
+
+function stripStepMetadata(
+  step: PersistedStepDefinition
+): StepDefinition {
+  const { __replaceSequence, ...rest } = step;
+  return rest as StepDefinition;
+}
+
 function cloneStepSequence(
-  steps: StepDefinition[] | undefined
+  steps: PersistedStepDefinition[] | StepDefinition[] | undefined
 ): StepDefinition[] | undefined {
   if (!steps) {
     return undefined;
   }
-  return steps.map((step) => ({ ...step }));
+  return steps.map((step) =>
+    cloneStepDefinition(stripStepMetadata(step as PersistedStepDefinition))
+  );
 }
 
 function mergeStepSequence(
   base: StepDefinition[] | undefined,
-  override: StepDefinition[] | undefined
+  override: PersistedStepDefinition[] | undefined
 ): StepDefinition[] | undefined {
   if (!base && !override) {
     return undefined;
@@ -834,15 +872,79 @@ function mergeStepSequence(
   }
 
   const baseMap = new Map(base.map((step) => [step.id, step]));
-  const overrideMap = new Map(override.map((step) => [step.id, step]));
-  const mergedBase = base.map((step) => {
-    const overrideStep = overrideMap.get(step.id);
-    return overrideStep ? { ...step, ...overrideStep } : { ...step };
+  const overrideEntries = override.map((step) => ({
+    step: stripStepMetadata(step),
+    replace: step.__replaceSequence === true,
+  }));
+  const overrideMap = new Map(overrideEntries.map(({ step }) => [step.id, step]));
+  const shouldReplace = overrideEntries.some((entry) => entry.replace);
+
+  const mergeWithBase = (
+    source: StepDefinition,
+    fallback: StepDefinition | undefined
+  ): StepDefinition => {
+    if (!fallback) {
+      return cloneStepDefinition(source);
+    }
+
+    if (isCompositeStepDefinition(source) || isCompositeStepDefinition(fallback)) {
+      const composite = isCompositeStepDefinition(source)
+        ? source.composite
+        : isCompositeStepDefinition(fallback)
+        ? fallback.composite
+        : undefined;
+
+      const merged = {
+        ...cloneStepDefinition(fallback),
+        ...source,
+      } as StepDefinition;
+
+      if (composite) {
+        (merged as { composite: CompositeStepConfig }).composite =
+          cloneCompositeConfig(composite);
+        delete (merged as { config?: unknown }).config;
+      }
+
+      return merged;
+    }
+
+    const hasConfigOverride = Object.prototype.hasOwnProperty.call(
+      source,
+      "config"
+    );
+    const configValue = hasConfigOverride
+      ? (source as { config?: unknown }).config
+      : (fallback as { config?: unknown }).config;
+
+    const merged = {
+      ...cloneStepDefinition(fallback),
+      ...source,
+    } as StepDefinition;
+
+    if (configValue !== undefined) {
+      (merged as { config?: unknown }).config = configValue;
+    } else {
+      delete (merged as { config?: unknown }).config;
+    }
+
+    return merged;
+  };
+
+  if (shouldReplace) {
+    return overrideEntries.map(({ step }) =>
+      mergeWithBase(step, baseMap.get(step.id))
+    );
+  }
+
+  const mergedBase = base.map((baseStep) => {
+    const overrideStep = overrideMap.get(baseStep.id);
+    return mergeWithBase(overrideStep ?? baseStep, baseStep);
   });
 
-  const mergedExtra = override
+  const mergedExtra = overrideEntries
+    .map(({ step }) => step)
     .filter((step) => !baseMap.has(step.id))
-    .map((step) => ({ ...step }));
+    .map((step) => mergeWithBase(step, undefined));
 
   return [...mergedBase, ...mergedExtra];
 }
@@ -1184,7 +1286,10 @@ export function serializeActivityDefinition(
     definition.stepSequence
   );
   if (stepSequenceDiff !== undefined) {
-    overrides.stepSequence = stepSequenceDiff;
+    overrides.stepSequence = stepSequenceDiff.map((step) => ({
+      ...step,
+      __replaceSequence: true,
+    }));
   }
 
   if (
