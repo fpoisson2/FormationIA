@@ -902,6 +902,63 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Mission introuvable.")
 
 
+def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
+    config = step.get("config")
+    normalized_config: dict[str, Any] = {
+        "terrain": None,
+        "steps": [],
+        "quarterDesignerSteps": None,
+        "quarters": [],
+    }
+
+    if isinstance(config, Mapping):
+        terrain = config.get("terrain")
+        normalized_config["terrain"] = deepcopy(terrain)
+
+        raw_steps = config.get("steps")
+        if isinstance(raw_steps, list):
+            normalized_config["steps"] = deepcopy(raw_steps)
+        elif isinstance(raw_steps, tuple):
+            normalized_config["steps"] = [deepcopy(item) for item in raw_steps]
+
+        normalized_config["quarterDesignerSteps"] = deepcopy(
+            config.get("quarterDesignerSteps")
+        )
+
+        raw_quarters = config.get("quarters")
+        if isinstance(raw_quarters, list):
+            normalized_config["quarters"] = deepcopy(raw_quarters)
+        elif isinstance(raw_quarters, tuple):
+            normalized_config["quarters"] = [deepcopy(item) for item in raw_quarters]
+
+        for key, value in config.items():
+            if key in normalized_config:
+                continue
+            normalized_config[key] = deepcopy(value)
+
+    step["config"] = normalized_config
+    if not _string_or_none(step.get("component")):
+        step["component"] = "explorateur-world"
+    if not _string_or_none(step.get("type")):
+        step["type"] = step["component"]
+
+
+def _ensure_step_sequence_structure(activity: dict[str, Any]) -> None:
+    sequence = activity.get("stepSequence")
+    if not isinstance(sequence, list):
+        return
+
+    for step in sequence:
+        if not isinstance(step, dict):
+            continue
+
+        step_type = _string_or_none(step.get("type")) or _string_or_none(
+            step.get("component")
+        )
+        if step_type == "explorateur-world":
+            _normalize_explorateur_world_config(step)
+
+
 def _normalize_activities_payload(
     activities: list[Any], *, error_status: int
 ) -> list[dict[str, Any]]:
@@ -4356,59 +4413,4 @@ def logout_lti_session(
         path="/",
     )
     return JSONResponse(content={"ok": True})
-def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
-    config = step.get("config")
-    normalized_config: dict[str, Any] = {
-        "terrain": None,
-        "steps": [],
-        "quarterDesignerSteps": None,
-        "quarters": [],
-    }
-
-    if isinstance(config, Mapping):
-        terrain = config.get("terrain")
-        normalized_config["terrain"] = deepcopy(terrain)
-
-        raw_steps = config.get("steps")
-        if isinstance(raw_steps, list):
-            normalized_config["steps"] = deepcopy(raw_steps)
-        elif isinstance(raw_steps, tuple):
-            normalized_config["steps"] = [deepcopy(item) for item in raw_steps]
-
-        normalized_config["quarterDesignerSteps"] = deepcopy(
-            config.get("quarterDesignerSteps")
-        )
-
-        raw_quarters = config.get("quarters")
-        if isinstance(raw_quarters, list):
-            normalized_config["quarters"] = deepcopy(raw_quarters)
-        elif isinstance(raw_quarters, tuple):
-            normalized_config["quarters"] = [deepcopy(item) for item in raw_quarters]
-
-        for key, value in config.items():
-            if key in normalized_config:
-                continue
-            normalized_config[key] = deepcopy(value)
-
-    step["config"] = normalized_config
-    if not _string_or_none(step.get("component")):
-        step["component"] = "explorateur-world"
-    if not _string_or_none(step.get("type")):
-        step["type"] = step["component"]
-
-
-def _ensure_step_sequence_structure(activity: dict[str, Any]) -> None:
-    sequence = activity.get("stepSequence")
-    if not isinstance(sequence, list):
-        return
-
-    for step in sequence:
-        if not isinstance(step, dict):
-            continue
-
-        step_type = _string_or_none(step.get("type")) or _string_or_none(
-            step.get("component")
-        )
-        if step_type == "explorateur-world":
-            _normalize_explorateur_world_config(step)
 
