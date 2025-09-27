@@ -22,8 +22,8 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
 
   return (
     <div className="relative mx-auto w-full max-w-[480px]">
-      <div className="flex items-end gap-4">
-        <div className="flex h-[360px] flex-col justify-between pb-4 text-xs font-semibold text-[color:var(--brand-charcoal)]/70">
+      <div className="flex items-end gap-3 md:gap-4">
+        <div className="flex h-[clamp(220px,80vw,360px)] flex-col justify-between pb-3 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:pb-4 md:text-xs">
           {axis.map((value) => (
             <span key={`row-${value}`} className="text-right">
               {value}
@@ -31,7 +31,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           ))}
         </div>
         <div className="relative">
-          <div className="relative aspect-square h-[360px] rounded-3xl border border-white/60 bg-white/70 p-2 shadow-inner">
+          <div className="relative aspect-square h-[clamp(220px,80vw,360px)] rounded-3xl border border-white/60 bg-white/70 p-2 shadow-inner">
             <div className="grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl border border-white/40">
               {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
                 const x = index % GRID_SIZE;
@@ -87,7 +87,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           </div>
         </div>
       </div>
-      <div className="mt-2 flex justify-center gap-[34px] text-xs font-semibold text-[color:var(--brand-charcoal)]/70">
+      <div className="mt-2 flex justify-center gap-[24px] text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:gap-[34px] md:text-xs">
         {axis.map((value) => (
           <span key={`col-${value}`}>{value}</span>
         ))}
