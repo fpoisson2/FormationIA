@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 interface AdminModalProps {
   open: boolean;
@@ -11,9 +11,9 @@ interface AdminModalProps {
 }
 
 const SIZE_CLASS: Record<NonNullable<AdminModalProps["size"]>, string> = {
-  sm: "w-full max-w-[18.5rem] sm:max-w-md",
-  md: "w-full max-w-[20rem] sm:max-w-2xl",
-  lg: "w-full max-w-[21rem] sm:max-w-4xl",
+  sm: "w-full max-w-[calc(100vw-1.5rem)] sm:max-w-md",
+  md: "w-full max-w-[calc(100vw-1.5rem)] sm:max-w-2xl",
+  lg: "w-full max-w-[calc(100vw-1.5rem)] sm:max-w-4xl",
 };
 
 export function AdminModal({
@@ -25,15 +25,55 @@ export function AdminModal({
   footer,
   size = "md",
 }: AdminModalProps): JSX.Element | null {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const container = scrollContainerRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    if (typeof container.scrollTo === "function") {
+      container.scrollTo({ top: 0, behavior: "auto" });
+    } else {
+      container.scrollTop = 0;
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") {
+      return;
+    }
+
+    const previousRootOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.documentElement.style.overflow = previousRootOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [open]);
+
   if (!open) {
     return null;
   }
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="flex min-h-full items-start justify-center overflow-y-auto bg-black/40 px-3 py-6 sm:min-h-[100dvh] sm:items-center sm:px-4 sm:py-8">
+      <div
+        ref={scrollContainerRef}
+        className="flex min-h-full items-start justify-center overflow-x-hidden overflow-y-auto bg-black/40 px-3 py-6 sm:min-h-[100dvh] sm:items-center sm:px-4 sm:py-8"
+      >
         <div
-          className={`${SIZE_CLASS[size]} max-h-[90vh] overflow-y-auto rounded-2xl border border-white/60 bg-white/95 p-5 shadow-2xl backdrop-blur sm:rounded-3xl sm:p-6`}
+          className={`${SIZE_CLASS[size]} max-h-[90vh] overflow-x-hidden overflow-y-auto rounded-2xl border border-white/60 bg-white/95 p-5 shadow-2xl backdrop-blur sm:rounded-3xl sm:p-6`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="admin-modal-title"
