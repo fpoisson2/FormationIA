@@ -226,7 +226,7 @@ interface StepSequenceEditorProps {
   onUpdateStepConfig: (stepId: string, config: unknown) => void;
 }
 
-interface StepSequenceStepCardProps {
+interface StepSequenceStepAccordionProps {
   step: StepDefinition;
   index: number;
   stepTypeOptions: string[];
@@ -237,9 +237,11 @@ interface StepSequenceStepCardProps {
   canMoveDown: boolean;
   onChangeType: (stepId: string, component: string) => void;
   onUpdateConfig: (stepId: string, config: unknown) => void;
+  isExpanded: boolean;
+  onToggle: () => void;
 }
 
-function StepSequenceStepCard({
+function StepSequenceStepAccordion({
   step,
   index,
   stepTypeOptions,
@@ -250,7 +252,9 @@ function StepSequenceStepCard({
   canMoveDown,
   onChangeType,
   onUpdateConfig,
-}: StepSequenceStepCardProps): JSX.Element {
+  isExpanded,
+  onToggle,
+}: StepSequenceStepAccordionProps): JSX.Element {
   const componentKey = resolveStepComponentKey(step);
   const selectOptions = useMemo(() => {
     const mapped = stepTypeOptions.map((type) => ({
@@ -303,12 +307,38 @@ function StepSequenceStepCard({
     [handleConfigUpdate, step]
   );
 
+  const accordionContentId = `${step.id}-content`;
+  const componentLabel = componentKey
+    ? getStepTypeLabel(componentKey)
+    : "Sélectionner un type";
+
   return (
-    <div className="rounded-2xl border border-orange-200/70 bg-orange-50/50 p-4">
+    <div className="rounded-2xl border border-orange-200/70 bg-orange-50/60 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
-          Étape {index + 1}
-        </h4>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isExpanded}
+          aria-controls={accordionContentId}
+          className="flex flex-1 items-center justify-between gap-3 rounded-2xl border border-transparent bg-white/60 px-4 py-3 text-left transition hover:border-orange-200 focus:border-orange-300 focus:outline-none"
+        >
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Étape {index + 1}
+            </p>
+            <p className="text-sm font-semibold text-orange-800">
+              {componentLabel}
+            </p>
+          </div>
+          <span
+            className={`text-lg text-orange-600 transition-transform ${
+              isExpanded ? "rotate-180" : ""
+            }`}
+            aria-hidden="true"
+          >
+            ˅
+          </span>
+        </button>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -333,11 +363,14 @@ function StepSequenceStepCard({
             onClick={() => onRemove(step.id)}
             className="rounded-full border border-red-200 px-2 py-1 text-xs text-red-600 transition hover:border-red-300 hover:bg-red-100"
           >
-            Supprimer l'étape
+            Supprimer
           </button>
         </div>
       </div>
-      <div className="mt-4 space-y-3">
+      <div
+        id={accordionContentId}
+        className={`mt-4 space-y-3 ${isExpanded ? "" : "hidden"}`}
+      >
         <label className="flex flex-col gap-1 text-xs font-semibold text-orange-700">
           Type d'étape
           <select
@@ -346,15 +379,19 @@ function StepSequenceStepCard({
             className="rounded-lg border border-orange-200 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-orange-400 focus:outline-none"
             disabled={selectOptions.length === 0}
           >
-            {selectOptions.map((option) => (
-              <option
-                key={option.value}
-                value={option.value}
-                disabled={option.disabled}
-              >
-                {option.label}
-              </option>
-            ))}
+            {selectOptions.length === 0 ? (
+              <option value="">Aucun module disponible</option>
+            ) : (
+              selectOptions.map((option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
+                  disabled={option.disabled}
+                >
+                  {option.label}
+                </option>
+              ))
+            )}
           </select>
         </label>
         <div className="space-y-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-sm">
@@ -392,6 +429,8 @@ function StepSequenceEditor({
   onUpdateStepConfig,
 }: StepSequenceEditorProps): JSX.Element {
   const [nextStepType, setNextStepType] = useState<string>("");
+  const [expandedSteps, setExpandedSteps] = useState<string[]>([]);
+  const previousStepIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (stepTypeOptions.length === 0) {
@@ -403,25 +442,55 @@ function StepSequenceEditor({
     );
   }, [stepTypeOptions]);
 
+  useEffect(() => {
+    const currentStepIds = steps.map((step) => step.id);
+    const previousStepIds = previousStepIdsRef.current;
+
+    setExpandedSteps((current) => {
+      const filtered = current.filter((id) => currentStepIds.includes(id));
+      const added = currentStepIds.filter((id) => !previousStepIds.includes(id));
+
+      if (added.length > 0) {
+        return [...filtered, ...added];
+      }
+
+      if (filtered.length === 0 && currentStepIds.length > 0) {
+        return [currentStepIds[0]];
+      }
+
+      return filtered;
+    });
+
+    previousStepIdsRef.current = currentStepIds;
+  }, [steps]);
+
   const handleAddStep = useCallback(() => {
     if (!nextStepType) return;
     onAddStep(nextStepType);
   }, [nextStepType, onAddStep]);
 
+  const toggleStep = useCallback((stepId: string) => {
+    setExpandedSteps((current) =>
+      current.includes(stepId)
+        ? current.filter((id) => id !== stepId)
+        : [...current, stepId]
+    );
+  }, []);
+
   return (
     <section
       role="region"
       aria-label={`Séquence d'étapes pour ${activityTitle}`}
-      className="space-y-5 rounded-3xl border border-orange-200 bg-orange-50/60 p-5"
+      className="space-y-5"
     >
-      <div className="space-y-1">
+      <header className="space-y-2 rounded-3xl border border-orange-200 bg-orange-50/80 p-5">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
           Séquence d'étapes
         </h3>
         <p className="text-xs text-orange-800">
-          Ajoutez, organisez et configurez les étapes qui composent cette activité.
+          Ajoutez, organisez et configurez les étapes qui composent cette activité. Chaque étape peut être développée pour modifier son contenu.
         </p>
-      </div>
+      </header>
       <div className="space-y-4">
         {steps.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-orange-200 bg-white/70 p-4 text-sm text-orange-700">
@@ -430,7 +499,7 @@ function StepSequenceEditor({
           </p>
         ) : (
           steps.map((step, index) => (
-            <StepSequenceStepCard
+            <StepSequenceStepAccordion
               key={step.id}
               step={step}
               index={index}
@@ -444,6 +513,8 @@ function StepSequenceEditor({
               canMoveDown={index < steps.length - 1}
               onChangeType={onChangeStepType}
               onUpdateConfig={onUpdateStepConfig}
+              isExpanded={expandedSteps.includes(step.id)}
+              onToggle={() => toggleStep(step.id)}
             />
           ))
         )}
@@ -633,6 +704,8 @@ function ActivitySelector(): JSX.Element {
     useState<string | null>(null);
   const [generationReasoningSummary, setGenerationReasoningSummary] =
     useState<string | null>(null);
+  const [stepSequenceEditorActivityId, setStepSequenceEditorActivityId] =
+    useState<string | null>(null);
   const generationControllerRef = useRef<AbortController | null>(null);
   const loadConfigMutexRef = useRef(false);
   const [generationStatusMessage, setGenerationStatusMessage] =
@@ -681,6 +754,18 @@ function ActivitySelector(): JSX.Element {
       "",
     [generationModel]
   );
+
+  const editingStepSequenceActivity = useMemo(() => {
+    if (!stepSequenceEditorActivityId) {
+      return null;
+    }
+
+    return (
+      editableActivities.find(
+        (activity) => activity.id === stepSequenceEditorActivityId
+      ) ?? null
+    );
+  }, [editableActivities, stepSequenceEditorActivityId]);
 
   const canUseStepSequenceShortcut = stepComponentKeys.length > 0;
   const newSequenceButtonClasses = `group flex min-h-[18rem] w-full flex-col items-center justify-center gap-4 rounded-3xl border-2 border-dashed p-8 text-center transition ${
@@ -792,6 +877,7 @@ function ActivitySelector(): JSX.Element {
       setGenerationSuccessMessage(null);
       setGenerationReasoningSummary(null);
       setLastGeneratedActivityId(null);
+      setStepSequenceEditorActivityId(null);
     }
   }, [isEditMode]);
 
@@ -1368,12 +1454,16 @@ function ActivitySelector(): JSX.Element {
   const handleCreateStepSequenceActivity = useCallback(() => {
     if (!isEditMode || !canUseStepSequenceShortcut) return;
 
+    let createdActivityId: string | null = null;
+
     setEditableActivities((prev) => {
       const existingIds = new Set(prev.map((activity) => activity.id));
       let candidateId = generateUniqueId("sequence");
       while (existingIds.has(candidateId)) {
         candidateId = generateUniqueId("sequence");
       }
+
+      createdActivityId = candidateId;
 
       const templateSteps = createDefaultStepSequenceTemplate();
 
@@ -1403,7 +1493,15 @@ function ActivitySelector(): JSX.Element {
       return [...prev, resolved];
     });
 
+    if (createdActivityId) {
+      setStepSequenceEditorActivityId(createdActivityId);
+    }
+
   }, [canUseStepSequenceShortcut, isEditMode]);
+
+  const handleCloseStepSequenceEditor = useCallback(() => {
+    setStepSequenceEditorActivityId(null);
+  }, []);
 
   const handleSaveChanges = async () => {
     if (isSaving) return;
@@ -1989,26 +2087,25 @@ function ActivitySelector(): JSX.Element {
               ) : null}
             </ul>
             {isEditMode && activity.component === StepSequenceActivity ? (
-              <StepSequenceEditor
-                activityTitle={activity.card.title}
-                steps={activity.stepSequence ?? []}
-                stepTypeOptions={stepComponentKeys}
-                onAddStep={(component) =>
-                  handleAddStepToActivity(activity.id, component)
-                }
-                onRemoveStep={(stepId) =>
-                  handleRemoveStepFromActivity(activity.id, stepId)
-                }
-                onMoveStep={(fromIndex, toIndex) =>
-                  handleMoveStepWithinActivity(activity.id, fromIndex, toIndex)
-                }
-                onChangeStepType={(stepId, component) =>
-                  handleChangeStepComponent(activity.id, stepId, component)
-                }
-                onUpdateStepConfig={(stepId, config) =>
-                  handleUpdateStepConfig(activity.id, stepId, config)
-                }
-              />
+              <div className="rounded-3xl border border-orange-200 bg-orange-50/70 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
+                      Séquence multi-étapes
+                    </h3>
+                    <p className="text-xs text-orange-800">
+                      Configurez les étapes et le contenu de cette activité dans une fenêtre dédiée.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStepSequenceEditorActivityId(activity.id)}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100"
+                  >
+                    Configurer la séquence
+                  </button>
+                </div>
+              </div>
             ) : null}
             <div
               className={
@@ -2094,6 +2191,68 @@ function ActivitySelector(): JSX.Element {
         ) : null}
       </div>
       </ActivityLayout>
+      <AdminModal
+        open={Boolean(stepSequenceEditorActivityId)}
+        onClose={handleCloseStepSequenceEditor}
+        title={
+          editingStepSequenceActivity
+            ? `Configurer « ${editingStepSequenceActivity.card.title} »`
+            : "Configurer la séquence StepSequence"
+        }
+        description="Ajustez les étapes, leur ordre et leur contenu. Les modifications sont prises en compte lorsque vous enregistrez la configuration des activités."
+        size="lg"
+        footer={
+          <button
+            type="button"
+            onClick={handleCloseStepSequenceEditor}
+            className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-charcoal)]/40 hover:text-[color:var(--brand-black)]"
+          >
+            Fermer
+          </button>
+        }
+      >
+        {editingStepSequenceActivity ? (
+          <StepSequenceEditor
+            activityTitle={editingStepSequenceActivity.card.title}
+            steps={editingStepSequenceActivity.stepSequence ?? []}
+            stepTypeOptions={stepComponentKeys}
+            onAddStep={(component) =>
+              handleAddStepToActivity(editingStepSequenceActivity.id, component)
+            }
+            onRemoveStep={(stepId) =>
+              handleRemoveStepFromActivity(
+                editingStepSequenceActivity.id,
+                stepId
+              )
+            }
+            onMoveStep={(fromIndex, toIndex) =>
+              handleMoveStepWithinActivity(
+                editingStepSequenceActivity.id,
+                fromIndex,
+                toIndex
+              )
+            }
+            onChangeStepType={(stepId, component) =>
+              handleChangeStepComponent(
+                editingStepSequenceActivity.id,
+                stepId,
+                component
+              )
+            }
+            onUpdateStepConfig={(stepId, config) =>
+              handleUpdateStepConfig(
+                editingStepSequenceActivity.id,
+                stepId,
+                config
+              )
+            }
+          />
+        ) : (
+          <p className="text-sm text-[color:var(--brand-charcoal)]">
+            Impossible de charger cette séquence.
+          </p>
+        )}
+      </AdminModal>
       <AdminModal
         open={isGenerateModalOpen}
         onClose={handleCloseGenerationModal}

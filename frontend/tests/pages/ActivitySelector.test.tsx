@@ -49,7 +49,7 @@ describe("ActivitySelector StepSequence designer", () => {
     saveMock.mockResolvedValue(undefined);
   });
 
-  it("exposes the StepSequence editor for default activities using the StepSequence component", async () => {
+  it("exposes the StepSequence editor via a modal for default StepSequence activities", async () => {
     render(
       <MemoryRouter>
         <ActivitySelector />
@@ -64,11 +64,25 @@ describe("ActivitySelector StepSequence designer", () => {
 
     expect(defaultStepSequenceCount).toBeGreaterThan(0);
 
-    await waitFor(() => {
-      expect(
-        screen.queryAllByRole("region", { name: /Séquence d'étapes pour/i })
-      ).toHaveLength(defaultStepSequenceCount);
+    const configureButtons = await screen.findAllByRole("button", {
+      name: /Configurer la séquence/i,
     });
+
+    expect(configureButtons).toHaveLength(defaultStepSequenceCount);
+
+    fireEvent.click(configureButtons[0]);
+
+    const modal = await screen.findByRole("dialog", {
+      name: /Configurer «/i,
+    });
+
+    expect(
+      within(modal).getByRole("region", {
+        name: /Séquence d'étapes pour/i,
+      })
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(modal).getByRole("button", { name: /Fermer/i }));
   });
 
   it("allows creating a StepSequence activity and editing its steps", async () => {
@@ -85,14 +99,18 @@ describe("ActivitySelector StepSequence designer", () => {
     });
     fireEvent.click(shortcutButton);
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const sequenceModal = await screen.findByRole("dialog", {
+      name: /Configurer « Nouvelle séquence StepSequence »/i,
+    });
 
-    const sequenceRegion = await screen.findByRole("region", {
+    const sequenceRegion = within(sequenceModal).getByRole("region", {
       name: /Séquence d'étapes pour Nouvelle séquence StepSequence/i,
     });
 
-    const initialHeadings = within(sequenceRegion).getAllByRole("heading", { name: /Étape/ });
-    expect(initialHeadings).toHaveLength(2);
+    const initialAccordions = within(sequenceRegion).getAllByRole("button", {
+      name: (name) => /^Étape \d+/i.test(name),
+    });
+    expect(initialAccordions).toHaveLength(2);
 
     const introTitleInput = within(sequenceRegion).getByPlaceholderText("Titre de l'étape");
     fireEvent.change(introTitleInput, {
@@ -111,8 +129,10 @@ describe("ActivitySelector StepSequence designer", () => {
     fireEvent.click(addStepButton);
 
     await waitFor(() => {
-      const headings = within(sequenceRegion).getAllByRole("heading", { name: /Étape/ });
-      expect(headings).toHaveLength(3);
+      const accordions = within(sequenceRegion).getAllByRole("button", {
+        name: (name) => /^Étape \d+/i.test(name),
+      });
+      expect(accordions).toHaveLength(3);
     });
   });
 });
