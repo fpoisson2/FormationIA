@@ -64,7 +64,16 @@ const normalizeErrorMessage = (error: string): string => {
 };
 
 export function LoginPage(): JSX.Element {
-  const { status, login, error, isProcessing, user, logout } = useAdminAuth();
+  const {
+    status,
+    login,
+    error,
+    isProcessing,
+    user,
+    logout,
+    isTestMode,
+    startTestSession,
+  } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState("");
@@ -164,6 +173,16 @@ export function LoginPage(): JSX.Element {
     }
   };
 
+  const handleStartTestSession = () => {
+    const session = startTestSession();
+    if (!session) {
+      return;
+    }
+    const nextRoles = normaliseRoles(session.user.roles);
+    const destination = resolveDestination(desiredPath, nextRoles) ?? "/admin";
+    navigate(destination, { replace: true });
+  };
+
   return (
     <div className="auth-background landing-gradient flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-lg animate-fade-in-up rounded-3xl border border-white/70 bg-white/95 p-8 shadow-2xl backdrop-blur">
@@ -182,6 +201,24 @@ export function LoginPage(): JSX.Element {
           </div>
         </div>
         <div className="my-6 h-px bg-gradient-to-r from-transparent via-[color:var(--brand-charcoal)]/20 to-transparent" />
+        {isTestMode ? (
+          <div className="mb-6 rounded-3xl border border-[color:var(--brand-red)]/30 bg-[color:var(--brand-red)]/5 p-4 text-left">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
+              Mode test activé
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-[color:var(--brand-charcoal)]">
+              Active une session de démonstration pour explorer l’administration sans identifiants réels.
+            </p>
+            <button
+              type="button"
+              className="mt-4 w-full rounded-full border border-[color:var(--brand-red)] bg-white px-4 py-2 text-xs font-semibold text-[color:var(--brand-red)] transition hover:bg-[color:var(--brand-red)] hover:text-white"
+              onClick={handleStartTestSession}
+              disabled={isProcessing}
+            >
+              {isProcessing ? "Activation…" : "Lancer la session de démonstration"}
+            </button>
+          </div>
+        ) : null}
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div className="text-left">
             <label className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]" htmlFor="login-username">

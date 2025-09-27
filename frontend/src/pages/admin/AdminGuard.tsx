@@ -31,7 +31,7 @@ export function AdminGuard(): JSX.Element {
   if (status !== "authenticated") {
     return (
       <Navigate
-        to="/connexion"
+        to="/admin/connexion"
         replace
         state={{ from: `${location.pathname}${location.search}` }}
       />
@@ -42,7 +42,7 @@ export function AdminGuard(): JSX.Element {
   if (!canAccessAdmin(roles)) {
     return (
       <Navigate
-        to="/connexion"
+        to="/admin/connexion"
         replace
         state={{ from: `${location.pathname}${location.search}` }}
       />
