@@ -47,6 +47,43 @@ const EMPTY_CONTENT: VideoStepContent = {
   expectedDuration: undefined,
 };
 
+type HlsModule = {
+  default?: typeof Hls;
+  Hls?: typeof Hls;
+};
+
+let cachedHlsConstructor: typeof Hls | null | undefined;
+
+async function loadHlsConstructor(): Promise<typeof Hls | null> {
+  if (cachedHlsConstructor !== undefined) {
+    return cachedHlsConstructor;
+  }
+
+  const attemptImport = async (
+    loader: () => Promise<HlsModule>
+  ): Promise<typeof Hls | null> => {
+    try {
+      const module = await loader();
+      const constructor = module.default ?? module.Hls;
+      return typeof constructor === "function" ? constructor : null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  cachedHlsConstructor =
+    (await attemptImport(
+      () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>
+    )) ??
+    (await attemptImport(() => import("hls.js") as Promise<HlsModule>));
+
+  if (!cachedHlsConstructor) {
+    cachedHlsConstructor = null;
+  }
+
+  return cachedHlsConstructor;
+}
+
 function sanitizeSources(sources: unknown): VideoSource[] {
   if (!Array.isArray(sources)) {
     return [];
@@ -448,22 +485,15 @@ export function VideoStep({
     }
 
     void (async () => {
-      try {
-        const { default: HlsConstructor } = await import("hls.js");
-        if (isUnmounted) {
-          return;
-        }
-        if (HlsConstructor.isSupported()) {
-          hlsInstance = new HlsConstructor();
-          hlsInstance.loadSource(hlsSource.url);
-          hlsInstance.attachMedia(video);
-        } else {
-          video.src = hlsSource.url;
-          if (typeof video.load === "function") {
-            video.load();
-          }
-        }
-      } catch (error) {
+      const HlsConstructor = await loadHlsConstructor();
+      if (isUnmounted) {
+        return;
+      }
+      if (HlsConstructor && HlsConstructor.isSupported()) {
+        hlsInstance = new HlsConstructor();
+        hlsInstance.loadSource(hlsSource.url);
+        hlsInstance.attachMedia(video);
+      } else {
         video.src = hlsSource.url;
         if (typeof video.load === "function") {
           video.load();
