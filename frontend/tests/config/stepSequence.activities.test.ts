@@ -60,6 +60,23 @@ describe("Step sequence activities", () => {
     ]);
   });
 
+  it("removes catalog defaults when override requests replacement", () => {
+    const entry: ActivityConfigEntry = {
+      id: TEST_ACTIVITY_ID,
+      overrides: {
+        stepSequence: [
+          { id: "practice", component: "practice", __replaceSequence: true },
+        ],
+      },
+    };
+
+    const definition = resolveActivityDefinition(entry);
+
+    expect(definition.stepSequence).toEqual([
+      { id: "practice", component: "practice", config: { order: 1 } },
+    ]);
+  });
+
   it("serializes changes to the step sequence", () => {
     const baseDefinition = resolveActivityDefinition({ id: TEST_ACTIVITY_ID });
     const updatedSteps: StepDefinition[] = [
@@ -75,6 +92,11 @@ describe("Step sequence activities", () => {
 
     const serialized = serializeActivityDefinition(updatedDefinition);
 
-    expect(serialized.overrides?.stepSequence).toEqual(updatedSteps);
+    const expectedSteps = updatedSteps.map((step) => ({
+      ...step,
+      __replaceSequence: true,
+    }));
+
+    expect(serialized.overrides?.stepSequence).toEqual(expectedSteps);
   });
 });
