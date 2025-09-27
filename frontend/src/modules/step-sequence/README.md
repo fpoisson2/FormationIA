@@ -114,3 +114,11 @@ const activityPayload = STEP_SEQUENCE_TOOLS.build_step_sequence_activity.handler
 ```
 
 L’utilitaire `generateStepId` est également disponible pour dériver des identifiants compatibles avec les conventions existantes (`workshop-…`, `step-…`, etc.).
+
+## Modules avec éditeur dédié
+
+Certains composants peuvent nécessiter un environnement d’édition sur mesure (plein écran, navigation multi-panneaux, etc.). L’étape `explorateur-world` en est l’exemple actuel : dans l’interface d’administration (`ActivitySelector`), le panneau de configuration affiche un résumé et ouvre l’éditeur complet dans une superposition qui embarque `StepSequenceRenderer`. La configuration émise par cet éditeur est systématiquement normalisée via `sanitizeExplorateurWorldConfig` puis filtrée pour ne conserver que des modules StepSequence enregistrés dans `STEP_COMPONENT_REGISTRY`. Toute future intégration qui requiert un éditeur complexe peut réutiliser cette approche en :
+
+1. Fournissant un aperçu compact côté `ActivitySelector`.
+2. Rendant l’éditeur dédié dans une modale/panneau plein écran qui enveloppe `StepSequenceRenderer` (ce qui garantit l’appel à `onUpdateConfig`).
+3. Appliquant le même filtrage de composants pour s’assurer que seules des étapes StepSequence valides sont stockées (important pour l’import/export JSON).
