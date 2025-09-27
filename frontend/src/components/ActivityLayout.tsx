@@ -79,12 +79,17 @@ function ActivityLayout({
     try {
       await onSaveActivity(activityConfig);
     } catch (error) {
-      console.error('Erreur lors de la sauvegarde de l\'activité:', error);
-      alert('Erreur lors de la sauvegarde. Veuillez réessayer.');
+      console.error("Erreur lors de la sauvegarde de l'activité:", error);
+      alert("Erreur lors de la sauvegarde. Veuillez réessayer.");
     } finally {
       setIsSaving(false);
     }
   };
+
+  const shouldShowEditBanner = isEditMode && !!onSaveActivity;
+  const bannerMessage = onHeaderEdit
+    ? "Mode édition activé — pensez à enregistrer vos modifications."
+    : "Mode édition activé — les changements doivent être sauvegardés.";
 
   const ContentTag = contentAs as ContentElement;
   const titleContainerClass =
@@ -109,6 +114,20 @@ function ActivityLayout({
           innerClassName
         )}
       >
+        {shouldShowEditBanner ? (
+          <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3">
+            <div className="flex flex-col gap-3 text-sm text-orange-800 md:flex-row md:items-center md:justify-between">
+              <p className="font-medium">{bannerMessage}</p>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="inline-flex items-center justify-center rounded bg-orange-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving ? "Sauvegarde…" : "Sauvegarder"}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {beforeHeader}
         {!shouldRenderHeader && actions ? (
           <div className="flex justify-end">
@@ -125,24 +144,11 @@ function ActivityLayout({
               isEditMode && onHeaderEdit ? "border-orange-200 ring-2 ring-orange-100" : ""
             )}
           >
-            {isEditMode && onHeaderEdit && (
-              <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-orange-700 uppercase tracking-wider">
-                    Mode édition activé - Modifier les textes de l'en-tête
-                  </p>
-                  {onSaveActivity && (
-                    <button
-                      onClick={handleSave}
-                      disabled={isSaving}
-                      className="text-xs px-3 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isSaving ? 'Sauvegarde...' : 'Sauvegarder'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+            {isEditMode && onHeaderEdit ? (
+              <p className="mb-4 text-xs font-medium uppercase tracking-wider text-orange-700">
+                Mode édition activé – modifier les textes de l'en-tête
+              </p>
+            ) : null}
             <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
               <Link
                 to={isAuthenticated ? "/activites" : "/"}
