@@ -6,6 +6,7 @@ import {
   type StepSequenceRenderWrapperProps,
 } from "./StepSequenceRenderer";
 import type {
+  CompositeStepConfig,
   StepDefinition,
   StepSequenceActivityContextBridge,
   StepSequenceWrapperPreference,
@@ -61,6 +62,7 @@ export function StepSequenceActivity({
   card,
   layout,
   layoutOverrides,
+  setStepSequence,
 }: StepSequenceActivityProps): JSX.Element {
   const metadataSteps = metadata?.steps;
   const resolvedSteps = useMemo(() => {
@@ -107,6 +109,47 @@ export function StepSequenceActivity({
       void finalizeSequence();
     },
     [finalizeSequence, onComplete]
+  );
+
+  const handleStepConfigChange = useCallback(
+    (stepId: string, config: unknown) => {
+      if (!isEditMode || typeof setStepSequence !== "function") {
+        return;
+      }
+
+      const nextSteps = resolvedSteps.map((step) => {
+        if (step.id !== stepId) {
+          return step;
+        }
+
+        if (isCompositeStepDefinition(step)) {
+          return {
+            ...step,
+            composite:
+              (config as CompositeStepConfig) ?? {
+                modules: [],
+                autoAdvance: null,
+                continueLabel: null,
+              },
+          };
+        }
+
+        const updatedStep: StepDefinition = {
+          ...step,
+        };
+
+        if (typeof config === "undefined") {
+          delete (updatedStep as { config?: unknown }).config;
+        } else {
+          (updatedStep as { config?: unknown }).config = config;
+        }
+
+        return updatedStep;
+      });
+
+      setStepSequence(nextSteps);
+    },
+    [isEditMode, resolvedSteps, setStepSequence]
   );
 
   const activityContext = useMemo<StepSequenceActivityContextBridge>(
@@ -250,6 +293,7 @@ export function StepSequenceActivity({
       isEditMode={isEditMode}
       onComplete={handleComplete}
       activityContext={activityContext}
+      onStepConfigChange={handleStepConfigChange}
       renderStepWrapper={renderDefaultWrapper}
     />
   );
