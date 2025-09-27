@@ -23,6 +23,7 @@ import type { ModelConfig } from "../config";
 
 type PersistedStepDefinition = StepDefinition & {
   __replaceSequence?: boolean;
+  type?: string;
 };
 const WORKSHOP_DEFAULT_TEXT = `L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil.`;
 
@@ -826,6 +827,35 @@ function cloneCompositeConfig(
   };
 }
 
+function normalizePersistedStep(step: StepDefinition): PersistedStepDefinition {
+  const normalized = { ...step } as PersistedStepDefinition & { component?: string; type?: string };
+  const componentKey = resolveStepComponentKey(step);
+
+  if (typeof normalized.component === "string") {
+    normalized.component = normalized.component.trim();
+  }
+  if (!normalized.component && componentKey) {
+    normalized.component = componentKey;
+  }
+
+  const existingType = typeof normalized.type === "string" ? normalized.type.trim() : "";
+  if (existingType) {
+    normalized.type = existingType;
+  } else if (normalized.component && normalized.component.trim().length > 0) {
+    normalized.type = normalized.component;
+  } else if (componentKey && componentKey.trim().length > 0) {
+    normalized.type = componentKey;
+  } else {
+    normalized.type = step.id || "step";
+  }
+
+  if (!normalized.component || normalized.component.trim().length === 0) {
+    normalized.component = normalized.type;
+  }
+
+  return normalized;
+}
+
 function cloneStepDefinition(step: StepDefinition): StepDefinition {
   if (isCompositeStepDefinition(step)) {
     return {
@@ -834,7 +864,7 @@ function cloneStepDefinition(step: StepDefinition): StepDefinition {
     };
   }
 
-  const cloned: StepDefinition = { ...step };
+  const cloned: StepDefinition = normalizePersistedStep(step);
   if (Object.prototype.hasOwnProperty.call(step, "config")) {
     (cloned as { config?: unknown }).config = step.config;
   }
@@ -1289,7 +1319,7 @@ export function serializeActivityDefinition(
   );
   if (stepSequenceDiff !== undefined) {
     overrides.stepSequence = stepSequenceDiff.map((step) => ({
-      ...step,
+      ...normalizePersistedStep(step),
       __replaceSequence: true,
     }));
   }

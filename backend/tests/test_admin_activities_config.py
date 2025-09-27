@@ -102,6 +102,78 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
     )
 
 
+def test_admin_persists_clarity_visibility_flags(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    payload = {
+        "activities": [
+            {
+                "id": "clarity",
+                "label": "Clarity",
+                "stepSequence": [
+                    {
+                        "type": "clarity-map",
+                        "id": "clarity-map",
+                        "config": {
+                            "showPlanPlaceholder": False,
+                            "planPlaceholderMessage": "Message personnalisé",
+                        },
+                    },
+                    {
+                        "type": "clarity-prompt",
+                        "id": "clarity-instruction",
+                        "config": {
+                            "helperTextEnabled": False,
+                            "promptLabel": "Instruction",
+                        },
+                    },
+                ],
+            }
+        ]
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/admin/activities", json=payload)
+            assert response.status_code == 200, response.text
+
+            get_response = client.get("/api/admin/activities")
+            assert get_response.status_code == 200
+            returned = get_response.json()
+            clarity_activity = returned["activities"][0]
+            map_step = next(
+                step for step in clarity_activity["stepSequence"] if step["id"] == "clarity-map"
+            )
+            prompt_step = next(
+                step
+                for step in clarity_activity["stepSequence"]
+                if step["id"] == "clarity-instruction"
+            )
+            assert map_step["config"]["showPlanPlaceholder"] is False
+            assert prompt_step["config"]["helperTextEnabled"] is False
+
+            persisted_path = main._activity_file_path("clarity")
+            assert persisted_path.exists()
+            persisted_activity = json.loads(persisted_path.read_text(encoding="utf-8"))
+            stored_map = next(
+                step
+                for step in persisted_activity["stepSequence"]
+                if step["id"] == "clarity-map"
+            )
+            stored_prompt = next(
+                step
+                for step in persisted_activity["stepSequence"]
+                if step["id"] == "clarity-instruction"
+            )
+            assert stored_map["config"]["showPlanPlaceholder"] is False
+            assert stored_prompt["config"]["helperTextEnabled"] is False
+    finally:
+        app.dependency_overrides.clear()
+
 def test_admin_export_activity_returns_complete_json(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "activities_config.json"
     monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)

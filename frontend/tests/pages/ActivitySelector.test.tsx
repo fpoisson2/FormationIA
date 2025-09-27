@@ -215,4 +215,97 @@ describe("ActivitySelector StepSequence designer", () => {
     expect(worldStep).toBeTruthy();
     expect(worldStep.config).toEqual(createDefaultExplorateurWorldConfig());
   });
+
+  it("persists clarity visibility toggles when saving", async () => {
+    render(
+      <MemoryRouter>
+        <ActivitySelector />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled());
+
+    const clarityConfigureButtons = await screen.findAllByRole("button", {
+      name: /Configurer la séquence Parcours de la clarté/i,
+    });
+    fireEvent.click(clarityConfigureButtons[0]);
+
+    const sequenceModal = await screen.findByRole("dialog", {
+      name: /Configurer « Parcours de la clarté »/i,
+    });
+    const sequenceRegion = await within(sequenceModal).findByRole("region", {
+      name: /Séquence d'étapes pour Parcours de la clarté/i,
+    });
+
+    const stepButtons = within(sequenceRegion).getAllByRole("button", {
+      name: (name) => /^Étape \d+/i.test(name),
+    });
+    const mapStepButton = stepButtons.find((button) => /Étape\s*2/i.test(button.textContent ?? ""));
+    if (mapStepButton) {
+      fireEvent.click(mapStepButton);
+    }
+
+    const planToggle = await within(sequenceRegion).findByLabelText(
+      /Afficher le message d’attente du plan/i
+    );
+    expect(planToggle).toBeChecked();
+    fireEvent.click(planToggle);
+    await waitFor(() => expect(planToggle).not.toBeChecked());
+
+    const promptStepButton = stepButtons.find((button) => /Étape\s*3/i.test(button.textContent ?? ""));
+    if (promptStepButton) {
+      fireEvent.click(promptStepButton);
+    }
+
+    const helperToggle = await within(sequenceRegion).findByLabelText(
+      /Afficher le texte d’aide sous les boutons/i
+    );
+    expect(helperToggle).toBeChecked();
+    fireEvent.click(helperToggle);
+    await waitFor(() => expect(helperToggle).not.toBeChecked());
+
+    fireEvent.click(within(sequenceModal).getByRole("button", { name: /^Fermer$/i }));
+
+    // Reopen to verify that the toggles remain unchecked before saving.
+    const reopenedButtons = await screen.findAllByRole("button", {
+      name: /Configurer la séquence Parcours de la clarté/i,
+    });
+    fireEvent.click(reopenedButtons[0]);
+
+    const reopenedModal = await screen.findByRole("dialog", {
+      name: /Configurer « Parcours de la clarté »/i,
+    });
+    const reopenedRegion = await within(reopenedModal).findByRole("region", {
+      name: /Séquence d'étapes pour Parcours de la clarté/i,
+    });
+    const reopenedPlanToggle = await within(reopenedRegion).findByLabelText(
+      /Afficher le message d’attente du plan/i
+    );
+    expect(reopenedPlanToggle).not.toBeChecked();
+    const reopenedHelperToggle = await within(reopenedRegion).findByLabelText(
+      /Afficher le texte d’aide sous les boutons/i
+    );
+    expect(reopenedHelperToggle).not.toBeChecked();
+
+    fireEvent.click(within(reopenedModal).getByRole("button", { name: /^Fermer$/i }));
+
+    const [saveButton] = await screen.findAllByRole("button", { name: /Sauvegarder/i });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
+
+    const payload = saveMock.mock.calls[0][0];
+    const clarityEntry = payload.activities.find((activity: any) => activity?.id === "clarity");
+    expect(clarityEntry).toBeTruthy();
+
+    const mapOverride = clarityEntry?.overrides?.stepSequence?.find(
+      (step: any) => step?.id === "clarity:map"
+    );
+    const promptOverride = clarityEntry?.overrides?.stepSequence?.find(
+      (step: any) => step?.id === "clarity:instruction"
+    );
+
+    expect(mapOverride?.config?.showPlanPlaceholder).toBe(false);
+    expect(promptOverride?.config?.helperTextEnabled).toBe(false);
+  });
 });
