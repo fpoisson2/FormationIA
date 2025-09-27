@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import secrets
+import re
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -134,6 +135,19 @@ def _resolve_activities_config_path() -> Path:
 ACTIVITIES_CONFIG_PATH = _resolve_activities_config_path()
 
 _ACTIVITY_CONFIG_LOCK = Lock()
+
+
+def _get_activities_library_dir() -> Path:
+    directory = ACTIVITIES_CONFIG_PATH.parent / "activities"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _get_activity_index_path() -> Path:
+    return ACTIVITIES_CONFIG_PATH.parent / "activities_index.json"
+
+
+_ACTIVITY_FILE_SANITIZER = re.compile(r"[^a-z0-9._-]+")
 
 ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
 _ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
@@ -648,6 +662,114 @@ def _normalize_activities_payload(
     return normalized
 
 
+def _sanitize_activity_filename(identifier: str) -> str:
+    lowered = identifier.strip().lower()
+    sanitized = _ACTIVITY_FILE_SANITIZER.sub("-", lowered)
+    sanitized = sanitized.strip("-._") or "activity"
+    if len(sanitized) > 80:
+        sanitized = sanitized[:80].rstrip("-._") or sanitized[:60]
+    return sanitized
+
+
+def _resolve_activity_filename(
+    activity_id: str, used_names: set[str]
+) -> tuple[str, str]:
+    base_name = _sanitize_activity_filename(activity_id or "activity")
+    candidate = f"{base_name}.json"
+    suffix = 2
+    while candidate in used_names:
+        candidate = f"{base_name}-{suffix}.json"
+        suffix += 1
+    used_names.add(candidate)
+    return candidate, base_name
+
+
+def _sync_activity_library(activities: Sequence[Mapping[str, Any]]) -> None:
+    directory = _get_activities_library_dir()
+    used_names: set[str] = set()
+    id_to_filename: dict[str, str] = {}
+
+    for index, activity in enumerate(activities):
+        raw_id = activity.get("id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            activity_id = raw_id.strip()
+        else:
+            activity_id = f"activity-{index + 1}"
+
+        if activity_id in id_to_filename:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Chaque activité doit avoir un identifiant unique. "
+                    f"Doublon détecté pour '{activity_id}'."
+                ),
+            )
+
+        filename, _ = _resolve_activity_filename(activity_id, used_names)
+        path = directory / filename
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(activity, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        id_to_filename[activity_id] = filename
+
+    managed_files = {directory / name for name in used_names}
+    for existing in directory.glob("*.json"):
+        if existing not in managed_files:
+            existing.unlink(missing_ok=True)
+
+    index_path = _get_activity_index_path()
+    with index_path.open("w", encoding="utf-8") as handle:
+        json.dump(id_to_filename, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def _load_activity_from_library(activity_id: str) -> dict[str, Any] | None:
+    if not activity_id:
+        return None
+
+    index_path = _get_activity_index_path()
+    directory = _get_activities_library_dir()
+
+    mapping: dict[str, str] = {}
+    if index_path.exists():
+        try:
+            with index_path.open("r", encoding="utf-8") as handle:
+                raw_mapping = json.load(handle)
+        except json.JSONDecodeError:
+            raw_mapping = {}
+        if isinstance(raw_mapping, dict):
+            mapping = {
+                str(key): str(value)
+                for key, value in raw_mapping.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
+
+    candidate: Path | None = None
+    mapped = mapping.get(activity_id)
+    if mapped:
+        candidate = directory / mapped
+        if not candidate.exists():
+            candidate = None
+
+    if candidate is None:
+        fallback_name = f"{_sanitize_activity_filename(activity_id)}.json"
+        fallback_path = directory / fallback_name
+        if fallback_path.exists():
+            candidate = fallback_path
+
+    if candidate is None or not candidate.exists():
+        return None
+
+    with candidate.open("r", encoding="utf-8") as handle:
+        try:
+            payload = json.load(handle)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
 def _load_activities_config() -> dict[str, Any]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
     uses_default_fallback = not ACTIVITIES_CONFIG_PATH.exists()
@@ -773,8 +895,19 @@ def _save_activities_config(config: dict[str, Any]) -> None:
         payload["activitySelectorHeader"] = header
 
     try:
+        _sync_activity_library(normalized_activities)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Impossible de synchroniser la bibliothèque d'activités: {str(exc)}",
+        ) from exc
+
+    try:
         with ACTIVITIES_CONFIG_PATH.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
 
@@ -1625,6 +1758,11 @@ class ActivityConfigRequest(BaseModel):
     activity_generation: ActivityGenerationConfig | None = Field(
         default=None, alias="activityGeneration"
     )
+
+
+class ActivityImportRequest(BaseModel):
+    activity: ActivityPayload
+
 
 class LTIScoreRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
@@ -2805,6 +2943,84 @@ def admin_save_activities_config(
     _save_activities_config(payload.model_dump(by_alias=True, exclude_none=True))
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
+@admin_router.post("/activities/import")
+def admin_import_activity(
+    payload: ActivityImportRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> dict[str, Any]:
+    activity_payload = payload.activity.model_dump(by_alias=True, exclude_none=True)
+    normalized_list = _normalize_activities_payload(
+        [activity_payload], error_status=400
+    )
+    normalized_activity = normalized_list[0]
+
+    with _ACTIVITY_CONFIG_LOCK:
+        current_config = _load_activities_config()
+        existing = list(current_config.get("activities", []))
+        target_id = normalized_activity.get("id")
+        if isinstance(target_id, str) and target_id:
+            filtered = [
+                entry
+                for entry in existing
+                if not (isinstance(entry, Mapping) and entry.get("id") == target_id)
+            ]
+        else:
+            filtered = existing
+        filtered.append(normalized_activity)
+
+        new_payload: dict[str, Any] = {"activities": filtered}
+        header = current_config.get("activitySelectorHeader")
+        if header is not None:
+            new_payload["activitySelectorHeader"] = header
+        generation = current_config.get("activityGeneration")
+        if generation is not None:
+            new_payload["activityGeneration"] = generation
+
+        _save_activities_config(new_payload)
+
+    return {
+        "ok": True,
+        "message": "Activité importée avec succès",
+        "activity": normalized_activity,
+    }
+
+
+@admin_router.get("/activities/{activity_id}/export")
+def admin_export_activity(
+    activity_id: str, _: LocalUser = Depends(_require_admin_user)
+) -> Response:
+    normalized_id = activity_id.strip()
+    if not normalized_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Identifiant d'activité manquant.",
+        )
+
+    activity = _load_activity_from_library(normalized_id)
+    if activity is None:
+        config = _load_activities_config()
+        for entry in config.get("activities", []):
+            if isinstance(entry, Mapping) and entry.get("id") == normalized_id:
+                activity = entry
+                break
+
+    if activity is None:
+        raise HTTPException(status_code=404, detail="Activité introuvable.")
+
+    candidate_id = activity.get("id")
+    if isinstance(candidate_id, str) and candidate_id.strip():
+        filename_base = _sanitize_activity_filename(candidate_id)
+    else:
+        filename_base = _sanitize_activity_filename(normalized_id)
+
+    filename = f"{filename_base or 'activite'}.json"
+
+    return JSONResponse(
+        activity,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+        },
+    )
 
 
 

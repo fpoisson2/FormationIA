@@ -384,6 +384,12 @@ export interface SaveActivityConfigResponse {
   message: string;
 }
 
+export interface ImportActivityResponse {
+  ok: boolean;
+  activity: Record<string, unknown>;
+  message?: string;
+}
+
 export interface ActivityGenerationDetailsPayload {
   theme?: string;
   audience?: string;
@@ -454,6 +460,31 @@ export const admin = {
           },
           token
         )
+      ),
+    import: async (
+      activity: Record<string, unknown>,
+      token?: string | null
+    ): Promise<ImportActivityResponse> =>
+      fetchJson<ImportActivityResponse>(
+        `${API_BASE_URL}/admin/activities/import`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ activity }),
+          },
+          token
+        )
+      ),
+    export: async (
+      activityId: string,
+      token?: string | null
+    ): Promise<Record<string, unknown>> =>
+      fetchJson<Record<string, unknown>>(
+        `${API_BASE_URL}/admin/activities/${encodeURIComponent(activityId)}/export`,
+        withAdminCredentials({}, token)
       ),
     generate: async (
       payload: GenerateActivityPayload,

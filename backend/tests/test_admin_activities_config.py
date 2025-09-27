@@ -95,6 +95,17 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
         == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
     )
 
+    activities_dir = config_path.parent / "activities"
+    index_path = config_path.parent / "activities_index.json"
+    activity_file = activities_dir / "sequence.json"
+    assert activity_file.exists(), "Chaque activité doit être persistée individuellement"
+    stored_activity = json.loads(activity_file.read_text(encoding="utf-8"))
+    assert stored_activity["id"] == "sequence"
+    assert stored_activity["stepSequence"] == payload["activities"][0]["stepSequence"]
+    assert index_path.exists(), "L'index des activités doit être généré"
+    index_data = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index_data == {"sequence": "sequence.json"}
+
 
 def test_admin_save_activities_rejects_invalid_step_sequence(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "activities_config.json"
@@ -183,6 +194,99 @@ def test_admin_can_remove_all_activities(tmp_path, monkeypatch) -> None:
     )
 
 
+def test_admin_import_activity(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    activity_payload = {
+        "activity": {
+            "id": "imported-activity",
+            "componentKey": "step-sequence",
+            "card": {
+                "title": "Activité importée",
+                "description": "Description",
+                "cta": {"label": "Lancer", "to": "/activites/imported-activity"},
+                "highlights": ["Point clé"],
+            },
+            "stepSequence": [
+                {
+                    "id": "intro",
+                    "type": "rich-content",
+                    "config": {"title": "Bienvenue", "body": "Contenu"},
+                }
+            ],
+        }
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/admin/activities/import", json=activity_payload)
+            assert response.status_code == 200, response.text
+            data = response.json()
+            assert data["ok"] is True
+            assert data["activity"]["id"] == "imported-activity"
+
+            config_response = client.get("/api/admin/activities")
+            assert config_response.status_code == 200
+            config_data = config_response.json()
+            saved_ids = [activity.get("id") for activity in config_data.get("activities", [])]
+            assert "imported-activity" in saved_ids
+    finally:
+        app.dependency_overrides.clear()
+
+    activities_dir = config_path.parent / "activities"
+    activity_file = activities_dir / "imported-activity.json"
+    assert activity_file.exists(), "Le fichier individuel doit être créé lors de l'import"
+    stored = json.loads(activity_file.read_text(encoding="utf-8"))
+    assert stored["id"] == "imported-activity"
+
+
+def test_admin_export_activity(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    payload = {
+        "activities": [
+            {
+                "id": "export-me",
+                "componentKey": "step-sequence",
+                "card": {
+                    "title": "Exportable",
+                    "description": "Activité",
+                    "cta": {"label": "Tester", "to": "/activites/export-me"},
+                    "highlights": ["Clé"],
+                },
+                "stepSequence": [
+                    {
+                        "id": "export-step",
+                        "type": "rich-content",
+                        "config": {"title": "Titre", "body": "Texte"},
+                    }
+                ],
+            }
+        ]
+    }
+
+    try:
+        with TestClient(app) as client:
+            save_response = client.post("/api/admin/activities", json=payload)
+            assert save_response.status_code == 200, save_response.text
+
+            export_response = client.get("/api/admin/activities/export-me/export")
+            assert export_response.status_code == 200, export_response.text
+            exported = export_response.json()
+            assert exported["id"] == "export-me"
+            assert export_response.headers["content-disposition"].startswith(
+                "attachment; filename=\"export-me"
+            )
+    finally:
+        app.dependency_overrides.clear()
 def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch) -> None:
     admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
     app.dependency_overrides[_require_admin_user] = lambda: admin_user

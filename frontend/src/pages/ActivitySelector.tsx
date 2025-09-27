@@ -67,6 +67,22 @@ const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
 
 const NOOP = () => {};
 
+function slugifyActivityFileName(input: string): string {
+  const normalized = input
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const sanitized = normalized.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  const truncated = sanitized.slice(0, 80).replace(/^-+|-+$/g, "");
+  return truncated || "activite";
+}
+
+function getActivityDownloadName(activity: ActivityDefinition): string {
+  const title = activity.card?.title?.trim();
+  const base = title && title.length > 0 ? title : activity.id || "activite";
+  return `${slugifyActivityFileName(base)}.json`;
+}
+
 function extractErrorMessage(error: unknown): string | null {
   if (!(error instanceof Error)) {
     return null;
@@ -633,12 +649,17 @@ function ActivitySelector(): JSX.Element {
   const [generationReasoningSummary, setGenerationReasoningSummary] =
     useState<string | null>(null);
   const generationControllerRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loadConfigMutexRef = useRef(false);
   const [generationStatusMessage, setGenerationStatusMessage] =
     useState<string | null>(null);
   const [activeGenerationJobId, setActiveGenerationJobId] =
     useState<string | null>(null);
   const [lastGeneratedActivityId, setLastGeneratedActivityId] =
+    useState<string | null>(null);
+  const [isImportingActivity, setIsImportingActivity] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [librarySuccessMessage, setLibrarySuccessMessage] =
     useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
@@ -791,8 +812,23 @@ function ActivitySelector(): JSX.Element {
       setGenerationSuccessMessage(null);
       setGenerationReasoningSummary(null);
       setLastGeneratedActivityId(null);
+      setLibraryError(null);
+      setLibrarySuccessMessage(null);
+      setIsImportingActivity(false);
     }
   }, [isEditMode]);
+
+  useEffect(() => {
+    if (!librarySuccessMessage) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setLibrarySuccessMessage(null);
+    }, 6000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [librarySuccessMessage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1484,6 +1520,14 @@ function ActivitySelector(): JSX.Element {
     setGenerationStatusMessage(null);
   }, []);
 
+  const handleDismissLibrarySuccess = useCallback(() => {
+    setLibrarySuccessMessage(null);
+  }, []);
+
+  const handleDismissLibraryError = useCallback(() => {
+    setLibraryError(null);
+  }, []);
+
   const handleSubmitGeneration = useCallback(async () => {
     if (isGeneratingActivity) {
       return;
@@ -1591,6 +1635,127 @@ function ActivitySelector(): JSX.Element {
     token,
   ]);
 
+
+
+  const handleTriggerImport = useCallback(() => {
+    if (!isEditMode || isImportingActivity) {
+      return;
+    }
+    setLibraryError(null);
+    fileInputRef.current?.click();
+  }, [isEditMode, isImportingActivity]);
+
+  const handleImportFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      if (!isEditMode) {
+        return;
+      }
+
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+
+      if (!token) {
+        setLibraryError(
+          "Connexion administrateur requise pour importer une activité."
+        );
+        return;
+      }
+
+      setLibraryError(null);
+      setLibrarySuccessMessage(null);
+      setIsImportingActivity(true);
+
+      try {
+        const rawText = await file.text();
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          throw new Error(
+            "Le fichier sélectionné ne contient pas un JSON valide."
+          );
+        }
+
+        const response = await admin.activities.import(
+          parsed as Record<string, unknown>,
+          token
+        );
+        const rawActivity = response?.activity;
+        if (!rawActivity || typeof rawActivity !== "object") {
+          throw new Error(
+            "Réponse inattendue du service d'importation."
+          );
+        }
+
+        let resolved: ActivityDefinition;
+        try {
+          resolved = resolveActivityDefinition(
+            rawActivity as ActivityConfigEntry
+          );
+        } catch {
+          throw new Error(
+            "L'activité importée est invalide ou incomplète."
+          );
+        }
+
+        setEditableActivities((prev) => {
+          const filtered = prev.filter((activity) => activity.id !== resolved.id);
+          return [...filtered, resolved];
+        });
+        setLastGeneratedActivityId(resolved.id);
+        const title = resolved.card.title?.trim() || resolved.id;
+        setLibrarySuccessMessage(
+          `L’activité « ${title} » a été importée. Pensez à enregistrer vos modifications.`
+        );
+      } catch (error) {
+        console.error("Erreur lors de l'import d'activité:", error);
+        const detail =
+          extractErrorMessage(error) ||
+          "Impossible d'importer cette activité. Vérifiez le fichier JSON et réessayez.";
+        setLibraryError(detail);
+      } finally {
+        setIsImportingActivity(false);
+      }
+    },
+    [isEditMode, token]
+  );
+
+  const handleExportActivity = useCallback(
+    async (activity: ActivityDefinition) => {
+      if (!isEditMode) {
+        return;
+      }
+
+      try {
+        setLibraryError(null);
+        const payload = await admin.activities.export(activity.id, token);
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = getActivityDownloadName(activity);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        const title = activity.card.title?.trim() || activity.id;
+        setLibrarySuccessMessage(`L’activité « ${title} » a été exportée.`);
+      } catch (error) {
+        console.error("Erreur lors de l'export d'activité:", error);
+        const detail =
+          extractErrorMessage(error) ||
+          "Impossible d'exporter cette activité pour le moment.";
+        setLibraryError(detail);
+      }
+    },
+    [isEditMode, token]
+  );
+
   const activitiesToDisplay = isEditMode
     ? editableActivities
     : editableActivities.filter((activity) => activity.enabled !== false);
@@ -1602,6 +1767,13 @@ function ActivitySelector(): JSX.Element {
 
   return (
     <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json"
+        className="hidden"
+        onChange={handleImportFileChange}
+      />
       <ActivityLayout
       activityId="activity-selector"
       eyebrow={currentHeader.eyebrow}
@@ -1614,6 +1786,13 @@ function ActivitySelector(): JSX.Element {
           <div className="flex items-center gap-2">
             {isEditMode ? (
               <>
+                <button
+                  onClick={handleTriggerImport}
+                  disabled={isSaving || isImportingActivity}
+                  className="inline-flex items-center justify-center rounded-full border border-sky-600/30 bg-sky-50 px-4 py-2 text-xs font-medium text-sky-700 transition hover:border-sky-600/40 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isImportingActivity ? "Importation..." : "Importer"}
+                </button>
                 <button
                   onClick={handleSaveChanges}
                   disabled={isSaving}
@@ -1792,6 +1971,46 @@ function ActivitySelector(): JSX.Element {
           </p>
         </div>
       ) : null}
+      {libraryError ? (
+        <div className="animate-section mb-6 space-y-3 rounded-3xl border border-orange-200/80 bg-orange-50/90 p-6 text-orange-900 shadow-sm backdrop-blur">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-orange-700/80">
+                Import / export indisponible
+              </p>
+              <p className="text-sm leading-relaxed md:text-base">{libraryError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissLibraryError}
+              className="inline-flex items-center justify-center self-start rounded-full border border-orange-400/40 px-3 py-1 text-xs font-semibold text-orange-700 transition hover:border-orange-500/70 hover:text-orange-900"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {librarySuccessMessage ? (
+        <div className="animate-section mb-6 space-y-3 rounded-3xl border border-emerald-200/70 bg-emerald-50/90 p-6 text-emerald-900 shadow-sm backdrop-blur">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700/80">
+                Import / export d’activité
+              </p>
+              <p className="text-sm leading-relaxed md:text-base">
+                {librarySuccessMessage}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissLibrarySuccess}
+              className="inline-flex items-center justify-center self-start rounded-full border border-emerald-400/40 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:border-emerald-500/70 hover:text-emerald-900"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-4 sm:gap-6">
         {activitiesToDisplay.map((activity: ActivityDefinition, index: number) => {
           const isDisabled = activity.enabled === false;
@@ -1876,6 +2095,14 @@ function ActivitySelector(): JSX.Element {
                   />
                   Visible
                 </label>
+                <button
+                  type="button"
+                  onClick={() => handleExportActivity(activity)}
+                  className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white/80 px-3 py-1 text-xs font-medium text-sky-700 shadow-sm transition hover:border-sky-300 hover:bg-sky-50"
+                  aria-label={`Exporter ${activity.card.title}`}
+                >
+                  Exporter
+                </button>
                 <button
                   type="button"
                   onClick={() => {

@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getProgressMock = vi.fn();
 const getConfigMock = vi.fn();
 const saveMock = vi.fn();
+const importMock = vi.fn();
+const exportMock = vi.fn();
 const setEditModeMock = vi.fn();
 
 vi.mock("../../src/api", () => ({
@@ -15,6 +17,8 @@ vi.mock("../../src/api", () => ({
   admin: {
     activities: {
       save: saveMock,
+      import: importMock,
+      export: exportMock,
     },
   },
 }));
@@ -42,6 +46,8 @@ describe("ActivitySelector StepSequence designer", () => {
     getProgressMock.mockResolvedValue({ activities: {} });
     getConfigMock.mockResolvedValue({ activities: [], activitySelectorHeader: null });
     saveMock.mockResolvedValue(undefined);
+    importMock.mockResolvedValue({ ok: true, activity: {} });
+    exportMock.mockResolvedValue({});
   });
 
   it("allows creating a StepSequence activity and editing its steps", async () => {
