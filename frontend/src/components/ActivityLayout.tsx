@@ -118,13 +118,6 @@ function ActivityLayout({
           <div className="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3">
             <div className="flex flex-col gap-3 text-sm text-orange-800 md:flex-row md:items-center md:justify-between">
               <p className="font-medium">{bannerMessage}</p>
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="inline-flex items-center justify-center rounded bg-orange-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSaving ? "Sauvegarde…" : "Sauvegarder"}
-              </button>
             </div>
           </div>
         ) : null}
@@ -237,6 +230,17 @@ function ActivityLayout({
           {children}
         </ContentTag>
       </div>
+      {shouldShowEditBanner ? (
+        <div className="pointer-events-none fixed bottom-6 right-6 z-50 flex flex-col gap-2 items-end">
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="pointer-events-auto inline-flex items-center justify-center gap-2 rounded-full bg-orange-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-orange-600/30 transition hover:bg-orange-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600 disabled:cursor-not-allowed disabled:bg-orange-500/80"
+          >
+            {isSaving ? "Sauvegarde…" : "Sauvegarder"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
