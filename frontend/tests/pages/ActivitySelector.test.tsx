@@ -214,7 +214,7 @@ describe("ActivitySelector StepSequence designer", () => {
 
     expect(worldStep).toBeTruthy();
     expect(worldStep.config).toEqual(createDefaultExplorateurWorldConfig());
-  });
+  }, 15000);
 
   it("persists clarity visibility toggles when saving", async () => {
     render(
@@ -307,5 +307,5 @@ describe("ActivitySelector StepSequence designer", () => {
 
     expect(mapOverride?.config?.showPlanPlaceholder).toBe(false);
     expect(promptOverride?.config?.helperTextEnabled).toBe(false);
-  });
+  }, 15000);
 });

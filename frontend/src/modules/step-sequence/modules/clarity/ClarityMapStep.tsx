@@ -429,6 +429,10 @@ export function ClarityMapStep({
   const normalizedConfig = useMemo(() => sanitizeConfig(config), [config]);
   const mapPayload = useMemo(() => sanitizePayload(payload), [payload]);
   const effectivePromptStepId = normalizedConfig.promptStepId || detectedPromptStepId;
+  const instructionFieldId = useMemo(() => {
+    const rawId = typeof definition?.id === "string" && definition.id ? definition.id : "clarity-map";
+    return `${rawId}-instruction`;
+  }, [definition?.id]);
   const {
     instruction: promptInstruction,
     triggerId: promptTriggerId,
@@ -626,10 +630,38 @@ export function ClarityMapStep({
     [applyConfigPatch]
   );
 
+  const handleInstructionLabelChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      applyConfigPatch({ instructionLabel: event.target.value });
+    },
+    [applyConfigPatch]
+  );
+
+  const handleInstructionPlaceholderChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      applyConfigPatch({ instructionPlaceholder: event.target.value });
+    },
+    [applyConfigPatch]
+  );
+
+  const handleAllowInstructionToggle = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      applyConfigPatch({ allowInstructionInput: event.target.checked });
+    },
+    [applyConfigPatch]
+  );
+
   const handleShuffleObstacles = useCallback(() => {
     setBlocked(createRandomObstacles(target, obstacleCount));
     setRunId(createRunId());
   }, [obstacleCount, target]);
+
+  const handleInstructionChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      setInstruction(event.target.value);
+    },
+    []
+  );
 
   const handleExecute = useCallback(async () => {
     if (!trimmedInstruction) {
@@ -812,6 +844,39 @@ export function ClarityMapStep({
             <label className="flex items-center gap-2 md:col-span-2">
               <input
                 type="checkbox"
+                checked={normalizedConfig.allowInstructionInput}
+                onChange={handleAllowInstructionToggle}
+                className="h-4 w-4 rounded border border-white/60 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Autoriser la saisie manuelle de la commande
+              </span>
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Libellé du champ commande
+              </span>
+              <input
+                type="text"
+                value={normalizedConfig.instructionLabel}
+                onChange={handleInstructionLabelChange}
+                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Placeholder du champ commande
+              </span>
+              <input
+                type="text"
+                value={normalizedConfig.instructionPlaceholder}
+                onChange={handleInstructionPlaceholderChange}
+                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-2 md:col-span-2">
+              <input
+                type="checkbox"
                 checked={showPlanPlaceholder}
                 onChange={(event) => applyConfigPatch({ showPlanPlaceholder: event.target.checked })}
                 className="h-4 w-4 rounded border border-white/60 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
@@ -893,6 +958,30 @@ export function ClarityMapStep({
             placeholderMessage={planPlaceholderMessage}
             showPlaceholder={showPlanPlaceholder}
           />
+          <div className="space-y-2 rounded-2xl border border-white/40 bg-white/30 p-4 shadow-inner">
+            <label
+              htmlFor={instructionFieldId}
+              className="block text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70"
+            >
+              {normalizedConfig.instructionLabel}
+            </label>
+            {normalizedConfig.allowInstructionInput && promptInstruction === null ? (
+              <textarea
+                id={instructionFieldId}
+                value={instruction}
+                onChange={handleInstructionChange}
+                placeholder={normalizedConfig.instructionPlaceholder}
+                rows={3}
+                className="w-full rounded-xl border border-white/60 bg-white/80 px-3 py-2 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+            ) : (
+              <p className="whitespace-pre-wrap rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-sm text-[color:var(--brand-charcoal)]/90">
+                {instruction.trim()
+                  ? instruction
+                  : normalizedConfig.instructionPlaceholder || "La consigne reçue s'affichera ici…"}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
