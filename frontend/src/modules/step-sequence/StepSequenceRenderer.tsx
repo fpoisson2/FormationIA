@@ -22,6 +22,66 @@ function buildInitialConfigs(steps: StepDefinition[]): Record<string, unknown> {
   return nextConfigs;
 }
 
+function sanitizeConfigValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeConfigValue(item, seen));
+  }
+
+  if (value && typeof value === "object") {
+    const objectValue = value as Record<string, unknown>;
+    if (seen.has(objectValue)) {
+      return null;
+    }
+
+    seen.add(objectValue);
+    const sanitizedEntries = Object.entries(objectValue).reduce<
+      Record<string, unknown>
+    >((accumulator, [key, entry]) => {
+      if (typeof entry === "function") {
+        return accumulator;
+      }
+
+      const sanitized = sanitizeConfigValue(entry, seen);
+      if (typeof sanitized !== "undefined") {
+        accumulator[key] = sanitized;
+      }
+
+      return accumulator;
+    }, {});
+    seen.delete(objectValue);
+    return sanitizedEntries;
+  }
+
+  if (typeof value === "function") {
+    return undefined;
+  }
+
+  return value;
+}
+
+function buildStepsSignature(steps: StepDefinition[]): string {
+  try {
+    const simplified = steps.map((step) => {
+      const seen = new WeakSet<object>();
+      if (isCompositeStepDefinition(step)) {
+        return {
+          id: step.id,
+          component: step.component ?? null,
+          composite: sanitizeConfigValue(step.composite, seen),
+        };
+      }
+      return {
+        id: step.id,
+        component: step.component,
+        config: sanitizeConfigValue(step.config, seen),
+      };
+    });
+    return JSON.stringify(simplified);
+  } catch {
+    return steps.map((step) => step.id).join("|");
+  }
+}
+
 export interface StepSequenceRenderWrapperProps {
   step: StepDefinition;
   stepIndex: number;
@@ -60,6 +120,12 @@ export function StepSequenceRenderer({
   );
 
   const stepIdsKey = useMemo(() => steps.map((step) => step.id).join("|"), [steps]);
+  const stepsSignature = useMemo(() => buildStepsSignature(steps), [steps]);
+  const latestStepsRef = useRef(steps);
+
+  useEffect(() => {
+    latestStepsRef.current = steps;
+  }, [steps]);
 
   useEffect(() => {
     setCurrentIndex((prevIndex) =>
@@ -69,8 +135,8 @@ export function StepSequenceRenderer({
   }, [stepIdsKey, steps.length]);
 
   useEffect(() => {
-    setStepConfigs(buildInitialConfigs(steps));
-  }, [stepIdsKey, steps]);
+    setStepConfigs(buildInitialConfigs(latestStepsRef.current));
+  }, [stepsSignature]);
 
   const handleAdvance = useCallback(
     (payload?: unknown) => {
