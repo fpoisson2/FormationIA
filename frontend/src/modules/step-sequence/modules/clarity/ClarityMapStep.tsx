@@ -58,6 +58,8 @@ export interface ClarityMapStepConfig {
   allowInstructionInput?: boolean;
   instructionLabel?: string;
   instructionPlaceholder?: string;
+  showPlanPlaceholder?: boolean;
+  planPlaceholderMessage?: string;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -68,6 +70,8 @@ interface NormalizedClarityMapConfig {
   allowInstructionInput: boolean;
   instructionLabel: string;
   instructionPlaceholder: string;
+  showPlanPlaceholder: boolean;
+  planPlaceholderMessage: string;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -242,6 +246,8 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
       allowInstructionInput: true,
       instructionLabel: "Commande transmise",
       instructionPlaceholder: "La consigne reçue s'affichera ici…",
+      showPlanPlaceholder: true,
+      planPlaceholderMessage: "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.",
     };
   }
 
@@ -262,6 +268,11 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     typeof raw.instructionPlaceholder === "string" && raw.instructionPlaceholder.trim()
       ? raw.instructionPlaceholder.trim()
       : "La consigne reçue s'affichera ici…";
+  const showPlanPlaceholder = raw.showPlanPlaceholder !== false;
+  const planPlaceholderMessage =
+    typeof raw.planPlaceholderMessage === "string" && raw.planPlaceholderMessage.trim()
+      ? raw.planPlaceholderMessage.trim()
+      : "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.";
 
   return {
     obstacleCount,
@@ -270,6 +281,8 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     allowInstructionInput,
     instructionLabel,
     instructionPlaceholder,
+    showPlanPlaceholder,
+    planPlaceholderMessage,
     onChange: raw.onChange,
   };
 }
@@ -482,6 +495,8 @@ export function ClarityMapStep({
 
   const targetFromConfig = normalizedConfig.initialTarget;
   const obstacleCount = normalizedConfig.obstacleCount;
+  const planPlaceholderMessage = normalizedConfig.planPlaceholderMessage;
+  const showPlanPlaceholder = normalizedConfig.showPlanPlaceholder;
 
   useEffect(() => {
     if (mapPayload || !targetFromConfig) {
@@ -569,6 +584,11 @@ export function ClarityMapStep({
             : normalizedConfig.allowInstructionInput,
         instructionLabel: patch.instructionLabel ?? normalizedConfig.instructionLabel,
         instructionPlaceholder: patch.instructionPlaceholder ?? normalizedConfig.instructionPlaceholder,
+        showPlanPlaceholder:
+          typeof patch.showPlanPlaceholder === "boolean"
+            ? patch.showPlanPlaceholder
+            : normalizedConfig.showPlanPlaceholder,
+        planPlaceholderMessage: patch.planPlaceholderMessage ?? normalizedConfig.planPlaceholderMessage,
       };
 
       normalizedConfig.onChange?.(nextConfig);
@@ -798,6 +818,29 @@ export function ClarityMapStep({
                 Laisse vide pour relier automatiquement le module prompt du composite.
               </span>
             </label>
+            <label className="flex items-center gap-2 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={showPlanPlaceholder}
+                onChange={(event) => applyConfigPatch({ showPlanPlaceholder: event.target.checked })}
+                className="h-4 w-4 rounded border border-white/60 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Afficher le message d’attente du plan
+              </span>
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Message d’attente du plan
+              </span>
+              <textarea
+                value={planPlaceholderMessage}
+                onChange={(event) => applyConfigPatch({ planPlaceholderMessage: event.target.value })}
+                rows={2}
+                disabled={!showPlanPlaceholder}
+                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
@@ -860,7 +903,12 @@ export function ClarityMapStep({
               {effectiveMessage || "L’IA calcule le trajet…"}
             </p>
           )}
-          <PlanPreview plan={effectivePlan} notes={effectiveNotes} />
+          <PlanPreview
+            plan={effectivePlan}
+            notes={effectiveNotes}
+            placeholderMessage={planPlaceholderMessage}
+            showPlaceholder={showPlanPlaceholder}
+          />
         </div>
       </div>
 

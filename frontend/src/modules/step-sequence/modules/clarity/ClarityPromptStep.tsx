@@ -1,4 +1,5 @@
 import {
+  ChangeEvent,
   FormEvent,
   useCallback,
   useContext,
@@ -28,6 +29,9 @@ export interface ClarityPromptStepConfig {
   thinking?: "minimal" | "medium" | "high";
   developerPrompt?: string;
   settingsMode?: "hidden" | "read-only" | "editable";
+  helperTextEnabled?: boolean;
+  autoPublishHelperText?: string;
+  manualPublishHelperText?: string;
   onChange?: (config: ClarityPromptStepConfig) => void;
 }
 
@@ -39,6 +43,9 @@ interface NormalizedPromptConfig {
   thinking: "minimal" | "medium" | "high";
   developerPrompt: string;
   settingsMode: "hidden" | "read-only" | "editable";
+  helperTextEnabled: boolean;
+  autoPublishHelperText: string;
+  manualPublishHelperText: string;
   onChange?: (config: ClarityPromptStepConfig) => void;
 }
 
@@ -52,6 +59,9 @@ function sanitizeConfig(config: unknown): NormalizedPromptConfig {
       thinking: "medium",
       developerPrompt: "",
       settingsMode: "hidden",
+      helperTextEnabled: true,
+      autoPublishHelperText: "Clique sur \"Lancer la consigne\" pour envoyer le prompt au module carte.",
+      manualPublishHelperText: "Clique sur \"Continuer\" pour transmettre la consigne au module suivant.",
     };
   }
 
@@ -81,6 +91,15 @@ function sanitizeConfig(config: unknown): NormalizedPromptConfig {
     raw.settingsMode === "hidden" || raw.settingsMode === "read-only" || raw.settingsMode === "editable"
       ? raw.settingsMode
       : "hidden";
+  const helperTextEnabled = raw.helperTextEnabled !== false;
+  const autoPublishHelperText =
+    typeof raw.autoPublishHelperText === "string" && raw.autoPublishHelperText.trim()
+      ? raw.autoPublishHelperText.trim()
+      : "Clique sur \"Lancer la consigne\" pour envoyer le prompt au module carte.";
+  const manualPublishHelperText =
+    typeof raw.manualPublishHelperText === "string" && raw.manualPublishHelperText.trim()
+      ? raw.manualPublishHelperText.trim()
+      : "Clique sur \"Continuer\" pour transmettre la consigne au module suivant.";
 
   return {
     promptLabel,
@@ -90,6 +109,9 @@ function sanitizeConfig(config: unknown): NormalizedPromptConfig {
     thinking,
     developerPrompt,
     settingsMode,
+    helperTextEnabled,
+    autoPublishHelperText,
+    manualPublishHelperText,
     onChange: raw.onChange,
   };
 }
@@ -238,6 +260,18 @@ export function ClarityPromptStep({
         thinking: patch.thinking ?? thinking,
         developerPrompt: patch.developerPrompt ?? developerPrompt,
         settingsMode: patch.settingsMode ?? settingsMode,
+        helperTextEnabled:
+          typeof patch.helperTextEnabled === "boolean"
+            ? patch.helperTextEnabled
+            : normalizedConfig.helperTextEnabled,
+        autoPublishHelperText:
+          typeof patch.autoPublishHelperText === "string"
+            ? patch.autoPublishHelperText
+            : normalizedConfig.autoPublishHelperText,
+        manualPublishHelperText:
+          typeof patch.manualPublishHelperText === "string"
+            ? patch.manualPublishHelperText
+            : normalizedConfig.manualPublishHelperText,
       };
 
       normalizedConfig.onChange?.(nextConfig);
@@ -326,8 +360,9 @@ export function ClarityPromptStep({
   const trimmedInstruction = instruction.trim();
   const buttonDisabled = !trimmedInstruction;
   const helperText = shouldAutoPublish
-    ? "Clique sur \"Lancer la consigne\" pour envoyer le prompt au module carte."
-    : "Clique sur \"Continuer\" pour transmettre la consigne au module suivant.";
+    ? normalizedConfig.autoPublishHelperText
+    : normalizedConfig.manualPublishHelperText;
+  const shouldShowHelperText = normalizedConfig.helperTextEnabled && helperText.trim().length > 0;
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit}>
@@ -432,6 +467,43 @@ export function ClarityPromptStep({
                 <option value="editable">Autoriser l’édition</option>
               </select>
             </label>
+            <label className="flex items-center gap-2 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={normalizedConfig.helperTextEnabled}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  handleConfigChange({ helperTextEnabled: event.target.checked })
+                }
+                className="h-4 w-4 rounded border border-white/60 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
+              />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Afficher le texte d’aide sous les boutons
+              </span>
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Texte d’aide (mode automatique)
+              </span>
+              <textarea
+                value={normalizedConfig.autoPublishHelperText}
+                onChange={(event) => handleConfigChange({ autoPublishHelperText: event.target.value })}
+                rows={2}
+                disabled={!normalizedConfig.helperTextEnabled}
+                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
+            <label className="flex flex-col gap-1 md:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                Texte d’aide (mode manuel)
+              </span>
+              <textarea
+                value={normalizedConfig.manualPublishHelperText}
+                onChange={(event) => handleConfigChange({ manualPublishHelperText: event.target.value })}
+                rows={2}
+                disabled={!normalizedConfig.helperTextEnabled}
+                className="rounded-lg border border-white/60 bg-white/80 px-3 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </label>
           </div>
         </fieldset>
       )}
@@ -470,7 +542,7 @@ export function ClarityPromptStep({
         </div>
       </div>
 
-      <p className="text-sm text-[color:var(--brand-charcoal)]">{helperText}</p>
+      {shouldShowHelperText && <p className="text-sm text-[color:var(--brand-charcoal)]">{helperText}</p>}
 
       {settingsMode !== "hidden" && (
         <div className="rounded-2xl border border-white/40 bg-white/70 p-4 shadow-sm">
