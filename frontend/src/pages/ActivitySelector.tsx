@@ -38,6 +38,7 @@ import {
 } from "../config";
 import {
   StepSequenceActivity,
+  StepSequenceRenderer,
   getStepComponent,
   STEP_COMPONENT_REGISTRY,
   StepSequenceContext,
@@ -47,7 +48,11 @@ import {
   type StepDefinition,
 } from "../modules/step-sequence";
 import "../modules/step-sequence/modules";
-import { createDefaultExplorateurWorldConfig } from "../modules/step-sequence/modules/explorateur-world";
+import {
+  createDefaultExplorateurWorldConfig,
+  sanitizeExplorateurWorldConfig,
+  type ExplorateurWorldConfig,
+} from "../modules/step-sequence/modules/explorateur-world";
 import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
@@ -252,6 +257,112 @@ interface StepSequenceStepAccordionProps {
   onToggle: () => void;
 }
 
+function filterRegisteredStepDefinitions(
+  definitions: StepDefinition[] | undefined,
+  allowedComponents: ReadonlySet<string>
+): StepDefinition[] {
+  if (!Array.isArray(definitions)) {
+    return [];
+  }
+  return definitions.filter((definition) => {
+    const key = resolveStepComponentKey(definition);
+    return typeof key === "string" && allowedComponents.has(key);
+  });
+}
+
+function enforceExplorateurWorldStepSequence(
+  config: ExplorateurWorldConfig,
+  allowedComponents: ReadonlySet<string>
+): ExplorateurWorldConfig {
+  const nextQuarterDesignerSteps = Object.fromEntries(
+    Object.entries(config.quarterDesignerSteps).map(([quarterId, steps]) => [
+      quarterId,
+      filterRegisteredStepDefinitions(steps, allowedComponents),
+    ])
+  ) as ExplorateurWorldConfig["quarterDesignerSteps"];
+
+  return {
+    ...config,
+    steps: filterRegisteredStepDefinitions(config.steps, allowedComponents),
+    quarterDesignerSteps: nextQuarterDesignerSteps,
+  };
+}
+
+interface ExplorateurWorldDesignerOverlayProps {
+  open: boolean;
+  step: StepDefinition;
+  config: ExplorateurWorldConfig;
+  onClose: () => void;
+  onUpdateConfig: (config: ExplorateurWorldConfig) => void;
+  allowedComponents: ReadonlySet<string>;
+}
+
+function ExplorateurWorldDesignerOverlay({
+  open,
+  step,
+  config,
+  onClose,
+  onUpdateConfig,
+  allowedComponents,
+}: ExplorateurWorldDesignerOverlayProps): JSX.Element | null {
+  const enforcedConfig = useMemo(
+    () => enforceExplorateurWorldStepSequence(config, allowedComponents),
+    [allowedComponents, config]
+  );
+  const normalizedStep = useMemo<StepDefinition>(() => ({
+    id: step.id,
+    component: "explorateur-world",
+    config: enforcedConfig,
+  }), [enforcedConfig, step.id]);
+
+  const handleConfigChange = useCallback(
+    (_stepId: string, nextConfig: unknown) => {
+      const sanitized = sanitizeExplorateurWorldConfig(nextConfig);
+      onUpdateConfig(
+        enforceExplorateurWorldStepSequence(sanitized, allowedComponents)
+      );
+    },
+    [allowedComponents, onUpdateConfig]
+  );
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-[color:var(--brand-black)]/80 backdrop-blur">
+      <div className="flex flex-col gap-1 border-b border-white/10 bg-[color:var(--brand-black)]/95 px-4 py-3 text-white shadow-lg sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-6">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-orange-200">
+            Explorateur IA · Monde
+          </p>
+          <h2 className="text-lg font-semibold">Éditeur du monde Explorateur IA</h2>
+          <p className="text-xs text-white/80">
+            Les modifications sont enregistrées immédiatement dans la configuration de l’étape.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center justify-center rounded-full border border-white/30 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:border-white/60 hover:bg-white/10"
+          >
+            Fermer l’éditeur
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden bg-white">
+        <StepSequenceRenderer
+          key={normalizedStep.id}
+          steps={[normalizedStep]}
+          isEditMode
+          onStepConfigChange={handleConfigChange}
+        />
+      </div>
+    </div>
+  );
+}
+
 function StepSequenceStepAccordion({
   step,
   index,
@@ -267,6 +378,11 @@ function StepSequenceStepAccordion({
   onToggle,
 }: StepSequenceStepAccordionProps): JSX.Element {
   const componentKey = resolveStepComponentKey(step);
+  const isExplorateurWorldStep = componentKey === "explorateur-world";
+  const allowedStepComponents = useMemo(
+    () => new Set(Object.keys(STEP_COMPONENT_REGISTRY)),
+    []
+  );
   const selectOptions = useMemo(() => {
     const mapped = stepTypeOptions.map((type) => ({
       value: type,
@@ -288,6 +404,14 @@ function StepSequenceStepAccordion({
     () => (componentKey ? getStepComponent(componentKey) : undefined),
     [componentKey]
   );
+
+  const [isExplorateurDesignerOpen, setExplorateurDesignerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isExplorateurWorldStep) {
+      setExplorateurDesignerOpen(false);
+    }
+  }, [isExplorateurWorldStep]);
 
   const handleTypeChange = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
@@ -322,6 +446,33 @@ function StepSequenceStepAccordion({
   const componentLabel = componentKey
     ? getStepTypeLabel(componentKey)
     : "Sélectionner un type";
+
+  const explorateurConfig = useMemo<ExplorateurWorldConfig | null>(() => {
+    if (!isExplorateurWorldStep || isCompositeStepDefinition(step)) {
+      return null;
+    }
+    const sanitized = sanitizeExplorateurWorldConfig(step.config);
+    return enforceExplorateurWorldStepSequence(
+      sanitized,
+      allowedStepComponents
+    );
+  }, [allowedStepComponents, isExplorateurWorldStep, step]);
+
+  const explorateurSummary = useMemo(() => {
+    if (!explorateurConfig) {
+      return null;
+    }
+    const quarterCount = explorateurConfig.quarters.length;
+    const goalCount = explorateurConfig.quarters.filter((quarter) => quarter.isGoal).length;
+    const stepCount = explorateurConfig.steps.length;
+    return {
+      quarterCount,
+      goalCount,
+      stepCount,
+      theme: explorateurConfig.terrain.themeId,
+      seed: explorateurConfig.terrain.seed,
+    };
+  }, [explorateurConfig]);
 
   return (
     <div className="rounded-2xl border border-orange-200/70 bg-orange-50/60 p-4">
@@ -407,17 +558,52 @@ function StepSequenceStepAccordion({
         </label>
         <div className="space-y-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-sm">
           {StepComponent ? (
-            <StepSequenceContext.Provider value={contextValue}>
-              <StepComponent
-                definition={step}
-                config={isCompositeStepDefinition(step) ? step.composite : step.config}
-                payload={undefined}
-                isActive
-                isEditMode
-                onAdvance={NOOP}
-                onUpdateConfig={handleConfigUpdate}
-              />
-            </StepSequenceContext.Provider>
+            isExplorateurWorldStep ? (
+              <div className="space-y-3 text-sm text-orange-800">
+                <p>
+                  Cette étape ouvre l’éditeur complet de l’activité «&nbsp;Explorateur IA&nbsp;». Utilise le bouton ci-dessous
+                  pour configurer les quartiers et leurs étapes StepSequence associées.
+                </p>
+                {explorateurSummary ? (
+                  <ul className="space-y-1 text-xs text-orange-700/90">
+                    <li>
+                      <span className="font-semibold">Quartiers configurés&nbsp;:</span> {explorateurSummary.quarterCount}
+                      {explorateurSummary.goalCount > 0
+                        ? ` · ${explorateurSummary.goalCount} objectif(s)`
+                        : ""}
+                    </li>
+                    <li>
+                      <span className="font-semibold">Étapes StepSequence&nbsp;:</span> {explorateurSummary.stepCount}
+                    </li>
+                    <li>
+                      <span className="font-semibold">Thème du terrain&nbsp;:</span> {explorateurSummary.theme}
+                    </li>
+                    <li>
+                      <span className="font-semibold">Graine du monde&nbsp;:</span> {explorateurSummary.seed}
+                    </li>
+                  </ul>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setExplorateurDesignerOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-orange-200 bg-orange-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-orange-800 transition hover:border-orange-300 hover:bg-orange-200"
+                >
+                  Ouvrir l’éditeur Explorateur IA
+                </button>
+              </div>
+            ) : (
+              <StepSequenceContext.Provider value={contextValue}>
+                <StepComponent
+                  definition={step}
+                  config={isCompositeStepDefinition(step) ? step.composite : step.config}
+                  payload={undefined}
+                  isActive
+                  isEditMode
+                  onAdvance={NOOP}
+                  onUpdateConfig={handleConfigUpdate}
+                />
+              </StepSequenceContext.Provider>
+            )
           ) : (
             <p className="text-sm text-orange-700">
               Aucun composant enregistré pour « {componentKey ?? "inconnu"} ».
@@ -425,6 +611,16 @@ function StepSequenceStepAccordion({
           )}
         </div>
       </div>
+      {isExplorateurWorldStep && explorateurConfig ? (
+        <ExplorateurWorldDesignerOverlay
+          open={isExplorateurDesignerOpen}
+          step={step}
+          config={explorateurConfig}
+          onClose={() => setExplorateurDesignerOpen(false)}
+          onUpdateConfig={handleConfigUpdate}
+          allowedComponents={allowedStepComponents}
+        />
+      ) : null}
     </div>
   );
 }
