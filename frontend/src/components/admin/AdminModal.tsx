@@ -1,8 +1,4 @@
 import type { ReactNode } from "react";
-import { useEffect, useLayoutEffect, useState } from "react";
-
-const useIsomorphicLayoutEffect =
-  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 interface AdminModalProps {
   open: boolean;
@@ -29,26 +25,13 @@ export function AdminModal({
   footer,
   size = "md",
 }: AdminModalProps): JSX.Element | null {
-  const [viewportOffset, setViewportOffset] = useState(0);
-
-  useIsomorphicLayoutEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    setViewportOffset(window.scrollY);
-  }, [open]);
-
   if (!open) {
     return null;
   }
 
   return (
-    <div
-      className="absolute inset-x-0 z-50"
-      style={{ top: viewportOffset }}
-    >
-      <div className="flex min-h-[100dvh] items-start justify-center overflow-y-auto bg-black/40 px-3 py-6 sm:items-center sm:px-4 sm:py-8">
+    <div className="fixed inset-0 z-50">
+      <div className="flex min-h-full items-start justify-center overflow-y-auto bg-black/40 px-3 py-6 sm:min-h-[100dvh] sm:items-center sm:px-4 sm:py-8">
         <div
           className={`${SIZE_CLASS[size]} max-h-[90vh] overflow-y-auto rounded-2xl border border-white/60 bg-white/95 p-5 shadow-2xl backdrop-blur sm:rounded-3xl sm:p-6`}
           role="dialog"
