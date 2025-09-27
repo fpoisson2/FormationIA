@@ -723,6 +723,58 @@ def _merge_card_with_overrides(
     return base
 
 
+def _merge_step_definition_payload(existing: Any, incoming: Any) -> Any:
+    if isinstance(incoming, Mapping):
+        base = deepcopy(existing) if isinstance(existing, Mapping) else {}
+        for key, value in incoming.items():
+            if value is None:
+                base.pop(key, None)
+            elif isinstance(value, Mapping):
+                base[key] = _merge_step_definition_payload(base.get(key), value)
+            else:
+                base[key] = deepcopy(value)
+        return base
+    return deepcopy(incoming)
+
+
+def _merge_step_sequences(existing: Any, incoming: list[Any]) -> list[Any]:
+    if not isinstance(incoming, list):
+        return deepcopy(incoming)
+
+    existing_list = existing if isinstance(existing, list) else []
+    existing_by_id: dict[str, Mapping[str, Any]] = {}
+    for index, step in enumerate(existing_list):
+        if not isinstance(step, Mapping):
+            continue
+        step_id = step.get("id")
+        if isinstance(step_id, str) and step_id:
+            if step_id not in existing_by_id:
+                existing_by_id[step_id] = step
+        else:
+            existing_by_id.setdefault(f"__index__{index}", step)
+
+    merged_steps: list[Any] = []
+    for index, step in enumerate(incoming):
+        if not isinstance(step, Mapping):
+            merged_steps.append(deepcopy(step))
+            continue
+
+        step_id = step.get("id")
+        existing_step: Mapping[str, Any] | None = None
+        if isinstance(step_id, str) and step_id:
+            existing_step = existing_by_id.pop(step_id, None)
+        if existing_step is None and index < len(existing_list):
+            candidate = existing_list[index]
+            if isinstance(candidate, Mapping):
+                candidate_id = candidate.get("id")
+                if not isinstance(step_id, str) or not step_id or candidate_id == step_id:
+                    existing_step = candidate
+
+        merged_steps.append(_merge_step_definition_payload(existing_step, step))
+
+    return merged_steps
+
+
 def _resolve_activity_library_payload(
     activity: Mapping[str, Any], existing: Mapping[str, Any] | None
 ) -> dict[str, Any]:
@@ -731,7 +783,12 @@ def _resolve_activity_library_payload(
     for key, value in activity.items():
         if key == "overrides":
             continue
-        resolved[key] = deepcopy(value)
+        if key == "stepSequence" and isinstance(value, list):
+            resolved["stepSequence"] = _merge_step_sequences(
+                resolved.get("stepSequence"), value
+            )
+        else:
+            resolved[key] = deepcopy(value)
 
     overrides = activity.get("overrides")
     if isinstance(overrides, Mapping):
@@ -765,6 +822,10 @@ def _resolve_activity_library_payload(
             if step_sequence_override is None:
                 resolved.pop("stepSequence", None)
             elif isinstance(step_sequence_override, list):
+                resolved["stepSequence"] = _merge_step_sequences(
+                    resolved.get("stepSequence"), step_sequence_override
+                )
+            else:
                 resolved["stepSequence"] = deepcopy(step_sequence_override)
 
     resolved.pop("overrides", None)

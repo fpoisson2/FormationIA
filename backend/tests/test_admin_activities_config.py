@@ -374,6 +374,130 @@ def test_export_preserves_step_sequence_when_overrides_only(tmp_path, monkeypatc
     assert stored_activity_path.exists()
     stored_payload = json.loads(stored_activity_path.read_text(encoding="utf-8"))
     assert stored_payload["stepSequence"] == initial_activity["stepSequence"]
+
+
+def test_library_export_retains_explorateur_world_structure(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    activities_dir = config_path.parent / "activities"
+    activities_dir.mkdir(parents=True, exist_ok=True)
+    index_path = config_path.parent / "activities_index.json"
+
+    base_world_step = {
+        "id": "explorateur:world",
+        "type": "explorateur-world",
+        "component": "explorateur-world",
+        "config": {
+            "world": {
+                "id": "world-1",
+                "name": "Tiny Town",
+                "tileset": "explorateur.tileset",
+                "quarters": [
+                    {
+                        "id": "north",
+                        "type": "explorateur-quarter-basics",
+                        "config": {"title": "Quartier Nord"},
+                    },
+                    {
+                        "id": "south",
+                        "type": "explorateur-quarter-inventory",
+                        "config": {"title": "Quartier Sud"},
+                    },
+                ],
+            },
+            "designer": {"camera": {"x": 10, "y": 20, "zoom": 2}},
+        },
+    }
+    base_activity = {
+        "id": "explorateur-ia",
+        "componentKey": "explorateur-ia",
+        "path": "/explorateur-ia",
+        "stepSequence": [
+            {
+                "id": "explorateur:introduction",
+                "type": "rich-content",
+                "component": "rich-content",
+            },
+            base_world_step,
+            {
+                "id": "explorateur:debrief",
+                "type": "rich-content",
+                "component": "rich-content",
+            },
+        ],
+    }
+
+    (activities_dir / "explorateur-ia.json").write_text(
+        json.dumps(base_activity, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    index_path.write_text(
+        json.dumps({"explorateur-ia": "explorateur-ia.json"}), encoding="utf-8"
+    )
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    payload = {
+        "activities": [
+            {
+                "id": "explorateur-ia",
+                "componentKey": "explorateur-ia",
+                "path": "/explorateur-ia",
+                "stepSequence": [
+                    {
+                        "id": "explorateur:introduction",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                    },
+                    {
+                        "id": "explorateur:world",
+                        "type": "explorateur-world",
+                        "component": "explorateur-world",
+                    },
+                    {
+                        "id": "explorateur:debrief",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                    },
+                ],
+            }
+        ]
+    }
+
+    try:
+        with TestClient(app) as client:
+            save_response = client.post("/api/admin/activities", json=payload)
+            assert save_response.status_code == 200, save_response.text
+
+            export_response = client.get("/api/admin/activities/explorateur-ia/export")
+            assert export_response.status_code == 200, export_response.text
+            exported = export_response.json()
+            world_step = next(
+                step
+                for step in exported["stepSequence"]
+                if step.get("id") == "explorateur:world"
+            )
+            assert world_step.get("config", {}).get("world", {}).get("id") == "world-1"
+            assert world_step.get("config", {}).get("designer", {}).get("camera", {}) == {
+                "x": 10,
+                "y": 20,
+                "zoom": 2,
+            }
+    finally:
+        app.dependency_overrides.clear()
+
+    stored_payload = json.loads(
+        (activities_dir / "explorateur-ia.json").read_text(encoding="utf-8")
+    )
+    stored_world = next(
+        step
+        for step in stored_payload["stepSequence"]
+        if step.get("id") == "explorateur:world"
+    )
+    assert stored_world["config"]["world"]["id"] == "world-1"
+    assert stored_world["config"]["designer"]["camera"] == {"x": 10, "y": 20, "zoom": 2}
 def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch) -> None:
     admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
     app.dependency_overrides[_require_admin_user] = lambda: admin_user
