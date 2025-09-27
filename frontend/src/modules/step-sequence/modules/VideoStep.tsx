@@ -62,9 +62,8 @@ const HLS_DIST_GLOB = import.meta.glob<HlsModule>([
 
 const HLS_MODULE_LOADERS: HlsModuleLoader[] = [
   ...Object.values(HLS_DIST_GLOB),
-  () => import("hls.js") as Promise<HlsModule>,
-  () =>
-    import(/* @vite-ignore */ "hls.js/dist/hls.mjs") as Promise<HlsModule>,
+  () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>,
+  () => import(/* @vite-ignore */ "hls.js") as Promise<HlsModule>,
 ];
 
 let cachedHlsConstructor: typeof Hls | null | undefined;
