@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import logging
@@ -10,6 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
+import re
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
@@ -261,6 +263,86 @@ def _resolve_activities_config_path() -> Path:
 ACTIVITIES_CONFIG_PATH = _resolve_activities_config_path()
 
 _ACTIVITY_CONFIG_LOCK = Lock()
+
+
+def _activity_storage_directory() -> Path:
+    directory = (ACTIVITIES_CONFIG_PATH.parent / "activities").resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _activity_file_stem(activity_id: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", activity_id.strip())
+    normalized = normalized.strip("-._")
+    digest = hashlib.sha256(activity_id.encode("utf-8")).hexdigest()[:8]
+    if normalized:
+        return f"{normalized}-{digest}"
+    return f"activity-{digest}"
+
+
+def _activity_file_path(activity_id: str) -> Path:
+    return _activity_storage_directory() / f"{_activity_file_stem(activity_id)}.json"
+
+
+def _load_activity_from_file(activity_id: str) -> dict[str, Any] | None:
+    path = _activity_file_path(activity_id)
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _load_all_activity_files() -> list[dict[str, Any]]:
+    directory = _activity_storage_directory()
+    collected: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            collected.append(data)
+    if not collected:
+        return []
+    try:
+        return _normalize_activities_payload(collected, error_status=500)
+    except HTTPException:
+        return []
+
+
+def _sync_activity_files(activities: Sequence[Mapping[str, Any]]) -> None:
+    for activity in activities:
+        activity_id = _string_or_none(activity.get("id"))
+        if not activity_id:
+            continue
+        path = _activity_file_path(activity_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(activity, handle, ensure_ascii=False, indent=2)
+
+
+def _load_activity_by_id(activity_id: str) -> dict[str, Any] | None:
+    activity = _load_activity_from_file(activity_id)
+    if activity:
+        return activity
+    try:
+        config = _load_activities_config()
+    except HTTPException:
+        return None
+    activities = config.get("activities")
+    if not isinstance(activities, list):
+        return None
+    for entry in activities:
+        if isinstance(entry, dict) and entry.get("id") == activity_id:
+            return entry
+    return None
 
 
 def _resolve_landing_page_config_path() -> Path:
@@ -820,6 +902,63 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Mission introuvable.")
 
 
+def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
+    config = step.get("config")
+    normalized_config: dict[str, Any] = {
+        "terrain": None,
+        "steps": [],
+        "quarterDesignerSteps": None,
+        "quarters": [],
+    }
+
+    if isinstance(config, Mapping):
+        terrain = config.get("terrain")
+        normalized_config["terrain"] = deepcopy(terrain)
+
+        raw_steps = config.get("steps")
+        if isinstance(raw_steps, list):
+            normalized_config["steps"] = deepcopy(raw_steps)
+        elif isinstance(raw_steps, tuple):
+            normalized_config["steps"] = [deepcopy(item) for item in raw_steps]
+
+        normalized_config["quarterDesignerSteps"] = deepcopy(
+            config.get("quarterDesignerSteps")
+        )
+
+        raw_quarters = config.get("quarters")
+        if isinstance(raw_quarters, list):
+            normalized_config["quarters"] = deepcopy(raw_quarters)
+        elif isinstance(raw_quarters, tuple):
+            normalized_config["quarters"] = [deepcopy(item) for item in raw_quarters]
+
+        for key, value in config.items():
+            if key in normalized_config:
+                continue
+            normalized_config[key] = deepcopy(value)
+
+    step["config"] = normalized_config
+    if not _string_or_none(step.get("component")):
+        step["component"] = "explorateur-world"
+    if not _string_or_none(step.get("type")):
+        step["type"] = step["component"]
+
+
+def _ensure_step_sequence_structure(activity: dict[str, Any]) -> None:
+    sequence = activity.get("stepSequence")
+    if not isinstance(sequence, list):
+        return
+
+    for step in sequence:
+        if not isinstance(step, dict):
+            continue
+
+        step_type = _string_or_none(step.get("type")) or _string_or_none(
+            step.get("component")
+        )
+        if step_type == "explorateur-world":
+            _normalize_explorateur_world_config(step)
+
+
 def _normalize_activities_payload(
     activities: list[Any], *, error_status: int
 ) -> list[dict[str, Any]]:
@@ -843,7 +982,9 @@ def _normalize_activities_payload(
                     )
                     break
             raise HTTPException(status_code=error_status, detail=detail) from exc
-        normalized.append(validated.model_dump(by_alias=True, exclude_none=True))
+        normalized_activity = validated.model_dump(by_alias=True, exclude_none=True)
+        _ensure_step_sequence_structure(normalized_activity)
+        normalized.append(normalized_activity)
     return normalized
 
 
@@ -851,9 +992,19 @@ def _load_activities_config() -> dict[str, Any]:
     """Charge la configuration des activités depuis le fichier ou retourne la configuration par défaut."""
     uses_default_fallback = not ACTIVITIES_CONFIG_PATH.exists()
     if uses_default_fallback:
+        activities_from_files = _load_all_activity_files()
+        if not activities_from_files:
+            return {
+                "activities": [],
+                "usesDefaultFallback": True,
+                "activityGeneration": ActivityGenerationConfig()
+                .model_dump(by_alias=True, exclude_none=True),
+            }
+        activities: list[dict[str, Any]] = activities_from_files
+        _set_deep_link_catalog(activities)
         return {
-            "activities": [],
-            "usesDefaultFallback": True,
+            "activities": activities,
+            "usesDefaultFallback": False,
             "activityGeneration": ActivityGenerationConfig()
             .model_dump(by_alias=True, exclude_none=True),
         }
@@ -979,6 +1130,7 @@ def _save_activities_config(config: dict[str, Any]) -> None:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
 
+    _sync_activity_files(normalized_activities)
     _set_deep_link_catalog(normalized_activities)
 
 
@@ -2069,6 +2221,13 @@ class ActivityConfigRequest(BaseModel):
     activity_generation: ActivityGenerationConfig | None = Field(
         default=None, alias="activityGeneration"
     )
+
+
+class ActivityImportRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    activity: dict[str, Any]
+
 
 class LTIScoreRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
@@ -3388,6 +3547,60 @@ def admin_save_activities_config(
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
+@admin_router.get("/activities/{activity_id}")
+def admin_export_activity(
+    activity_id: str, _: LocalUser = Depends(_require_admin_user)
+) -> dict[str, Any]:
+    """Exporte l'activité demandée avec son JSON complet."""
+
+    activity = _load_activity_by_id(activity_id)
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activité introuvable.")
+
+    normalized = _normalize_activities_payload([activity], error_status=500)[0]
+    return normalized
+
+
+@admin_router.post("/activities/import")
+def admin_import_activity(
+    payload: ActivityImportRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> dict[str, Any]:
+    """Importe ou remplace une activité à partir de son JSON complet."""
+
+    normalized_activity = _normalize_activities_payload(
+        [payload.activity], error_status=400
+    )[0]
+
+    with _ACTIVITY_CONFIG_LOCK:
+        current_config = _load_activities_config()
+        existing = list(current_config.get("activities", []))
+        header = current_config.get("activitySelectorHeader")
+        generation = current_config.get("activityGeneration")
+
+        updated: list[dict[str, Any]] = []
+        target_id = normalized_activity.get("id")
+        replaced = False
+        for entry in existing:
+            if target_id is not None and entry.get("id") == target_id:
+                updated.append(normalized_activity)
+                replaced = True
+            else:
+                updated.append(entry)
+        if not replaced:
+            updated.append(normalized_activity)
+
+        payload_dict: dict[str, Any] = {"activities": updated}
+        if header is not None:
+            payload_dict["activitySelectorHeader"] = header
+        if generation is not None:
+            payload_dict["activityGeneration"] = generation
+
+        _save_activities_config(payload_dict)
+
+    return {"ok": True, "activity": normalized_activity, "replaced": replaced}
+
+
 @admin_router.get("/landing-page")
 def admin_get_landing_page_config_endpoint(
     _: LocalUser = Depends(_require_admin_user),
@@ -4200,3 +4413,4 @@ def logout_lti_session(
         path="/",
     )
     return JSONResponse(content={"ok": True})
+
