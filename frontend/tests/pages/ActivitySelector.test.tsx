@@ -2,10 +2,13 @@ import { render, screen, within, fireEvent, waitFor } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const getProgressMock = vi.fn();
-const getConfigMock = vi.fn();
-const saveMock = vi.fn();
-const setEditModeMock = vi.fn();
+const { getProgressMock, getConfigMock, saveMock, setEditModeMock } =
+  vi.hoisted(() => ({
+    getProgressMock: vi.fn(),
+    getConfigMock: vi.fn(),
+    saveMock: vi.fn(),
+    setEditModeMock: vi.fn(),
+  }));
 
 vi.mock("../../src/api", () => ({
   getProgress: getProgressMock,
@@ -34,6 +37,8 @@ vi.mock("../../src/hooks/useLTI", () => ({
 }));
 
 import ActivitySelector from "../../src/pages/ActivitySelector";
+import { getDefaultActivityDefinitions } from "../../src/config/activities";
+import { StepSequenceActivity } from "../../src/modules/step-sequence";
 import "../../src/modules/step-sequence/modules";
 
 describe("ActivitySelector StepSequence designer", () => {
@@ -42,6 +47,28 @@ describe("ActivitySelector StepSequence designer", () => {
     getProgressMock.mockResolvedValue({ activities: {} });
     getConfigMock.mockResolvedValue({ activities: [], activitySelectorHeader: null });
     saveMock.mockResolvedValue(undefined);
+  });
+
+  it("exposes the StepSequence editor for default activities using the StepSequence component", async () => {
+    render(
+      <MemoryRouter>
+        <ActivitySelector />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled());
+
+    const defaultStepSequenceCount = getDefaultActivityDefinitions().filter(
+      (definition) => definition.component === StepSequenceActivity
+    ).length;
+
+    expect(defaultStepSequenceCount).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("region", { name: /Séquence d'étapes pour/i })
+      ).toHaveLength(defaultStepSequenceCount);
+    });
   });
 
   it("allows creating a StepSequence activity and editing its steps", async () => {
@@ -53,11 +80,8 @@ describe("ActivitySelector StepSequence designer", () => {
 
     await waitFor(() => expect(getConfigMock).toHaveBeenCalled());
 
-    const addButton = await screen.findByRole("button", { name: /Ajouter une activité/i });
-    fireEvent.click(addButton);
-
-    const shortcutButton = await screen.findByRole("button", {
-      name: /Nouvelle activité StepSequence/i,
+    const [shortcutButton] = await screen.findAllByRole("button", {
+      name: /Ajouter une activité StepSequence/i,
     });
     fireEvent.click(shortcutButton);
 

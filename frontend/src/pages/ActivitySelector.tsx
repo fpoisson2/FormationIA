@@ -37,6 +37,7 @@ import {
   type VerbosityChoice,
 } from "../config";
 import {
+  StepSequenceActivity,
   getStepComponent,
   STEP_COMPONENT_REGISTRY,
   StepSequenceContext,
@@ -1987,7 +1988,7 @@ function ActivitySelector(): JSX.Element {
                 </li>
               ) : null}
             </ul>
-            {isEditMode && activity.componentKey === STEP_SEQUENCE_COMPONENT_KEY ? (
+            {isEditMode && activity.component === StepSequenceActivity ? (
               <StepSequenceEditor
                 activityTitle={activity.card.title}
                 steps={activity.stepSequence ?? []}
