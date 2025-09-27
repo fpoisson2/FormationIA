@@ -40,6 +40,7 @@ import ActivitySelector from "../../src/pages/ActivitySelector";
 import { getDefaultActivityDefinitions } from "../../src/config/activities";
 import { StepSequenceActivity } from "../../src/modules/step-sequence";
 import "../../src/modules/step-sequence/modules";
+import { createDefaultExplorateurWorldConfig } from "../../src/modules/step-sequence/modules/explorateur-world";
 
 describe("ActivitySelector StepSequence designer", () => {
   beforeEach(() => {
@@ -82,7 +83,7 @@ describe("ActivitySelector StepSequence designer", () => {
       })
     ).toBeInTheDocument();
 
-    fireEvent.click(within(modal).getByRole("button", { name: /Fermer/i }));
+    fireEvent.click(within(modal).getByRole("button", { name: /^Fermer$/i }));
   });
 
   it("allows creating a StepSequence activity and editing its steps", async () => {
@@ -99,11 +100,16 @@ describe("ActivitySelector StepSequence designer", () => {
     });
     fireEvent.click(shortcutButton);
 
+    const [openModalButton] = await screen.findAllByRole("button", {
+      name: /Configurer la séquence Nouvelle séquence StepSequence/i,
+    });
+    fireEvent.click(openModalButton);
+
     const sequenceModal = await screen.findByRole("dialog", {
       name: /Configurer « Nouvelle séquence StepSequence »/i,
     });
 
-    const sequenceRegion = within(sequenceModal).getByRole("region", {
+    const sequenceRegion = await within(sequenceModal).findByRole("region", {
       name: /Séquence d'étapes pour Nouvelle séquence StepSequence/i,
     });
 
@@ -134,5 +140,79 @@ describe("ActivitySelector StepSequence designer", () => {
       });
       expect(accordions).toHaveLength(3);
     });
+  });
+
+  it("persists the default Explorateur world config when adding the module", async () => {
+    render(
+      <MemoryRouter>
+        <ActivitySelector />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled());
+
+    const [shortcutButton] = await screen.findAllByRole("button", {
+      name: /Ajouter une activité StepSequence/i,
+    });
+    fireEvent.click(shortcutButton);
+
+    const [openModalButton] = await screen.findAllByRole("button", {
+      name: /Configurer la séquence Nouvelle séquence StepSequence/i,
+    });
+    fireEvent.click(openModalButton);
+
+    const sequenceModal = await screen.findByRole("dialog", {
+      name: /Configurer « Nouvelle séquence StepSequence »/i,
+    });
+
+    const sequenceRegion = await within(sequenceModal).findByRole("region", {
+      name: /Séquence d'étapes pour Nouvelle séquence StepSequence/i,
+    });
+
+    const typeSelect = within(sequenceRegion).getByLabelText(
+      "Type d'étape à ajouter"
+    );
+    fireEvent.change(typeSelect, { target: { value: "explorateur-world" } });
+
+    const addStepButton = within(sequenceRegion).getByRole("button", {
+      name: /Ajouter une étape/i,
+    });
+    fireEvent.click(addStepButton);
+
+    await waitFor(() => {
+      const accordions = within(sequenceRegion).getAllByRole("button", {
+        name: (name) => /^Étape \d+/i.test(name),
+      });
+      expect(accordions.length).toBeGreaterThanOrEqual(3);
+    });
+
+    fireEvent.click(
+      within(sequenceModal).getByRole("button", { name: /^Fermer$/i })
+    );
+
+    const [saveButton] = await screen.findAllByRole("button", {
+      name: /Sauvegarder/i,
+    });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(saveMock).toHaveBeenCalled());
+
+    const payload = saveMock.mock.calls[0][0];
+    expect(Array.isArray(payload.activities)).toBe(true);
+
+    const createdActivity = payload.activities.find(
+      (activity: any) =>
+        activity &&
+        typeof activity.id === "string" &&
+        activity.id.startsWith("sequence-")
+    );
+    expect(createdActivity).toBeTruthy();
+
+    const worldStep = createdActivity?.overrides?.stepSequence?.find(
+      (step: any) => step?.component === "explorateur-world"
+    );
+
+    expect(worldStep).toBeTruthy();
+    expect(worldStep.config).toEqual(createDefaultExplorateurWorldConfig());
   });
 });

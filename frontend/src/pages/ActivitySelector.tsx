@@ -47,6 +47,7 @@ import {
   type StepDefinition,
 } from "../modules/step-sequence";
 import "../modules/step-sequence/modules";
+import { createDefaultExplorateurWorldConfig } from "../modules/step-sequence/modules/explorateur-world";
 import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
@@ -58,6 +59,7 @@ const STEP_TYPE_LABELS: Record<string, string> = {
   composite: "Étape composite",
   form: "Formulaire",
   "rich-content": "Contenu riche",
+  "explorateur-world": "Explorateur IA · Monde",
   video: "Vidéo",
   "workshop-context": "Atelier · Contexte",
   "workshop-comparison": "Atelier · Comparaison",
@@ -67,6 +69,15 @@ const STEP_TYPE_LABELS: Record<string, string> = {
 const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
 
 const NOOP = () => {};
+
+const createDefaultConfigForComponent = (
+  component: string
+): unknown | undefined => {
+  if (component === "explorateur-world") {
+    return createDefaultExplorateurWorldConfig();
+  }
+  return undefined;
+};
 
 function extractErrorMessage(error: unknown): string | null {
   if (!(error instanceof Error)) {
@@ -1254,10 +1265,18 @@ function ActivitySelector(): JSX.Element {
                     continueLabel: null,
                   },
                 }
-              : {
-                  id: stepId,
-                  component,
-                };
+              : (() => {
+                  const defaultConfig =
+                    createDefaultConfigForComponent(component);
+                  const baseStep: StepDefinition = {
+                    id: stepId,
+                    component,
+                  };
+                  if (typeof defaultConfig !== "undefined") {
+                    (baseStep as { config: unknown }).config = defaultConfig;
+                  }
+                  return baseStep;
+                })();
           const nextSteps: StepDefinition[] = [
             ...baseSteps.map((step) => ({ ...step })),
             nextStep,
@@ -1361,11 +1380,24 @@ function ActivitySelector(): JSX.Element {
                   },
               };
             }
-            return {
+            const defaultConfig = createDefaultConfigForComponent(component);
+            const shouldPreserveConfig =
+              !isCompositeStepDefinition(step) && step.component === component;
+            const preservedConfig = shouldPreserveConfig
+              ? (step as { config?: unknown }).config
+              : undefined;
+            const resolvedConfig =
+              typeof defaultConfig !== "undefined"
+                ? defaultConfig
+                : preservedConfig;
+            const nextStep: StepDefinition = {
               id: step.id,
               component,
-              config: undefined,
             };
+            if (typeof resolvedConfig !== "undefined") {
+              (nextStep as { config: unknown }).config = resolvedConfig;
+            }
+            return nextStep;
           });
           if (!updated) {
             return activity;
@@ -2090,6 +2122,7 @@ function ActivitySelector(): JSX.Element {
               <button
                 type="button"
                 onClick={() => setStepSequenceEditorActivityId(activity.id)}
+                aria-label={`Configurer la séquence ${activity.card.title}`}
                 className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 sm:w-auto"
               >
                 Configurer
