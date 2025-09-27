@@ -2018,70 +2018,140 @@ function ActivitySelector(): JSX.Element {
               className={`group relative flex h-full flex-col gap-6 rounded-3xl border p-6 shadow-sm backdrop-blur transition ${hoverClasses} ${statusClasses} ${editClasses} ${generatedClasses} ${dragClasses} ${isEditMode ? "items-stretch text-left sm:p-8" : "items-center text-center"}`.trim()}
             >
               {isEditMode && (
-                <div className="absolute left-4 top-4 flex flex-col gap-1">
+                <>
+                <div className="absolute left-4 top-4 hidden flex-col gap-1 sm:flex">
                   <div className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs text-orange-600 shadow-sm">
                     ⋮⋮
                   </div>
-                <button
-                  onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
-                  disabled={index === 0}
-                  className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
-                  disabled={index === activitiesToDisplay.length - 1}
-                  className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
-                >
-                  ↓
+                  <button
+                    onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
+                    disabled={index === 0}
+                    className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
+                    disabled={index === activitiesToDisplay.length - 1}
+                    className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    ↓
                   </button>
                 </div>
+                <div className="w-full rounded-2xl bg-white/80 p-3 text-xs text-gray-600 shadow-sm sm:hidden">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs text-orange-600 shadow-sm">
+                        ⋮⋮
+                      </span>
+                      <span className="font-medium">Réorganiser</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
+                        disabled={index === 0}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                        aria-label="Monter l’activité"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
+                        disabled={index === activitiesToDisplay.length - 1}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                        aria-label="Descendre l’activité"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                </>
               )}
-            {!isEditMode && isCompleted ? (
-              <div className="absolute right-6 top-6 flex flex-col items-center gap-1">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-sm">
-                  ✓
+              {!isEditMode && isCompleted ? (
+                <>
+                <div className="absolute right-6 top-6 hidden flex-col items-center gap-1 sm:flex">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-700 shadow-sm">
+                    ✓
+                  </span>
+                  <span className="text-xs font-medium uppercase tracking-wide text-green-700">
+                    Complété
+                  </span>
+                </div>
+                <div className="flex w-full items-center justify-center gap-2 rounded-full bg-green-100/90 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-green-700 shadow-sm sm:hidden">
+                  <span className="text-base">✓</span>
+                  <span>Activité complétée</span>
+                </div>
+                </>
+              ) : null}
+              {isEditMode && (
+                <>
+                <div className="absolute right-6 top-6 hidden flex-col items-end gap-2 sm:flex">
+                  <label className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
+                    <input
+                      type="checkbox"
+                      checked={activity.enabled !== false}
+                      onChange={(event) =>
+                        handleToggleActivityEnabled(activity.id, event.target.checked)
+                      }
+                      className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                    />
+                    Visible
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const shouldRemove = window.confirm(`Supprimer l’activité « ${activity.card.title} » ?`);
+                      if (shouldRemove) {
+                        handleRemoveActivity(activity.id);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white/80 px-3 py-1 text-xs font-medium text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
+                    aria-label={`Supprimer ${activity.card.title}`}
+                  >
+                    Supprimer
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </div>
+                <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-2xl bg-white/80 p-3 text-xs text-gray-600 shadow-sm sm:hidden">
+                  <label className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
+                    <input
+                      type="checkbox"
+                      checked={activity.enabled !== false}
+                      onChange={(event) =>
+                        handleToggleActivityEnabled(activity.id, event.target.checked)
+                      }
+                      className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                    />
+                    Visible pour les apprenants
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const shouldRemove = window.confirm(`Supprimer l’activité « ${activity.card.title} » ?`);
+                      if (shouldRemove) {
+                        handleRemoveActivity(activity.id);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
+                    aria-label={`Supprimer ${activity.card.title}`}
+                  >
+                    Supprimer
+                    <span aria-hidden="true">×</span>
+                  </button>
+                </div>
+                </>
+              )}
+              {isDisabled && (
+                <>
+                <span className="pointer-events-none absolute left-1/2 top-6 hidden -translate-x-1/2 rounded-full bg-red-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700 shadow-sm sm:inline-flex">
+                  Désactivée
                 </span>
-                <span className="text-xs font-medium text-green-700 uppercase tracking-wide">
-                  Complété
+                <span className="pointer-events-none inline-flex w-full items-center justify-center rounded-full bg-red-100/90 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-red-700 shadow-sm sm:hidden">
+                  Activité désactivée
                 </span>
-              </div>
-            ) : null}
-            {isEditMode && (
-              <div className="absolute right-6 top-6 flex flex-col items-end gap-2">
-                <label className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
-                  <input
-                    type="checkbox"
-                    checked={activity.enabled !== false}
-                    onChange={(event) =>
-                      handleToggleActivityEnabled(activity.id, event.target.checked)
-                    }
-                    className="h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
-                  />
-                  Visible
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const shouldRemove = window.confirm(`Supprimer l’activité « ${activity.card.title} » ?`);
-                    if (shouldRemove) {
-                      handleRemoveActivity(activity.id);
-                    }
-                  }}
-                  className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white/80 px-3 py-1 text-xs font-medium text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
-                  aria-label={`Supprimer ${activity.card.title}`}
-                >
-                  Supprimer
-                  <span aria-hidden="true">×</span>
-                </button>
-              </div>
-            )}
-            {isDisabled && (
-              <span className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-full bg-red-100/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700 shadow-sm">
-                Désactivée
-              </span>
-            )}
+                </>
+              )}
             <div
               className={`space-y-3${isEditMode ? "" : " hidden sm:block"}`}
             >
