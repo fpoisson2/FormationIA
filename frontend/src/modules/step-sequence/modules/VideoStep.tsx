@@ -59,6 +59,11 @@ async function loadHlsConstructor(): Promise<typeof Hls | null> {
     return cachedHlsConstructor;
   }
 
+  if (typeof window === "undefined") {
+    cachedHlsConstructor = null;
+    return cachedHlsConstructor;
+  }
+
   const attemptImport = async (
     loader: () => Promise<HlsModule>
   ): Promise<typeof Hls | null> => {
@@ -71,16 +76,20 @@ async function loadHlsConstructor(): Promise<typeof Hls | null> {
     }
   };
 
-  cachedHlsConstructor =
-    (await attemptImport(
-      () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>
-    )) ??
-    (await attemptImport(() => import("hls.js") as Promise<HlsModule>));
+  const loaderCandidates: Array<() => Promise<HlsModule>> = [
+    () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>,
+    () => import("hls.js") as Promise<HlsModule>,
+  ];
 
-  if (!cachedHlsConstructor) {
-    cachedHlsConstructor = null;
+  for (const loader of loaderCandidates) {
+    const constructor = await attemptImport(loader);
+    if (constructor) {
+      cachedHlsConstructor = constructor;
+      return cachedHlsConstructor;
+    }
   }
 
+  cachedHlsConstructor = null;
   return cachedHlsConstructor;
 }
 
