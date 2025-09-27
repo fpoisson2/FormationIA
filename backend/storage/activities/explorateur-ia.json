@@ -1,80 +1,975 @@
 {
-  "id": "explorateur-ia",
-  "componentKey": "explorateur-ia",
-  "path": "/explorateur-ia",
-  "completionId": "explorateur-ia",
-  "enabled": true,
-  "header": {
-    "eyebrow": "Activité 5",
-    "title": "L’Explorateur IA",
-    "subtitle": "Parcours une mini-ville façon Game Boy pour valider quatre compétences IA sans jamais taper au clavier.",
-    "badge": "Ville interactive"
-  },
-  "layout": {
-    "outerClassName": "flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden px-0 pt-0 pb-0",
-    "innerClassName": "flex h-full min-h-0 flex-1 w-full max-w-none gap-0",
-    "headerClassName": "hidden",
-    "contentClassName": "flex h-full min-h-0 flex-1 flex-col space-y-0",
-    "withLandingGradient": false,
-    "useDynamicViewportHeight": true,
-    "withBasePadding": false,
-    "withBaseContentSpacing": false,
-    "withBaseInnerGap": false
-  },
-  "card": {
-    "title": "L’Explorateur IA",
-    "description": "Objectif : compléter un parcours ludique mêlant quiz, drag-and-drop, décisions et dilemmes éthiques.",
-    "highlights": [
-      "Déplacements façon jeu vidéo et interactions à la souris",
-      "Quatre mini-activités pédagogiques sans saisie de texte",
-      "Export JSON immédiat et impression PDF du bilan"
-    ],
-    "cta": {
-      "label": "Entrer dans la ville",
-      "to": "/explorateur-ia"
-    }
-  },
-  "stepSequence": [
-    {
-      "id": "explorateur:introduction",
-      "type": "rich-content",
-      "component": "rich-content",
-      "config": {
-        "title": "Prépare ton exploration pixelisée",
-        "body": "Bienvenue dans Tiny Town, une mini-ville en pixel art où chaque quartier correspond à une compétence IA.\n\n• Déplace-toi avec les flèches du clavier ou les touches WASD. Sur mobile, utilise le joystick flottant.\n• Clique sur un bâtiment pour lancer la mission associée et suis les consignes à l'écran.\n• Termine les quatre quartiers thématiques pour débloquer la mairie et valider ton parcours.",
-        "sidebar": {
-          "type": "tips",
-          "title": "Astuces de navigation",
-          "tips": [
-            "Observe les couleurs des bâtiments : elles rappellent la compétence évaluée.",
-            "Rouvre un quartier quand tu veux pour compléter un objectif manquant.",
-            "L’inventaire en haut à droite conserve tes objets de mission."
-          ]
-        }
-      }
+    "id": "explorateur-ia",
+    "componentKey": "explorateur-ia",
+    "path": "/explorateur-ia",
+    "completionId": "explorateur-ia",
+    "enabled": true,
+    "header": {
+        "eyebrow": "Activit\u00e9 5",
+        "title": "L\u2019Explorateur IA",
+        "subtitle": "Parcours une mini-ville fa\u00e7on Game Boy pour valider quatre comp\u00e9tences IA sans jamais taper au clavier.",
+        "badge": "Ville interactive"
     },
-    {
-      "id": "explorateur:world",
-      "type": "explorateur-world",
-      "component": "explorateur-world"
+    "layout": {
+        "outerClassName": "flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden px-0 pt-0 pb-0",
+        "innerClassName": "flex h-full min-h-0 flex-1 w-full max-w-none gap-0",
+        "headerClassName": "hidden",
+        "contentClassName": "flex h-full min-h-0 flex-1 flex-col space-y-0",
+        "withLandingGradient": false,
+        "useDynamicViewportHeight": true,
+        "withBasePadding": false,
+        "withBaseContentSpacing": false,
+        "withBaseInnerGap": false
     },
-    {
-      "id": "explorateur:debrief",
-      "type": "rich-content",
-      "component": "rich-content",
-      "config": {
-        "title": "Capture ton bilan d’explorateur ou d’exploratrice",
-        "body": "Bravo pour cette exploration !\n\nDepuis la ville, ouvre la mairie pour afficher ta carte de compétences. Utilise les boutons JSON et PDF pour exporter ton rapport, l’ajouter à ton portfolio ou le partager avec ton équipe.\n\nTu peux revenir dans n’importe quel quartier pour améliorer un score ou récolter les idées à transformer en prompts.",
-        "sidebar": {
-          "type": "tips",
-          "title": "Et après ?",
-          "tips": [
-            "Note trois apprentissages clés dans ton portfolio.",
-            "Transforme les meilleures stratégies en consignes prêtes à réutiliser.",
-            "Anime un atelier en montrant comment tu as débloqué la mairie."
-          ]
+    "card": {
+        "title": "L\u2019Explorateur IA",
+        "description": "Objectif : compl\u00e9ter un parcours ludique m\u00ealant quiz, drag-and-drop, d\u00e9cisions et dilemmes \u00e9thiques.",
+        "highlights": [
+            "D\u00e9placements fa\u00e7on jeu vid\u00e9o et interactions \u00e0 la souris",
+            "Quatre mini-activit\u00e9s p\u00e9dagogiques sans saisie de texte",
+            "Export JSON imm\u00e9diat et impression PDF du bilan"
+        ],
+        "cta": {
+            "label": "Entrer dans la ville",
+            "to": "/explorateur-ia"
         }
-      }
-    }
-  ]
+    },
+    "stepSequence": [
+        {
+            "id": "explorateur:introduction",
+            "type": "rich-content",
+            "component": "rich-content",
+            "config": {
+                "title": "Pr\u00e9pare ton exploration pixelis\u00e9e",
+                "body": "Bienvenue dans Tiny Town, une mini-ville en pixel art o\u00f9 chaque quartier correspond \u00e0 une comp\u00e9tence IA.\n\n\u2022 D\u00e9place-toi avec les fl\u00e8ches du clavier ou les touches WASD. Sur mobile, utilise le joystick flottant.\n\u2022 Clique sur un b\u00e2timent pour lancer la mission associ\u00e9e et suis les consignes \u00e0 l'\u00e9cran.\n\u2022 Termine les quatre quartiers th\u00e9matiques pour d\u00e9bloquer la mairie et valider ton parcours.",
+                "sidebar": {
+                    "type": "tips",
+                    "title": "Astuces de navigation",
+                    "tips": [
+                        "Observe les couleurs des b\u00e2timents : elles rappellent la comp\u00e9tence \u00e9valu\u00e9e.",
+                        "Rouvre un quartier quand tu veux pour compl\u00e9ter un objectif manquant.",
+                        "L\u2019inventaire en haut \u00e0 droite conserve tes objets de mission."
+                    ]
+                }
+            }
+        },
+        {
+            "id": "explorateur:world",
+            "type": "explorateur-world",
+            "component": "explorateur-world",
+            "config": {
+                "terrain": {
+                    "themeId": "sand",
+                    "seed": 1247
+                },
+                "steps": [
+                    {
+                        "id": "clarte:intro",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                        "config": {
+                            "title": "Bienvenue au quartier Clart\u00e9",
+                            "body": "Explorez ce qui rend une consigne pr\u00e9cise et actionnable avant de tester vos choix.",
+                            "sidebar": {
+                                "type": "tips",
+                                "title": "Checklist clart\u00e9",
+                                "tips": [
+                                    "Pr\u00e9ciser le r\u00e9sultat attendu",
+                                    "Indiquer le format et la longueur",
+                                    "Contextualiser pour le public cible"
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        "id": "clarte:video",
+                        "type": "video",
+                        "component": "video",
+                        "config": {
+                            "sources": [
+                                {
+                                    "type": "mp4",
+                                    "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+                                }
+                            ],
+                            "expectedDuration": 45,
+                            "autoAdvanceOnEnd": false,
+                            "poster": "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=800&q=80"
+                        }
+                    },
+                    {
+                        "id": "clarte:quiz",
+                        "type": "custom",
+                        "component": "custom",
+                        "config": {
+                            "type": "clarte-quiz",
+                            "title": "Choisissez la consigne la plus claire",
+                            "question": "Quel est le meilleur \u00e9nonc\u00e9 pour obtenir un plan clair?",
+                            "options": [
+                                {
+                                    "id": "A",
+                                    "label": "\u00c9cris un plan.",
+                                    "explanation": "Trop vague : objectifs, sections, longueur\u2026 manquent.",
+                                    "score": 0
+                                },
+                                {
+                                    "id": "B",
+                                    "label": "Donne un plan en 5 sections sur l'\u00e9nergie solaire pour d\u00e9butants, avec titres et 2 sous-points chacun.",
+                                    "explanation": "Pr\u00e9cis, contraint et adapt\u00e9 au public cible.",
+                                    "score": 100
+                                },
+                                {
+                                    "id": "C",
+                                    "label": "Plan \u00e9nergie solaire?",
+                                    "explanation": "Formulation t\u00e9l\u00e9graphique, ambigu\u00eb.",
+                                    "score": 10
+                                }
+                            ],
+                            "validateLabel": "Valider"
+                        }
+                    },
+                    {
+                        "id": "creation:intro",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                        "config": {
+                            "title": "Quartier Cr\u00e9ation",
+                            "body": "Assemblez une consigne sur-mesure en combinant action, m\u00e9dia, style et th\u00e8me.",
+                            "sidebar": {
+                                "type": "checklist",
+                                "title": "\u00c9tapes",
+                                "items": [
+                                    {
+                                        "id": "select-action",
+                                        "label": "S\u00e9lectionner un verbe d'action",
+                                        "checked": false
+                                    },
+                                    {
+                                        "id": "select-media",
+                                        "label": "Choisir un m\u00e9dia adapt\u00e9",
+                                        "checked": false
+                                    },
+                                    {
+                                        "id": "select-style",
+                                        "label": "D\u00e9finir le ton et le style",
+                                        "checked": false
+                                    },
+                                    {
+                                        "id": "select-theme",
+                                        "label": "Associer un th\u00e8me",
+                                        "checked": false
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        "id": "creation:builder",
+                        "type": "custom",
+                        "component": "custom",
+                        "config": {
+                            "type": "creation-builder",
+                            "title": "Assemblez votre d\u00e9fi de cr\u00e9ation",
+                            "instructions": "Choisissez un verbe d'action, un m\u00e9dia, un style et un th\u00e8me pour g\u00e9n\u00e9rer une consigne personnalis\u00e9e.",
+                            "pools": {
+                                "action": [
+                                    "cr\u00e9er",
+                                    "r\u00e9diger",
+                                    "composer"
+                                ],
+                                "media": [
+                                    "affiche",
+                                    "article",
+                                    "capsule audio"
+                                ],
+                                "style": [
+                                    "cartoon",
+                                    "acad\u00e9mique",
+                                    "minimaliste"
+                                ],
+                                "theme": [
+                                    "\u00e9nergie",
+                                    "ville intelligente",
+                                    "biodiversit\u00e9"
+                                ]
+                            },
+                            "submitLabel": "Valider ma consigne"
+                        }
+                    },
+                    {
+                        "id": "creation:reflection",
+                        "type": "form",
+                        "component": "form",
+                        "config": {
+                            "submitLabel": "Enregistrer ma synth\u00e8se",
+                            "fields": [
+                                {
+                                    "id": "audience",
+                                    "label": "D\u00e9crivez le public cible",
+                                    "type": "textarea_with_counter",
+                                    "minWords": 10,
+                                    "maxWords": 80
+                                },
+                                {
+                                    "id": "outcome",
+                                    "label": "Quels livrables attendez-vous ?",
+                                    "type": "bulleted_list",
+                                    "minBullets": 2,
+                                    "maxBullets": 4,
+                                    "maxWordsPerBullet": 12
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "id": "decision:intro",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                        "config": {
+                            "title": "Quartier D\u00e9cision",
+                            "body": "Exp\u00e9rimentez diff\u00e9rentes strat\u00e9gies et observez leurs compromis pour mener votre projet."
+                        }
+                    },
+                    {
+                        "id": "decision:path",
+                        "type": "custom",
+                        "component": "custom",
+                        "config": {
+                            "type": "decision-path",
+                            "title": "Tracez votre parcours de d\u00e9cision",
+                            "introduction": "Chaque choix r\u00e9v\u00e8le des compromis diff\u00e9rents. Exp\u00e9rimentez plusieurs trajectoires pour comparer les impacts.",
+                            "steps": [
+                                {
+                                    "id": "announce",
+                                    "prompt": "Votre \u00e9quipe doit annoncer un nouveau projet. Quelle strat\u00e9gie choisissez-vous ?",
+                                    "options": [
+                                        {
+                                            "id": "A",
+                                            "title": "Annonce rapide",
+                                            "impact": "+ vitesse / \u2013 profondeur",
+                                            "next": "follow-up"
+                                        },
+                                        {
+                                            "id": "B",
+                                            "title": "Annonce \u00e9quilibr\u00e9e",
+                                            "impact": "+ clart\u00e9 / \u2013 temps",
+                                            "next": "follow-up"
+                                        },
+                                        {
+                                            "id": "C",
+                                            "title": "Annonce personnalis\u00e9e",
+                                            "impact": "+ pertinence / \u2013 effort",
+                                            "next": "follow-up"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "id": "follow-up",
+                                    "prompt": "Le public r\u00e9agit vivement. Quelle action de suivi priorisez-vous ?",
+                                    "options": [
+                                        {
+                                            "id": "A",
+                                            "title": "FAQ automatis\u00e9e",
+                                            "impact": "+ \u00e9chelle / \u2013 nuance",
+                                            "next": null
+                                        },
+                                        {
+                                            "id": "B",
+                                            "title": "Atelier interactif",
+                                            "impact": "+ engagement / \u2013 logistique",
+                                            "next": null
+                                        },
+                                        {
+                                            "id": "C",
+                                            "title": "Messages cibl\u00e9s",
+                                            "impact": "+ efficacit\u00e9 / \u2013 donn\u00e9es",
+                                            "next": null
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "id": "ethique:intro",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                        "config": {
+                            "title": "Quartier \u00c9thique",
+                            "body": "Chaque sc\u00e9nario illustre une d\u00e9rive potentielle. S\u00e9lectionnez la r\u00e9ponse qui prot\u00e8ge au mieux les usagers."
+                        }
+                    },
+                    {
+                        "id": "ethique:dilemmas",
+                        "type": "custom",
+                        "component": "custom",
+                        "config": {
+                            "type": "ethics-dilemmas",
+                            "title": "R\u00e9agissez \u00e0 des dilemmes \u00e9thiques",
+                            "introduction": "Choisissez la meilleure r\u00e9ponse pour limiter les d\u00e9rives et renforcer la responsabilit\u00e9.",
+                            "dilemmas": [
+                                {
+                                    "id": "bias",
+                                    "scenario": "Un outil g\u00e9n\u00e8re un r\u00e9sum\u00e9 contenant des st\u00e9r\u00e9otypes.",
+                                    "options": [
+                                        {
+                                            "id": "ignore",
+                                            "label": "Ignorer",
+                                            "feedback": "Risque d'amplifier le biais et de diffuser une erreur.",
+                                            "score": 0
+                                        },
+                                        {
+                                            "id": "correct",
+                                            "label": "Corriger et justifier",
+                                            "feedback": "Bonne pratique: signalez et corrigez les biais.",
+                                            "score": 100
+                                        },
+                                        {
+                                            "id": "question",
+                                            "label": "Demander des explications",
+                                            "feedback": "Utile, mais sans correction le risque demeure.",
+                                            "score": 60
+                                        }
+                                    ]
+                                },
+                                {
+                                    "id": "sensitive",
+                                    "scenario": "Un mod\u00e8le r\u00e9v\u00e8le des donn\u00e9es sensibles dans un exemple.",
+                                    "options": [
+                                        {
+                                            "id": "ignore",
+                                            "label": "Ignorer",
+                                            "feedback": "Non conforme \u00e0 la protection des donn\u00e9es.",
+                                            "score": 0
+                                        },
+                                        {
+                                            "id": "remove",
+                                            "label": "Supprimer et anonymiser",
+                                            "feedback": "Conforme aux bonnes pratiques.",
+                                            "score": 100
+                                        },
+                                        {
+                                            "id": "ask",
+                                            "label": "Demander justification",
+                                            "feedback": "Insuffisant sans retrait imm\u00e9diat.",
+                                            "score": 40
+                                        }
+                                    ]
+                                }
+                            ],
+                            "concludeLabel": "Voir mon score"
+                        }
+                    },
+                    {
+                        "id": "ethique:commitment",
+                        "type": "form",
+                        "component": "form",
+                        "config": {
+                            "submitLabel": "Formuler mon engagement",
+                            "allowEmpty": false,
+                            "fields": [
+                                {
+                                    "id": "guardrail",
+                                    "label": "Quelles pratiques mettrez-vous en place pour limiter les biais ?",
+                                    "type": "two_bullets",
+                                    "maxWordsPerBullet": 16
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "id": "mairie:intro",
+                        "type": "rich-content",
+                        "component": "rich-content",
+                        "config": {
+                            "title": "Mairie \u2014 Synth\u00e8se",
+                            "body": "Rassemblez vos apprentissages et pr\u00e9parez l'export de votre badge Explorateur IA."
+                        }
+                    },
+                    {
+                        "id": "mairie:feedback",
+                        "type": "form",
+                        "component": "form",
+                        "config": {
+                            "submitLabel": "Valider mon bilan",
+                            "allowEmpty": false,
+                            "fields": [
+                                {
+                                    "id": "takeaway",
+                                    "label": "Quelle pratique garderez-vous en priorit\u00e9 ?",
+                                    "type": "textarea_with_counter",
+                                    "minWords": 12,
+                                    "maxWords": 120
+                                },
+                                {
+                                    "id": "confidence",
+                                    "label": "Niveau de confiance actuel (0-100%)",
+                                    "type": "reference_line"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "quarterDesignerSteps": {
+                    "clarte": [
+                        {
+                            "id": "clarte:designer:basics",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-basics",
+                                "quarterId": "clarte",
+                                "label": "Quartier Clart\u00e9",
+                                "color": "#06d6a0",
+                                "buildingNumber": 1,
+                                "isGoal": false
+                            }
+                        },
+                        {
+                            "id": "clarte:intro",
+                            "type": "rich-content",
+                            "component": "rich-content",
+                            "config": {
+                                "title": "Bienvenue au quartier Clart\u00e9",
+                                "body": "Explorez ce qui rend une consigne pr\u00e9cise et actionnable avant de tester vos choix.",
+                                "sidebar": {
+                                    "type": "tips",
+                                    "title": "Checklist clart\u00e9",
+                                    "tips": [
+                                        "Pr\u00e9ciser le r\u00e9sultat attendu",
+                                        "Indiquer le format et la longueur",
+                                        "Contextualiser pour le public cible"
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "id": "clarte:video",
+                            "type": "video",
+                            "component": "video",
+                            "config": {
+                                "sources": [
+                                    {
+                                        "type": "mp4",
+                                        "url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
+                                    }
+                                ],
+                                "expectedDuration": 45,
+                                "autoAdvanceOnEnd": false,
+                                "poster": "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=800&q=80"
+                            }
+                        },
+                        {
+                            "id": "clarte:quiz",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "clarte-quiz",
+                                "title": "Choisissez la consigne la plus claire",
+                                "question": "Quel est le meilleur \u00e9nonc\u00e9 pour obtenir un plan clair?",
+                                "options": [
+                                    {
+                                        "id": "A",
+                                        "label": "\u00c9cris un plan.",
+                                        "explanation": "Trop vague : objectifs, sections, longueur\u2026 manquent.",
+                                        "score": 0
+                                    },
+                                    {
+                                        "id": "B",
+                                        "label": "Donne un plan en 5 sections sur l'\u00e9nergie solaire pour d\u00e9butants, avec titres et 2 sous-points chacun.",
+                                        "explanation": "Pr\u00e9cis, contraint et adapt\u00e9 au public cible.",
+                                        "score": 100
+                                    },
+                                    {
+                                        "id": "C",
+                                        "label": "Plan \u00e9nergie solaire?",
+                                        "explanation": "Formulation t\u00e9l\u00e9graphique, ambigu\u00eb.",
+                                        "score": 10
+                                    }
+                                ],
+                                "validateLabel": "Valider"
+                            }
+                        },
+                        {
+                            "id": "clarte:designer:inventory",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-inventory",
+                                "quarterId": "clarte",
+                                "enabled": true,
+                                "title": "Boussole de clart\u00e9",
+                                "description": "Une boussole calibr\u00e9e pour pointer vers les consignes les plus limpides.",
+                                "hint": "R\u00e9ussissez le d\u00e9fi Clart\u00e9 pour l'ajouter \u00e0 votre sac.",
+                                "icon": "\ud83e\udded"
+                            }
+                        }
+                    ],
+                    "creation": [
+                        {
+                            "id": "creation:designer:basics",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-basics",
+                                "quarterId": "creation",
+                                "label": "Quartier Cr\u00e9ation",
+                                "color": "#118ab2",
+                                "buildingNumber": 2,
+                                "isGoal": false
+                            }
+                        },
+                        {
+                            "id": "creation:intro",
+                            "type": "rich-content",
+                            "component": "rich-content",
+                            "config": {
+                                "title": "Quartier Cr\u00e9ation",
+                                "body": "Assemblez une consigne sur-mesure en combinant action, m\u00e9dia, style et th\u00e8me.",
+                                "sidebar": {
+                                    "type": "checklist",
+                                    "title": "\u00c9tapes",
+                                    "items": [
+                                        {
+                                            "id": "select-action",
+                                            "label": "S\u00e9lectionner un verbe d'action",
+                                            "checked": false
+                                        },
+                                        {
+                                            "id": "select-media",
+                                            "label": "Choisir un m\u00e9dia adapt\u00e9",
+                                            "checked": false
+                                        },
+                                        {
+                                            "id": "select-style",
+                                            "label": "D\u00e9finir le ton et le style",
+                                            "checked": false
+                                        },
+                                        {
+                                            "id": "select-theme",
+                                            "label": "Associer un th\u00e8me",
+                                            "checked": false
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "id": "creation:builder",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "creation-builder",
+                                "title": "Assemblez votre d\u00e9fi de cr\u00e9ation",
+                                "instructions": "Choisissez un verbe d'action, un m\u00e9dia, un style et un th\u00e8me pour g\u00e9n\u00e9rer une consigne personnalis\u00e9e.",
+                                "pools": {
+                                    "action": [
+                                        "cr\u00e9er",
+                                        "r\u00e9diger",
+                                        "composer"
+                                    ],
+                                    "media": [
+                                        "affiche",
+                                        "article",
+                                        "capsule audio"
+                                    ],
+                                    "style": [
+                                        "cartoon",
+                                        "acad\u00e9mique",
+                                        "minimaliste"
+                                    ],
+                                    "theme": [
+                                        "\u00e9nergie",
+                                        "ville intelligente",
+                                        "biodiversit\u00e9"
+                                    ]
+                                },
+                                "submitLabel": "Valider ma consigne"
+                            }
+                        },
+                        {
+                            "id": "creation:reflection",
+                            "type": "form",
+                            "component": "form",
+                            "config": {
+                                "submitLabel": "Enregistrer ma synth\u00e8se",
+                                "fields": [
+                                    {
+                                        "id": "audience",
+                                        "label": "D\u00e9crivez le public cible",
+                                        "type": "textarea_with_counter",
+                                        "minWords": 10,
+                                        "maxWords": 80
+                                    },
+                                    {
+                                        "id": "outcome",
+                                        "label": "Quels livrables attendez-vous ?",
+                                        "type": "bulleted_list",
+                                        "minBullets": 2,
+                                        "maxBullets": 4,
+                                        "maxWordsPerBullet": 12
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": "creation:designer:inventory",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-inventory",
+                                "quarterId": "creation",
+                                "enabled": true,
+                                "title": "Palette synth\u00e9tique",
+                                "description": "Un set modulable pour combiner styles, m\u00e9dias et tonalit\u00e9s \u00e0 la demande.",
+                                "hint": "Terminez le d\u00e9fi Cr\u00e9ation pour d\u00e9bloquer cet outil.",
+                                "icon": "\ud83c\udfa8"
+                            }
+                        }
+                    ],
+                    "decision": [
+                        {
+                            "id": "decision:designer:basics",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-basics",
+                                "quarterId": "decision",
+                                "label": "Quartier D\u00e9cision",
+                                "color": "#ef476f",
+                                "buildingNumber": 3,
+                                "isGoal": false
+                            }
+                        },
+                        {
+                            "id": "decision:intro",
+                            "type": "rich-content",
+                            "component": "rich-content",
+                            "config": {
+                                "title": "Quartier D\u00e9cision",
+                                "body": "Exp\u00e9rimentez diff\u00e9rentes strat\u00e9gies et observez leurs compromis pour mener votre projet."
+                            }
+                        },
+                        {
+                            "id": "decision:path",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "decision-path",
+                                "title": "Tracez votre parcours de d\u00e9cision",
+                                "introduction": "Chaque choix r\u00e9v\u00e8le des compromis diff\u00e9rents. Exp\u00e9rimentez plusieurs trajectoires pour comparer les impacts.",
+                                "steps": [
+                                    {
+                                        "id": "announce",
+                                        "prompt": "Votre \u00e9quipe doit annoncer un nouveau projet. Quelle strat\u00e9gie choisissez-vous ?",
+                                        "options": [
+                                            {
+                                                "id": "A",
+                                                "title": "Annonce rapide",
+                                                "impact": "+ vitesse / \u2013 profondeur",
+                                                "next": "follow-up"
+                                            },
+                                            {
+                                                "id": "B",
+                                                "title": "Annonce \u00e9quilibr\u00e9e",
+                                                "impact": "+ clart\u00e9 / \u2013 temps",
+                                                "next": "follow-up"
+                                            },
+                                            {
+                                                "id": "C",
+                                                "title": "Annonce personnalis\u00e9e",
+                                                "impact": "+ pertinence / \u2013 effort",
+                                                "next": "follow-up"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "id": "follow-up",
+                                        "prompt": "Le public r\u00e9agit vivement. Quelle action de suivi priorisez-vous ?",
+                                        "options": [
+                                            {
+                                                "id": "A",
+                                                "title": "FAQ automatis\u00e9e",
+                                                "impact": "+ \u00e9chelle / \u2013 nuance",
+                                                "next": null
+                                            },
+                                            {
+                                                "id": "B",
+                                                "title": "Atelier interactif",
+                                                "impact": "+ engagement / \u2013 logistique",
+                                                "next": null
+                                            },
+                                            {
+                                                "id": "C",
+                                                "title": "Messages cibl\u00e9s",
+                                                "impact": "+ efficacit\u00e9 / \u2013 donn\u00e9es",
+                                                "next": null
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": "decision:designer:inventory",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-inventory",
+                                "quarterId": "decision",
+                                "enabled": true,
+                                "title": "Balance d'arbitrage",
+                                "description": "Une balance portative qui r\u00e9v\u00e8le instantan\u00e9ment impacts et compromis.",
+                                "hint": "Gagnez le d\u00e9fi D\u00e9cision pour la remporter.",
+                                "icon": "\u2696\ufe0f"
+                            }
+                        }
+                    ],
+                    "ethique": [
+                        {
+                            "id": "ethique:designer:basics",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-basics",
+                                "quarterId": "ethique",
+                                "label": "Quartier \u00c9thique",
+                                "color": "#8338ec",
+                                "buildingNumber": 4,
+                                "isGoal": false
+                            }
+                        },
+                        {
+                            "id": "ethique:intro",
+                            "type": "rich-content",
+                            "component": "rich-content",
+                            "config": {
+                                "title": "Quartier \u00c9thique",
+                                "body": "Chaque sc\u00e9nario illustre une d\u00e9rive potentielle. S\u00e9lectionnez la r\u00e9ponse qui prot\u00e8ge au mieux les usagers."
+                            }
+                        },
+                        {
+                            "id": "ethique:dilemmas",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "ethics-dilemmas",
+                                "title": "R\u00e9agissez \u00e0 des dilemmes \u00e9thiques",
+                                "introduction": "Choisissez la meilleure r\u00e9ponse pour limiter les d\u00e9rives et renforcer la responsabilit\u00e9.",
+                                "dilemmas": [
+                                    {
+                                        "id": "bias",
+                                        "scenario": "Un outil g\u00e9n\u00e8re un r\u00e9sum\u00e9 contenant des st\u00e9r\u00e9otypes.",
+                                        "options": [
+                                            {
+                                                "id": "ignore",
+                                                "label": "Ignorer",
+                                                "feedback": "Risque d'amplifier le biais et de diffuser une erreur.",
+                                                "score": 0
+                                            },
+                                            {
+                                                "id": "correct",
+                                                "label": "Corriger et justifier",
+                                                "feedback": "Bonne pratique: signalez et corrigez les biais.",
+                                                "score": 100
+                                            },
+                                            {
+                                                "id": "question",
+                                                "label": "Demander des explications",
+                                                "feedback": "Utile, mais sans correction le risque demeure.",
+                                                "score": 60
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "id": "sensitive",
+                                        "scenario": "Un mod\u00e8le r\u00e9v\u00e8le des donn\u00e9es sensibles dans un exemple.",
+                                        "options": [
+                                            {
+                                                "id": "ignore",
+                                                "label": "Ignorer",
+                                                "feedback": "Non conforme \u00e0 la protection des donn\u00e9es.",
+                                                "score": 0
+                                            },
+                                            {
+                                                "id": "remove",
+                                                "label": "Supprimer et anonymiser",
+                                                "feedback": "Conforme aux bonnes pratiques.",
+                                                "score": 100
+                                            },
+                                            {
+                                                "id": "ask",
+                                                "label": "Demander justification",
+                                                "feedback": "Insuffisant sans retrait imm\u00e9diat.",
+                                                "score": 40
+                                            }
+                                        ]
+                                    }
+                                ],
+                                "concludeLabel": "Voir mon score"
+                            }
+                        },
+                        {
+                            "id": "ethique:commitment",
+                            "type": "form",
+                            "component": "form",
+                            "config": {
+                                "submitLabel": "Formuler mon engagement",
+                                "allowEmpty": false,
+                                "fields": [
+                                    {
+                                        "id": "guardrail",
+                                        "label": "Quelles pratiques mettrez-vous en place pour limiter les biais ?",
+                                        "type": "two_bullets",
+                                        "maxWordsPerBullet": 16
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "id": "ethique:designer:inventory",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-inventory",
+                                "quarterId": "ethique",
+                                "enabled": true,
+                                "title": "Lanterne d\u00e9ontique",
+                                "description": "Une lanterne qui \u00e9claire les zones d'ombre pour garder le cap \u00e9thique.",
+                                "hint": "Relevez le d\u00e9fi \u00c9thique pour la r\u00e9cup\u00e9rer.",
+                                "icon": "\ud83d\udd6f\ufe0f"
+                            }
+                        }
+                    ],
+                    "mairie": [
+                        {
+                            "id": "mairie:designer:basics",
+                            "type": "custom",
+                            "component": "custom",
+                            "config": {
+                                "type": "explorateur-quarter-basics",
+                                "quarterId": "mairie",
+                                "label": "Mairie (Bilan)",
+                                "color": "#ffd166",
+                                "buildingNumber": null,
+                                "isGoal": true
+                            }
+                        },
+                        {
+                            "id": "mairie:intro",
+                            "type": "rich-content",
+                            "component": "rich-content",
+                            "config": {
+                                "title": "Mairie \u2014 Synth\u00e8se",
+                                "body": "Rassemblez vos apprentissages et pr\u00e9parez l'export de votre badge Explorateur IA."
+                            }
+                        },
+                        {
+                            "id": "mairie:feedback",
+                            "type": "form",
+                            "component": "form",
+                            "config": {
+                                "submitLabel": "Valider mon bilan",
+                                "allowEmpty": false,
+                                "fields": [
+                                    {
+                                        "id": "takeaway",
+                                        "label": "Quelle pratique garderez-vous en priorit\u00e9 ?",
+                                        "type": "textarea_with_counter",
+                                        "minWords": 12,
+                                        "maxWords": 120
+                                    },
+                                    {
+                                        "id": "confidence",
+                                        "label": "Niveau de confiance actuel (0-100%)",
+                                        "type": "reference_line"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "quarters": [
+                    {
+                        "id": "clarte",
+                        "label": "Quartier Clart\u00e9",
+                        "color": "#06d6a0",
+                        "buildingNumber": 1,
+                        "isGoal": false,
+                        "inventory": {
+                            "title": "Boussole de clart\u00e9",
+                            "description": "Une boussole calibr\u00e9e pour pointer vers les consignes les plus limpides.",
+                            "hint": "R\u00e9ussissez le d\u00e9fi Clart\u00e9 pour l'ajouter \u00e0 votre sac.",
+                            "icon": "\ud83e\udded"
+                        }
+                    },
+                    {
+                        "id": "creation",
+                        "label": "Quartier Cr\u00e9ation",
+                        "color": "#118ab2",
+                        "buildingNumber": 2,
+                        "isGoal": false,
+                        "inventory": {
+                            "title": "Palette synth\u00e9tique",
+                            "description": "Un set modulable pour combiner styles, m\u00e9dias et tonalit\u00e9s \u00e0 la demande.",
+                            "hint": "Terminez le d\u00e9fi Cr\u00e9ation pour d\u00e9bloquer cet outil.",
+                            "icon": "\ud83c\udfa8"
+                        }
+                    },
+                    {
+                        "id": "decision",
+                        "label": "Quartier D\u00e9cision",
+                        "color": "#ef476f",
+                        "buildingNumber": 3,
+                        "isGoal": false,
+                        "inventory": {
+                            "title": "Balance d'arbitrage",
+                            "description": "Une balance portative qui r\u00e9v\u00e8le instantan\u00e9ment impacts et compromis.",
+                            "hint": "Gagnez le d\u00e9fi D\u00e9cision pour la remporter.",
+                            "icon": "\u2696\ufe0f"
+                        }
+                    },
+                    {
+                        "id": "ethique",
+                        "label": "Quartier \u00c9thique",
+                        "color": "#8338ec",
+                        "buildingNumber": 4,
+                        "isGoal": false,
+                        "inventory": {
+                            "title": "Lanterne d\u00e9ontique",
+                            "description": "Une lanterne qui \u00e9claire les zones d'ombre pour garder le cap \u00e9thique.",
+                            "hint": "Relevez le d\u00e9fi \u00c9thique pour la r\u00e9cup\u00e9rer.",
+                            "icon": "\ud83d\udd6f\ufe0f"
+                        }
+                    },
+                    {
+                        "id": "mairie",
+                        "label": "Mairie (Bilan)",
+                        "color": "#ffd166",
+                        "buildingNumber": null,
+                        "isGoal": true,
+                        "inventory": null
+                    }
+                ]
+            }
+        },
+        {
+            "id": "explorateur:debrief",
+            "type": "rich-content",
+            "component": "rich-content",
+            "config": {
+                "title": "Capture ton bilan d\u2019explorateur ou d\u2019exploratrice",
+                "body": "Bravo pour cette exploration !\n\nDepuis la ville, ouvre la mairie pour afficher ta carte de comp\u00e9tences. Utilise les boutons JSON et PDF pour exporter ton rapport, l\u2019ajouter \u00e0 ton portfolio ou le partager avec ton \u00e9quipe.\n\nTu peux revenir dans n\u2019importe quel quartier pour am\u00e9liorer un score ou r\u00e9colter les id\u00e9es \u00e0 transformer en prompts.",
+                "sidebar": {
+                    "type": "tips",
+                    "title": "Et apr\u00e8s ?",
+                    "tips": [
+                        "Note trois apprentissages cl\u00e9s dans ton portfolio.",
+                        "Transforme les meilleures strat\u00e9gies en consignes pr\u00eates \u00e0 r\u00e9utiliser.",
+                        "Anime un atelier en montrant comment tu as d\u00e9bloqu\u00e9 la mairie."
+                    ]
+                }
+            }
+        }
+    ]
 }
