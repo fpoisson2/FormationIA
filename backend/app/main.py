@@ -684,6 +684,94 @@ def _resolve_activity_filename(
     return candidate, base_name
 
 
+def _merge_mapping_with_overrides(
+    existing: Mapping[str, Any] | None, overrides: Mapping[str, Any]
+) -> dict[str, Any]:
+    base = deepcopy(existing) if isinstance(existing, Mapping) else {}
+    for key, value in overrides.items():
+        if value is None:
+            base.pop(key, None)
+        else:
+            base[key] = value
+    return base
+
+
+def _merge_card_with_overrides(
+    existing: Mapping[str, Any] | None, overrides: Mapping[str, Any]
+) -> dict[str, Any]:
+    base = deepcopy(existing) if isinstance(existing, Mapping) else {}
+    for key, value in overrides.items():
+        if key == "cta" and isinstance(value, Mapping):
+            current_cta = (
+                deepcopy(base.get("cta"))
+                if isinstance(base.get("cta"), Mapping)
+                else {}
+            )
+            for cta_key, cta_value in value.items():
+                if cta_value is None:
+                    current_cta.pop(cta_key, None)
+                else:
+                    current_cta[cta_key] = cta_value
+            if current_cta:
+                base["cta"] = current_cta
+            else:
+                base.pop("cta", None)
+        elif value is None:
+            base.pop(key, None)
+        else:
+            base[key] = value
+    return base
+
+
+def _resolve_activity_library_payload(
+    activity: Mapping[str, Any], existing: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    resolved = deepcopy(existing) if isinstance(existing, Mapping) else {}
+
+    for key, value in activity.items():
+        if key == "overrides":
+            continue
+        resolved[key] = deepcopy(value)
+
+    overrides = activity.get("overrides")
+    if isinstance(overrides, Mapping):
+        header_override = overrides.get("header")
+        if isinstance(header_override, Mapping):
+            resolved["header"] = _merge_mapping_with_overrides(
+                resolved.get("header"), header_override
+            )
+
+        layout_override = overrides.get("layout")
+        if isinstance(layout_override, Mapping):
+            resolved["layout"] = _merge_mapping_with_overrides(
+                resolved.get("layout"), layout_override
+            )
+
+        card_override = overrides.get("card")
+        if isinstance(card_override, Mapping):
+            resolved["card"] = _merge_card_with_overrides(
+                resolved.get("card"), card_override
+            )
+
+        if "completionId" in overrides:
+            completion_override = overrides.get("completionId")
+            if completion_override is None:
+                resolved.pop("completionId", None)
+            else:
+                resolved["completionId"] = completion_override
+
+        if "stepSequence" in overrides:
+            step_sequence_override = overrides.get("stepSequence")
+            if step_sequence_override is None:
+                resolved.pop("stepSequence", None)
+            elif isinstance(step_sequence_override, list):
+                resolved["stepSequence"] = deepcopy(step_sequence_override)
+
+    resolved.pop("overrides", None)
+
+    return resolved
+
+
 def _sync_activity_library(activities: Sequence[Mapping[str, Any]]) -> None:
     directory = _get_activities_library_dir()
     used_names: set[str] = set()
@@ -705,10 +793,13 @@ def _sync_activity_library(activities: Sequence[Mapping[str, Any]]) -> None:
                 ),
             )
 
+        existing_payload = _load_activity_from_library(activity_id)
+        library_payload = _resolve_activity_library_payload(activity, existing_payload)
+
         filename, _ = _resolve_activity_filename(activity_id, used_names)
         path = directory / filename
         with path.open("w", encoding="utf-8") as handle:
-            json.dump(activity, handle, ensure_ascii=False, indent=2)
+            json.dump(library_payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
         id_to_filename[activity_id] = filename
 

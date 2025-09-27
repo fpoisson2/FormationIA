@@ -287,6 +287,93 @@ def test_admin_export_activity(tmp_path, monkeypatch) -> None:
             )
     finally:
         app.dependency_overrides.clear()
+
+
+def test_export_preserves_step_sequence_when_overrides_only(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    initial_activity = {
+        "id": "clarte-dabord",
+        "componentKey": "clarte-dabord",
+        "path": "/clarte-dabord",
+        "enabled": True,
+        "header": {"title": "Clarté d'abord"},
+        "card": {
+            "title": "Clarté d'abord",
+            "description": "Mesure l'impact d'un brief incomplet.",
+            "cta": {"label": "Commencer", "to": "/clarte-dabord"},
+            "highlights": ["Étapes guidées"],
+        },
+        "stepSequence": [
+            {
+                "id": "clarte:intro",
+                "type": "rich-content",
+                "config": {"title": "Introduction", "body": "Bienvenue"},
+            },
+            {
+                "id": "clarte:form",
+                "type": "form",
+                "config": {
+                    "submitLabel": "Continuer",
+                    "fields": [
+                        {
+                            "id": "champ",
+                            "type": "textarea_with_counter",
+                            "label": "Ta réponse",
+                            "minWords": 10,
+                            "maxWords": 50,
+                        }
+                    ],
+                },
+            },
+        ],
+    }
+
+    overrides_only_activity = {
+        "id": "clarte-dabord",
+        "componentKey": "clarte-dabord",
+        "path": "/clarte-dabord",
+        "enabled": True,
+        "overrides": {
+            "header": {"badge": ""},
+            "card": {
+                "title": "Activité #2 - Prends le rôle de l'IA",
+                "description": "Objectif : Prends le rôle de l'IA pour découvrir les impacts d'une mauvaise requête.",
+                "cta": {"label": "Débuter l'activité"},
+            },
+        },
+    }
+
+    try:
+        with TestClient(app) as client:
+            first_save = client.post(
+                "/api/admin/activities", json={"activities": [initial_activity]}
+            )
+            assert first_save.status_code == 200, first_save.text
+
+            second_save = client.post(
+                "/api/admin/activities", json={"activities": [overrides_only_activity]}
+            )
+            assert second_save.status_code == 200, second_save.text
+
+            export_response = client.get("/api/admin/activities/clarte-dabord/export")
+            assert export_response.status_code == 200, export_response.text
+            exported = export_response.json()
+            assert exported["id"] == "clarte-dabord"
+            assert exported["card"]["title"].startswith("Activité #2")
+            assert exported["stepSequence"] == initial_activity["stepSequence"]
+    finally:
+        app.dependency_overrides.clear()
+
+    activities_dir = config_path.parent / "activities"
+    stored_activity_path = activities_dir / "clarte-dabord.json"
+    assert stored_activity_path.exists()
+    stored_payload = json.loads(stored_activity_path.read_text(encoding="utf-8"))
+    assert stored_payload["stepSequence"] == initial_activity["stepSequence"]
 def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch) -> None:
     admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
     app.dependency_overrides[_require_admin_user] = lambda: admin_user
