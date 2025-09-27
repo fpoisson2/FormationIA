@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import logoPrincipal from "../assets/logo_principal.svg";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 import { admin } from "../api";
+import { useLTI } from "../hooks/useLTI";
 
 const combineClasses = (...values: Array<string | false | null | undefined>) =>
   values.filter(Boolean).join(" ");
@@ -64,7 +65,9 @@ function ActivityLayout({
   withBaseContentSpacing = true,
   withBaseInnerGap = true,
 }: ActivityLayoutProps): JSX.Element {
-  const { isEditMode, token } = useAdminAuth();
+  const { isEditMode, status, token } = useAdminAuth();
+  const { isLTISession } = useLTI();
+  const isAuthenticated = status === "authenticated" || isLTISession;
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -130,7 +133,10 @@ function ActivityLayout({
             </div>
           )}
           <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
-            <Link to="/" className="flex items-center gap-3">
+            <Link
+              to={isAuthenticated ? "/activites" : "/"}
+              className="flex items-center gap-3"
+            >
               <img src={logoPrincipal} alt="Cégep Limoilou" className="h-12 w-auto md:h-16" />
               {isEditMode && onHeaderEdit ? (
                 <input
