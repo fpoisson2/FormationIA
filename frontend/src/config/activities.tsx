@@ -449,6 +449,7 @@ export interface ActivityLayoutOptions {
   headerClassName?: string;
   contentClassName?: string;
   contentAs?: keyof JSX.IntrinsicElements;
+  showHeader?: boolean;
   withLandingGradient?: boolean;
   useDynamicViewportHeight?: boolean;
   withBasePadding?: boolean;
@@ -776,6 +777,7 @@ const SERIALIZABLE_LAYOUT_KEYS: Array<keyof ActivityLayoutOptions> = [
   "headerClassName",
   "contentClassName",
   "contentAs",
+  "showHeader",
   "withLandingGradient",
   "useDynamicViewportHeight",
   "withBasePadding",
@@ -1335,6 +1337,7 @@ function buildBaseLayout(definition: ActivityDefinition): ActivityLayoutConfig {
     headerClassName: definition.layout?.headerClassName,
     contentClassName: definition.layout?.contentClassName,
     contentAs: definition.layout?.contentAs,
+    showHeader: definition.layout?.showHeader ?? false,
     withLandingGradient: definition.layout?.withLandingGradient,
     useDynamicViewportHeight: definition.layout?.useDynamicViewportHeight,
     withBasePadding: definition.layout?.withBasePadding,
