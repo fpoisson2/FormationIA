@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 
 from fastapi.testclient import TestClient
 
@@ -94,6 +95,45 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
         persisted["activityGeneration"]["developerMessage"]
         == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
     )
+
+
+def test_save_activities_updates_deep_link_catalog(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    original_catalog = deepcopy(main.DEEP_LINK_ACTIVITIES)
+
+    try:
+        payload = {
+            "activities": [
+                {
+                    "id": "sequence",
+                    "label": "Sequence Activity",
+                    "path": "/sequence",
+                    "scoreMaximum": 2,
+                    "stepSequence": [
+                        {"type": "rich-content", "id": "intro"},
+                    ],
+                }
+            ]
+        }
+
+        main._save_activities_config(payload)
+
+        dynamic_entry = next(
+            (item for item in main.DEEP_LINK_ACTIVITIES if item["id"] == "sequence"),
+            None,
+        )
+        assert dynamic_entry is not None
+        assert dynamic_entry["title"] == "Sequence Activity"
+        assert dynamic_entry["route"] == "/sequence"
+        assert dynamic_entry["scoreMaximum"] == 2.0
+        assert main._DEEP_LINK_ACTIVITY_MAP["sequence"] == dynamic_entry
+    finally:
+        main.DEEP_LINK_ACTIVITIES[:] = deepcopy(original_catalog)
+        main._DEEP_LINK_ACTIVITY_MAP.clear()
+        for item in main.DEEP_LINK_ACTIVITIES:
+            main._DEEP_LINK_ACTIVITY_MAP[item["id"]] = item
 
 
 def test_admin_save_activities_rejects_invalid_step_sequence(tmp_path, monkeypatch) -> None:

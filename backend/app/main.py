@@ -902,6 +902,8 @@ def _load_activities_config() -> dict[str, Any]:
 
     activities = _normalize_activities_payload(activities, error_status=500)
 
+    _set_deep_link_catalog(activities)
+
     try:
         generation_config = ActivityGenerationConfig.model_validate(
             activity_generation_data or {}
@@ -976,6 +978,8 @@ def _save_activities_config(config: dict[str, Any]) -> None:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Impossible de sauvegarder la configuration: {str(exc)}") from exc
+
+    _set_deep_link_catalog(normalized_activities)
 
 
 def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
@@ -2158,7 +2162,7 @@ if _PROGRESS_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     _PROGRESS_COOKIE_SAMESITE = "lax"
 _PROGRESS_COOKIE_MAX_AGE = int(os.getenv("PROGRESS_COOKIE_MAX_AGE", str(365 * 24 * 60 * 60)))
 
-DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
+_DEFAULT_DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
     {
         "id": "atelier",
         "title": "Atelier comparatif IA",
@@ -2187,8 +2191,139 @@ DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
         "route": "/clarte-dabord",
         "scoreMaximum": 1.0,
     },
+    {
+        "id": "explorateur-ia",
+        "title": "L’Explorateur IA",
+        "description": "Parcourir une mini-ville interactive pour valider quatre compétences IA.",
+        "route": "/explorateur-ia",
+        "scoreMaximum": 1.0,
+    },
 ]
-_DEEP_LINK_ACTIVITY_MAP = {item["id"]: item for item in DEEP_LINK_ACTIVITIES}
+
+_DEEP_LINK_ACTIVITY_LOCK = Lock()
+DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = []
+_DEEP_LINK_ACTIVITY_MAP: dict[str, dict[str, Any]] = {}
+
+
+def _string_or_none(value: Any) -> str | None:
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed:
+            return trimmed
+    return None
+
+
+def _safe_get(mapping: Mapping[str, Any], path: Sequence[str]) -> Any:
+    current: Any = mapping
+    for key in path:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _coerce_score_maximum(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _extract_deep_link_activity(activity: Mapping[str, Any]) -> dict[str, Any] | None:
+    step_sequence = activity.get("stepSequence")
+    if not isinstance(step_sequence, list) or not step_sequence:
+        return None
+
+    enabled = activity.get("enabled")
+    if isinstance(enabled, bool) and not enabled:
+        return None
+
+    activity_id = _string_or_none(activity.get("id"))
+    if not activity_id:
+        return None
+
+    route_candidate = activity.get("path") or activity.get("route")
+    route = _string_or_none(route_candidate)
+    if not route:
+        route = f"/activites/{activity_id}"
+    elif not route.startswith(("/", "http://", "https://")):
+        route = f"/{route}"
+
+    title = (
+        _string_or_none(activity.get("label"))
+        or _string_or_none(_safe_get(activity, ("card", "title")))
+        or _string_or_none(_safe_get(activity, ("header", "title")))
+        or activity_id
+    )
+
+    description = (
+        _string_or_none(_safe_get(activity, ("card", "description")))
+        or _string_or_none(_safe_get(activity, ("header", "subtitle")))
+        or _string_or_none(activity.get("description"))
+        or "Activité FormationIA basée sur une séquence d'étapes."
+    )
+
+    score = _coerce_score_maximum(
+        activity.get("scoreMaximum") or activity.get("score_maximum")
+    )
+    if score is None:
+        score = 1.0
+
+    return {
+        "id": activity_id,
+        "title": title,
+        "description": description,
+        "route": route,
+        "scoreMaximum": score,
+    }
+
+
+def _set_deep_link_catalog(custom_activities: Sequence[Mapping[str, Any]] | None) -> None:
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    for item in _DEFAULT_DEEP_LINK_ACTIVITIES:
+        merged[item["id"]] = deepcopy(item)
+        order.append(item["id"])
+
+    if custom_activities:
+        for raw_activity in custom_activities:
+            if not isinstance(raw_activity, Mapping):
+                continue
+            extracted = _extract_deep_link_activity(raw_activity)
+            if not extracted:
+                continue
+            merged[extracted["id"]] = extracted
+            if extracted["id"] not in order:
+                order.append(extracted["id"])
+
+    updated = [merged[item_id] for item_id in order if item_id in merged]
+
+    with _DEEP_LINK_ACTIVITY_LOCK:
+        DEEP_LINK_ACTIVITIES.clear()
+        DEEP_LINK_ACTIVITIES.extend(updated)
+        _DEEP_LINK_ACTIVITY_MAP.clear()
+        for item in DEEP_LINK_ACTIVITIES:
+            _DEEP_LINK_ACTIVITY_MAP[item["id"]] = item
+
+
+def _initialize_deep_link_catalog() -> None:
+    _set_deep_link_catalog(None)
+    try:
+        config = _load_activities_config()
+    except HTTPException:
+        return
+    activities = config.get("activities")
+    if isinstance(activities, list):
+        _set_deep_link_catalog(activities)
+
+
+_initialize_deep_link_catalog()
 MAX_DEEP_LINK_SELECTION = 4
 
 app.add_middleware(
