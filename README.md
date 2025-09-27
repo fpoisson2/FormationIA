@@ -150,6 +150,20 @@ Chaque module intègre des encarts pédagogiques pour ancrer les notions clés e
 - Le backend s’appuie sur le SDK `openai>=1.99.2` (utilisé ici comme client Responses) afin d’accéder aux paramètres de verbosité et de raisonnement des modèles GPT-5.
 - L’interface adopte l’esthétique du Cégep Limoilou (palette noir/rouge, typographie Poppins, bandeaux arrondis) tout en conservant la progression pédagogique en trois pages distinctes.
 
+### Vérification manuelle — page « Liste d’activités »
+
+La connexion administrateur peut être simulée grâce au **mode test** pour confirmer l’accès au catalogue d’activités sans identifiants réels :
+
+1. Lancer le frontend localement :
+   ```bash
+   cd frontend
+   npm install
+   VITE_ADMIN_TEST_MODE=1 npm run dev -- --host
+   ```
+2. Depuis un navigateur, ouvrir `http://localhost:5173/activites` ; la redirection mène à la page de connexion.
+3. Cliquer sur **« Lancer la session de démonstration »** dans l’encart *Mode test activé*.
+4. Vérifier que la navigation retourne sur `/activites` et que la grille des activités (cartes « Activité ») s’affiche correctement.
+
 ### Vérification manuelle — carrefour NESO
 
 Après avoir appliqué les correctifs de sprites de chemin, vous pouvez confirmer visuellement que la tuile de croisement NESO (`mapTile_128.png`) est bien sélectionnée :
