@@ -92,6 +92,133 @@ DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE = "\n".join(
     ]
 )
 
+DEFAULT_LANDING_PAGE_CONFIG: dict[str, Any] = {
+    "brandTagline": "Formation IA",
+    "navActivitiesLabel": "Studio d'activités",
+    "navIntegrationsLabel": "Intégrations",
+    "navLoginLabel": "Se connecter",
+    "heroEyebrow": "Créateur d'activités",
+    "heroTitle": "Concevez des activités pédagogiques autoportantes alimentées par l'IA.",
+    "heroDescription": (
+        "Formation IA devient votre studio de conception : décrivez vos objectifs, laissez l'IA générer le parcours, "
+        "publiez-le en Deep Link dans votre LMS et suivez l'engagement sans friction."
+    ),
+    "heroPrimaryCtaLabel": "Accéder au studio",
+    "heroSecondaryCtaLabel": "Déployer via LTI Deep Link",
+    "heroHighlights": [
+        {
+            "title": "Génération assistée",
+            "description": "Construisez une activité complète en quelques minutes : structure, consignes et rétroactions sont proposés automatiquement.",
+        },
+        {
+            "title": "Diffusion autoportante",
+            "description": "Chaque activité inclut les supports nécessaires pour être utilisée en autonomie ou intégrée à distance dans vos cours.",
+        },
+    ],
+    "heroBadgeLabel": "Nouveauté",
+    "heroBadgeTitle": "Génération IA + Deep Linking LTI",
+    "heroBadgeDescription": "Composez et distribuez vos activités autoportantes dans votre LMS en un clic.",
+    "heroIdealForTitle": "Pensé pour",
+    "heroIdealForItems": [
+        "Concepteurs pédagogiques et conseillers TIC",
+        "Responsables de formation continue",
+        "Équipes numériques des établissements",
+    ],
+    "experiencesEyebrow": "Canevas intelligents",
+    "experiencesTitle": "Des modèles autoportants qui transforment une intention en parcours complet.",
+    "experiencesDescription": (
+        "Chaque activité générée fournit un storyboard, des consignes adaptées et des livrables exportables, "
+        "sans dépendre d'un accompagnement manuel."
+    ),
+    "experiencesCards": [
+        {
+            "title": "Storyboard assisté",
+            "description": "L'IA suggère une progression alignée sur vos objectifs avec des moments d'interaction ciblés.",
+        },
+        {
+            "title": "Ressources intégrées",
+            "description": "Textes, rétroactions et exemples contextualisés sont préremplis et personnalisables.",
+        },
+        {
+            "title": "Suivi prêt à l'emploi",
+            "description": "Collectez les traces d'apprentissage et exportez les livrables vers vos outils institutionnels.",
+        },
+    ],
+    "experiencesCardCtaLabel": "Publier immédiatement",
+    "integrationsEyebrow": "Intégrations LTI",
+    "integrationsTitle": "Connectez vos activités autoportantes à n'importe quel environnement d'apprentissage.",
+    "integrationsDescription": (
+        "Le Deep Linking LTI diffuse vos créations vers le bon groupe tandis que les webhooks alimentent vos tableaux de bord."
+    ),
+    "integrationHighlights": [
+        {
+            "title": "Deep Link dynamique",
+            "description": "Insérez l'activité générée directement dans un cours via LTI 1.3, sans double saisie.",
+        },
+        {
+            "title": "Rôles synchronisés",
+            "description": "Les permissions enseignant et étudiant sont gérées automatiquement depuis votre LMS.",
+        },
+        {
+            "title": "Suivi consolidé",
+            "description": "Retrouvez l'engagement et les livrables dans vos outils analytiques existants.",
+        },
+    ],
+    "onboardingTitle": "Comment déployer ?",
+    "onboardingSteps": [
+        {
+            "title": "Configurer le studio",
+            "description": "Ajoutez le connecteur LTI et partagez la clé publique fournie par Formation IA.",
+        },
+        {
+            "title": "Générer l'activité",
+            "description": "Décrivez objectifs et livrables : l'IA compose un parcours autoportant prêt à l'emploi.",
+        },
+        {
+            "title": "Partager en Deep Link",
+            "description": "Sélectionnez l'activité générée et insérez-la dans vos cours via le flux LTI.",
+        },
+    ],
+    "onboardingCtaLabel": "Activer le déploiement LTI",
+    "closingTitle": "Passez de l'idée à l'activité livrable en quelques minutes.",
+    "closingDescription": (
+        "Nos spécialistes vous accompagnent pour configurer le studio, cadrer les usages responsables de l'IA "
+        "et déployer vos activités via LTI Deep Linking."
+    ),
+    "closingPrimaryCtaLabel": "Lancer le studio",
+    "closingSecondaryCtaLabel": "Planifier une démonstration",
+    "footerNote": "Formation IA – Studio autoportant du Cégep Limoilou.",
+    "footerLinks": [
+        {"label": "Studio", "href": "/activites"},
+        {"label": "Connexion", "href": "/connexion"},
+        {"label": "LTI Deep Link", "href": "#integrations"},
+    ],
+}
+
+
+def _default_hero_highlights() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_LANDING_PAGE_CONFIG["heroHighlights"]]
+
+
+def _default_experiences_cards() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_LANDING_PAGE_CONFIG["experiencesCards"]]
+
+
+def _default_integration_highlights() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_LANDING_PAGE_CONFIG["integrationHighlights"]]
+
+
+def _default_onboarding_steps() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_LANDING_PAGE_CONFIG["onboardingSteps"]]
+
+
+def _default_hero_ideal_for_items() -> list[str]:
+    return list(DEFAULT_LANDING_PAGE_CONFIG["heroIdealForItems"])
+
+
+def _default_footer_links() -> list[dict[str, str]]:
+    return [dict(item) for item in DEFAULT_LANDING_PAGE_CONFIG["footerLinks"]]
+
 MISSIONS_PATH = Path(__file__).resolve().parent.parent / "missions.json"
 
 
@@ -134,6 +261,78 @@ def _resolve_activities_config_path() -> Path:
 ACTIVITIES_CONFIG_PATH = _resolve_activities_config_path()
 
 _ACTIVITY_CONFIG_LOCK = Lock()
+
+
+def _resolve_landing_page_config_path() -> Path:
+    raw_path = os.getenv("LANDING_PAGE_CONFIG_PATH")
+    if raw_path:
+        candidate = Path(raw_path).expanduser()
+        treat_as_dir = raw_path.endswith(("/", "\\")) or (
+            candidate.exists() and candidate.is_dir()
+        )
+        if treat_as_dir:
+            candidate.mkdir(parents=True, exist_ok=True)
+            target = candidate / "landing_page_config.json"
+        else:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            target = candidate
+        return target.resolve()
+
+    storage_dir = get_admin_storage_directory()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    return (storage_dir / "landing_page_config.json").resolve()
+
+
+LANDING_PAGE_CONFIG_PATH = _resolve_landing_page_config_path()
+LANDING_PAGE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+_LANDING_PAGE_CONFIG_LOCK = Lock()
+
+
+def _load_landing_page_config() -> dict[str, Any]:
+    if not LANDING_PAGE_CONFIG_PATH.exists():
+        return LandingPageConfig().model_dump(by_alias=True, exclude_none=True)
+
+    try:
+        with LANDING_PAGE_CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            raw_data = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="landing_page_config.json contient un JSON invalide.",
+        ) from exc
+
+    try:
+        config = LandingPageConfig.model_validate(raw_data or {})
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="landing_page_config.json contient une configuration invalide.",
+        ) from exc
+
+    return config.model_dump(by_alias=True, exclude_none=True)
+
+
+def _save_landing_page_config(config: Mapping[str, Any]) -> None:
+    try:
+        validated = LandingPageConfig.model_validate(config)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="landingPage doit contenir une configuration valide.",
+        ) from exc
+
+    payload = validated.model_dump(by_alias=True, exclude_none=True)
+
+    with _LANDING_PAGE_CONFIG_LOCK:
+        try:
+            with LANDING_PAGE_CONFIG_PATH.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+        except Exception as exc:  # pragma: no cover - IO errors
+            raise HTTPException(
+                status_code=500,
+                detail=f"Impossible de sauvegarder la configuration de la page d'accueil: {str(exc)}",
+            ) from exc
 
 ADMIN_SESSION_COOKIE_NAME = os.getenv("ADMIN_SESSION_COOKIE_NAME", "formationia_admin_session")
 _ADMIN_SESSION_TTL = max(int(os.getenv("ADMIN_SESSION_TTL", "3600")), 60)
@@ -1569,6 +1768,247 @@ class ActivityProgressRequest(BaseModel):
     completed: bool = Field(default=True)
 
 
+class LandingPageHighlight(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(..., min_length=1, max_length=160)
+    description: str = Field(..., min_length=1, max_length=800)
+
+
+class LandingPageStep(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(..., min_length=1, max_length=160)
+    description: str = Field(..., min_length=1, max_length=800)
+
+
+class LandingPageLink(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    label: str = Field(..., min_length=1, max_length=160)
+    href: str = Field(..., min_length=1, max_length=400)
+
+
+class LandingPageConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    brand_tagline: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["brandTagline"],
+        alias="brandTagline",
+        min_length=1,
+        max_length=160,
+    )
+    nav_activities_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["navActivitiesLabel"],
+        alias="navActivitiesLabel",
+        min_length=1,
+        max_length=160,
+    )
+    nav_integrations_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["navIntegrationsLabel"],
+        alias="navIntegrationsLabel",
+        min_length=1,
+        max_length=160,
+    )
+    nav_login_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["navLoginLabel"],
+        alias="navLoginLabel",
+        min_length=1,
+        max_length=160,
+    )
+    hero_eyebrow: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroEyebrow"],
+        alias="heroEyebrow",
+        min_length=1,
+        max_length=160,
+    )
+    hero_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroTitle"],
+        alias="heroTitle",
+        min_length=1,
+        max_length=200,
+    )
+    hero_description: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroDescription"],
+        alias="heroDescription",
+        min_length=1,
+        max_length=800,
+    )
+    hero_primary_cta_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroPrimaryCtaLabel"],
+        alias="heroPrimaryCtaLabel",
+        min_length=1,
+        max_length=120,
+    )
+    hero_secondary_cta_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroSecondaryCtaLabel"],
+        alias="heroSecondaryCtaLabel",
+        min_length=1,
+        max_length=160,
+    )
+    hero_highlights: list[LandingPageHighlight] = Field(
+        default_factory=_default_hero_highlights,
+        alias="heroHighlights",
+        min_length=1,
+        max_length=6,
+    )
+    hero_badge_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroBadgeLabel"],
+        alias="heroBadgeLabel",
+        min_length=1,
+        max_length=80,
+    )
+    hero_badge_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroBadgeTitle"],
+        alias="heroBadgeTitle",
+        min_length=1,
+        max_length=160,
+    )
+    hero_badge_description: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroBadgeDescription"],
+        alias="heroBadgeDescription",
+        min_length=1,
+        max_length=400,
+    )
+    hero_ideal_for_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["heroIdealForTitle"],
+        alias="heroIdealForTitle",
+        min_length=1,
+        max_length=120,
+    )
+    hero_ideal_for_items: list[str] = Field(
+        default_factory=_default_hero_ideal_for_items,
+        alias="heroIdealForItems",
+        min_length=1,
+        max_length=6,
+    )
+    experiences_eyebrow: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["experiencesEyebrow"],
+        alias="experiencesEyebrow",
+        min_length=1,
+        max_length=160,
+    )
+    experiences_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["experiencesTitle"],
+        alias="experiencesTitle",
+        min_length=1,
+        max_length=200,
+    )
+    experiences_description: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["experiencesDescription"],
+        alias="experiencesDescription",
+        min_length=1,
+        max_length=800,
+    )
+    experiences_cards: list[LandingPageHighlight] = Field(
+        default_factory=_default_experiences_cards,
+        alias="experiencesCards",
+        min_length=1,
+        max_length=6,
+    )
+    experiences_card_cta_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["experiencesCardCtaLabel"],
+        alias="experiencesCardCtaLabel",
+        min_length=1,
+        max_length=160,
+    )
+    integrations_eyebrow: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["integrationsEyebrow"],
+        alias="integrationsEyebrow",
+        min_length=1,
+        max_length=160,
+    )
+    integrations_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["integrationsTitle"],
+        alias="integrationsTitle",
+        min_length=1,
+        max_length=200,
+    )
+    integrations_description: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["integrationsDescription"],
+        alias="integrationsDescription",
+        min_length=1,
+        max_length=800,
+    )
+    integration_highlights: list[LandingPageHighlight] = Field(
+        default_factory=_default_integration_highlights,
+        alias="integrationHighlights",
+        min_length=1,
+        max_length=6,
+    )
+    onboarding_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["onboardingTitle"],
+        alias="onboardingTitle",
+        min_length=1,
+        max_length=160,
+    )
+    onboarding_steps: list[LandingPageStep] = Field(
+        default_factory=_default_onboarding_steps,
+        alias="onboardingSteps",
+        min_length=1,
+        max_length=6,
+    )
+    onboarding_cta_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["onboardingCtaLabel"],
+        alias="onboardingCtaLabel",
+        min_length=1,
+        max_length=160,
+    )
+    closing_title: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["closingTitle"],
+        alias="closingTitle",
+        min_length=1,
+        max_length=200,
+    )
+    closing_description: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["closingDescription"],
+        alias="closingDescription",
+        min_length=1,
+        max_length=800,
+    )
+    closing_primary_cta_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["closingPrimaryCtaLabel"],
+        alias="closingPrimaryCtaLabel",
+        min_length=1,
+        max_length=160,
+    )
+    closing_secondary_cta_label: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["closingSecondaryCtaLabel"],
+        alias="closingSecondaryCtaLabel",
+        min_length=1,
+        max_length=160,
+    )
+    footer_note: str = Field(
+        default=DEFAULT_LANDING_PAGE_CONFIG["footerNote"],
+        alias="footerNote",
+        min_length=1,
+        max_length=240,
+    )
+    footer_links: list[LandingPageLink] = Field(
+        default_factory=_default_footer_links,
+        alias="footerLinks",
+        min_length=1,
+        max_length=6,
+    )
+
+    @model_validator(mode="after")
+    def _normalize_lists(self) -> "LandingPageConfig":
+        normalized_ideal_for: list[str] = []
+        for item in self.hero_ideal_for_items:
+            if isinstance(item, str):
+                trimmed = item.strip()
+                if trimmed and trimmed not in normalized_ideal_for:
+                    normalized_ideal_for.append(trimmed)
+        if not normalized_ideal_for:
+            normalized_ideal_for = _default_hero_ideal_for_items()
+        object.__setattr__(self, "hero_ideal_for_items", normalized_ideal_for)
+        return self
+
+
+class LandingPageConfigRequest(LandingPageConfig):
+    pass
+
+
 class ActivitySelectorHeader(BaseModel):
     eyebrow: str | None = None
     title: str | None = None
@@ -2788,6 +3228,13 @@ def get_activities_config() -> dict[str, Any]:
     return _load_activities_config()
 
 
+@app.get("/api/landing-page")
+@app.get("/landing-page")
+def get_landing_page_config_endpoint() -> dict[str, Any]:
+    """Endpoint public renvoyant la configuration de la page d'accueil."""
+    return _load_landing_page_config()
+
+
 @admin_router.get("/activities")
 def admin_get_activities_config(
     _: LocalUser = Depends(_require_admin_user),
@@ -2806,6 +3253,22 @@ def admin_save_activities_config(
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
+@admin_router.get("/landing-page")
+def admin_get_landing_page_config_endpoint(
+    _: LocalUser = Depends(_require_admin_user),
+) -> dict[str, Any]:
+    """Récupère la configuration de la page d'accueil."""
+    return _load_landing_page_config()
+
+
+@admin_router.post("/landing-page")
+def admin_save_landing_page_config_endpoint(
+    payload: LandingPageConfigRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> dict[str, Any]:
+    """Sauvegarde la configuration de la page d'accueil."""
+    _save_landing_page_config(payload.model_dump(by_alias=True, exclude_none=True))
+    return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
 def _run_activity_generation_job(

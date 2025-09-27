@@ -384,6 +384,62 @@ export interface SaveActivityConfigResponse {
   message: string;
 }
 
+export interface LandingPageHighlight {
+  title: string;
+  description: string;
+}
+
+export interface LandingPageStep {
+  title: string;
+  description: string;
+}
+
+export interface LandingPageLink {
+  label: string;
+  href: string;
+}
+
+export interface LandingPageContent {
+  brandTagline: string;
+  navActivitiesLabel: string;
+  navIntegrationsLabel: string;
+  navLoginLabel: string;
+  heroEyebrow: string;
+  heroTitle: string;
+  heroDescription: string;
+  heroPrimaryCtaLabel: string;
+  heroSecondaryCtaLabel: string;
+  heroHighlights: LandingPageHighlight[];
+  heroBadgeLabel: string;
+  heroBadgeTitle: string;
+  heroBadgeDescription: string;
+  heroIdealForTitle: string;
+  heroIdealForItems: string[];
+  experiencesEyebrow: string;
+  experiencesTitle: string;
+  experiencesDescription: string;
+  experiencesCards: LandingPageHighlight[];
+  experiencesCardCtaLabel: string;
+  integrationsEyebrow: string;
+  integrationsTitle: string;
+  integrationsDescription: string;
+  integrationHighlights: LandingPageHighlight[];
+  onboardingTitle: string;
+  onboardingSteps: LandingPageStep[];
+  onboardingCtaLabel: string;
+  closingTitle: string;
+  closingDescription: string;
+  closingPrimaryCtaLabel: string;
+  closingSecondaryCtaLabel: string;
+  footerNote: string;
+  footerLinks: LandingPageLink[];
+}
+
+export interface SaveLandingPageConfigResponse {
+  ok: boolean;
+  message: string;
+}
+
 export interface ActivityGenerationDetailsPayload {
   theme?: string;
   audience?: string;
@@ -429,6 +485,11 @@ export interface ActivityGenerationJobOptions {
 export const activities = {
   getConfig: async (): Promise<ActivityConfigResponse> =>
     fetchJson<ActivityConfigResponse>(`${API_BASE_URL}/activities-config`),
+};
+
+export const landingPage = {
+  get: async (): Promise<LandingPageContent> =>
+    fetchJson<LandingPageContent>(`${API_BASE_URL}/landing-page`),
 };
 
 export const admin = {
@@ -484,6 +545,30 @@ export const admin = {
         withAdminCredentials(
           {
             signal: options?.signal,
+          },
+          token
+        )
+      ),
+  },
+  landingPage: {
+    get: async (token?: string | null): Promise<LandingPageContent> =>
+      fetchJson<LandingPageContent>(
+        `${API_BASE_URL}/admin/landing-page`,
+        withAdminCredentials({}, token)
+      ),
+    save: async (
+      payload: LandingPageContent,
+      token?: string | null
+    ): Promise<SaveLandingPageConfigResponse> =>
+      fetchJson<SaveLandingPageConfigResponse>(
+        `${API_BASE_URL}/admin/landing-page`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
           },
           token
         )
