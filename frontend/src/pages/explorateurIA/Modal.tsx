@@ -31,7 +31,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-xl"
+        className="relative flex w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] md:max-h-[calc(100dvh-4rem)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-5 py-3">
@@ -44,7 +44,9 @@ export function Modal({
             ✕
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-5">{children}</div>
+        </div>
       </div>
     </div>
   );
