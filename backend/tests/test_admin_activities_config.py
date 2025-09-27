@@ -78,6 +78,11 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
                 public_payload["activityGeneration"]["developerMessage"]
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
+
+            activity_file = main._activity_file_path("sequence")
+            assert activity_file.exists(), "Le fichier JSON individuel doit être créé"
+            stored_activity = json.loads(activity_file.read_text(encoding="utf-8"))
+            assert stored_activity["stepSequence"] == payload["activities"][0]["stepSequence"]
     finally:
         app.dependency_overrides.clear()
 
@@ -96,6 +101,89 @@ def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None
         == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
     )
 
+
+def test_admin_export_activity_returns_complete_json(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    payload = {
+        "activities": [
+            {
+                "id": "sequence",
+                "label": "Sequence Activity",
+                "stepSequence": [
+                    {"type": "rich-content", "id": "intro", "config": {"body": "Texte"}},
+                    {"type": "form", "id": "quiz", "config": {"questions": []}},
+                ],
+            }
+        ]
+    }
+
+    try:
+        with TestClient(app) as client:
+            save_response = client.post("/api/admin/activities", json=payload)
+            assert save_response.status_code == 200, save_response.text
+
+            export_response = client.get("/api/admin/activities/sequence")
+            assert export_response.status_code == 200, export_response.text
+            exported = export_response.json()
+            assert exported["id"] == "sequence"
+            assert exported["stepSequence"] == payload["activities"][0]["stepSequence"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_admin_import_activity_replaces_existing(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    original_activity = {
+        "id": "sequence",
+        "label": "Sequence Activity",
+        "stepSequence": [{"type": "rich-content", "id": "intro"}],
+    }
+
+    updated_activity = {
+        "id": "sequence",
+        "label": "Sequence Activity",
+        "path": "/sequence",
+        "stepSequence": [
+            {"type": "rich-content", "id": "intro", "config": {"body": "Texte"}},
+            {"type": "form", "id": "quiz", "config": {"questions": ["Q1"]}},
+        ],
+    }
+
+    try:
+        with TestClient(app) as client:
+            initial_response = client.post("/api/admin/activities", json={"activities": [original_activity]})
+            assert initial_response.status_code == 200, initial_response.text
+
+            import_response = client.post(
+                "/api/admin/activities/import",
+                json={"activity": updated_activity},
+            )
+            assert import_response.status_code == 200, import_response.text
+            import_payload = import_response.json()
+            assert import_payload["replaced"] is True
+            assert import_payload["activity"]["stepSequence"] == updated_activity["stepSequence"]
+
+            admin_response = client.get("/api/admin/activities")
+            assert admin_response.status_code == 200
+            admin_payload = admin_response.json()
+            assert admin_payload["activities"][0]["stepSequence"] == updated_activity["stepSequence"]
+
+            activity_file = main._activity_file_path("sequence")
+            assert activity_file.exists()
+            stored = json.loads(activity_file.read_text(encoding="utf-8"))
+            assert stored["stepSequence"] == updated_activity["stepSequence"]
+    finally:
+        app.dependency_overrides.clear()
 
 def test_save_activities_updates_deep_link_catalog(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "activities_config.json"
