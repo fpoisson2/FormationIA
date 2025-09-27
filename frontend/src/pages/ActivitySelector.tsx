@@ -2088,23 +2088,13 @@ function ActivitySelector(): JSX.Element {
             </ul>
             {isEditMode && activity.component === StepSequenceActivity ? (
               <div className="rounded-3xl border border-orange-200 bg-orange-50/70 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-orange-700">
-                      Séquence multi-étapes
-                    </h3>
-                    <p className="text-xs text-orange-800">
-                      Configurez les étapes et le contenu de cette activité dans une fenêtre dédiée.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setStepSequenceEditorActivityId(activity.id)}
-                    className="inline-flex items-center justify-center rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-sm font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100"
-                  >
-                    Configurer
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setStepSequenceEditorActivityId(activity.id)}
+                  className="inline-flex w-full items-center justify-center rounded-xl border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100 sm:w-auto"
+                >
+                  Configurer
+                </button>
               </div>
             ) : null}
             <div
