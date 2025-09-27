@@ -2100,9 +2100,9 @@ function ActivitySelector(): JSX.Element {
                   <button
                     type="button"
                     onClick={() => setStepSequenceEditorActivityId(activity.id)}
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100"
+                    className="inline-flex items-center justify-center rounded-lg border border-orange-300 bg-white px-3 py-1.5 text-sm font-semibold text-orange-700 transition hover:border-orange-400 hover:bg-orange-100"
                   >
-                    Configurer la séquence
+                    Configurer
                   </button>
                 </div>
               </div>
@@ -2200,7 +2200,7 @@ function ActivitySelector(): JSX.Element {
             : "Configurer la séquence StepSequence"
         }
         description="Ajustez les étapes, leur ordre et leur contenu. Les modifications sont prises en compte lorsque vous enregistrez la configuration des activités."
-        size="lg"
+        size="md"
         footer={
           <button
             type="button"
