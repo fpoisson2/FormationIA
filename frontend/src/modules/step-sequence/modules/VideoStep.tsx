@@ -54,15 +54,9 @@ type HlsModule = {
 
 type HlsModuleLoader = () => Promise<HlsModule>;
 
-const HLS_DIST_GLOB = import.meta.glob<HlsModule>([
-  "/node_modules/hls.js/dist/hls.mjs",
-  "/node_modules/hls.js/dist/hls.min.mjs",
-  "/node_modules/hls.js/dist/hls.light.mjs",
-]);
-
 const HLS_MODULE_LOADERS: HlsModuleLoader[] = [
-  ...Object.values(HLS_DIST_GLOB),
   () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>,
+  () => import("hls.js/dist/hls.light.mjs") as Promise<HlsModule>,
   () => import(/* @vite-ignore */ "hls.js") as Promise<HlsModule>,
 ];
 
