@@ -479,21 +479,39 @@ function LandingPage(): JSX.Element {
       <div className="mx-auto flex max-w-6xl flex-col gap-16">
         <header className="rounded-3xl border border-white/60 bg-white/80 p-6 shadow-sm backdrop-blur">
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <Link to="/" className="flex items-center gap-3">
-              <img
-                src={logoPrincipal}
-                alt={`Logo ${displayContent.brandTagline}`}
-                className="h-10 w-auto md:h-12"
-              />
-              <EditableText
-                value={displayContent.brandTagline}
-                onChange={handleStringChange("brandTagline")}
-                as="span"
-                className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/80"
-                placeholder="Nom de la plateforme"
-                inputClassName="w-auto min-w-[160px]"
-              />
-            </Link>
+            {isEditMode ? (
+              <div className="flex items-center gap-3">
+                <img
+                  src={logoPrincipal}
+                  alt={`Logo ${displayContent.brandTagline}`}
+                  className="h-10 w-auto md:h-12"
+                />
+                <EditableText
+                  value={displayContent.brandTagline}
+                  onChange={handleStringChange("brandTagline")}
+                  as="span"
+                  className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/80"
+                  placeholder="Nom de la plateforme"
+                  inputClassName="w-auto min-w-[160px]"
+                />
+              </div>
+            ) : (
+              <Link to="/" className="flex items-center gap-3">
+                <img
+                  src={logoPrincipal}
+                  alt={`Logo ${displayContent.brandTagline}`}
+                  className="h-10 w-auto md:h-12"
+                />
+                <EditableText
+                  value={displayContent.brandTagline}
+                  onChange={handleStringChange("brandTagline")}
+                  as="span"
+                  className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/80"
+                  placeholder="Nom de la plateforme"
+                  inputClassName="w-auto min-w-[160px]"
+                />
+              </Link>
+            )}
             <div className="flex flex-col gap-3 md:items-end">
               <nav className="flex flex-wrap items-center gap-3 text-sm font-semibold text-[color:var(--brand-charcoal)]/80 md:justify-end">
                 {isEditMode ? (
