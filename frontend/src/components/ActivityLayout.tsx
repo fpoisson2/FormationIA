@@ -146,36 +146,40 @@ function ActivityLayout({
             <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
               <Link
                 to={isAuthenticated ? "/activites" : "/"}
-                className="flex items-center gap-3"
+                className="flex w-full flex-wrap items-center gap-3 md:w-auto"
               >
-                <img src={logoPrincipal} alt="Cégep Limoilou" className="h-12 w-auto md:h-16" />
+                <img
+                  src={logoPrincipal}
+                  alt="Cégep Limoilou"
+                  className="h-12 w-auto flex-shrink-0 md:h-16"
+                />
                 {isEditMode && onHeaderEdit ? (
                   <input
                     type="text"
                     value={eyebrow}
                     onChange={(e) => onHeaderEdit('eyebrow', e.target.value)}
-                    className="text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70 bg-transparent border-b border-orange-300 focus:border-orange-500 focus:outline-none min-w-[120px]"
+                    className="w-full min-w-0 flex-1 text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70 bg-transparent border-b border-orange-300 focus:border-orange-500 focus:outline-none md:w-auto"
                     placeholder="Eyebrow"
                   />
                 ) : (
-                  <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70">
+                  <span className="block w-full min-w-0 text-xs uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/70 md:inline-block md:w-auto">
                     {eyebrow}
                   </span>
                 )}
               </Link>
               {(badge || actions) && (
-                <div className="flex flex-col items-center gap-2 md:flex-row md:items-center">
+                <div className="flex w-full flex-col items-center gap-2 md:w-auto md:flex-row md:items-center">
                   {badge ? (
                     isEditMode && onHeaderEdit ? (
                       <input
                         type="text"
                         value={badge}
                         onChange={(e) => onHeaderEdit('badge', e.target.value)}
-                        className="brand-chip bg-orange-50 border border-orange-300 focus:border-orange-500 focus:outline-none text-orange-700 min-w-[100px]"
+                        className="brand-chip w-full min-w-0 border border-orange-300 bg-orange-50 text-orange-700 focus:border-orange-500 focus:outline-none md:w-auto"
                         placeholder="Badge"
                       />
                     ) : (
-                      <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+                      <span className="brand-chip w-full justify-center text-[color:var(--brand-red)] bg-[color:var(--brand-red)]/10 md:w-auto md:justify-start">
                         {badge}
                       </span>
                     )
