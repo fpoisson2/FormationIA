@@ -2028,28 +2028,28 @@ function ActivitySelector(): JSX.Element {
               {isEditMode && (
                 <>
                 <div className="absolute left-4 top-4 hidden flex-col gap-1 sm:flex">
-                  <div className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs text-orange-600 shadow-sm">
+                  <div className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs font-semibold leading-none text-orange-600 shadow-sm">
                     ⋮⋮
                   </div>
                   <button
                     onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
                     disabled={index === 0}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                    className="flex h-6 w-6 items-center justify-center rounded border border-gray-200 bg-white text-xs font-semibold leading-none text-gray-600 shadow-sm transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-300 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:opacity-70 disabled:shadow-none"
                   >
-                    ↑
+                    <span aria-hidden="true">↑</span>
                   </button>
                   <button
                     onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
                     disabled={index === activitiesToDisplay.length - 1}
-                    className="flex h-6 w-6 items-center justify-center rounded bg-white text-xs text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                    className="flex h-6 w-6 items-center justify-center rounded border border-gray-200 bg-white text-xs font-semibold leading-none text-gray-600 shadow-sm transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-300 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:opacity-70 disabled:shadow-none"
                   >
-                    ↓
+                    <span aria-hidden="true">↓</span>
                   </button>
                 </div>
                 <div className="w-full rounded-2xl bg-white/80 p-3 text-xs text-gray-600 shadow-sm sm:hidden">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs text-orange-600 shadow-sm">
+                      <span className="flex h-6 w-6 items-center justify-center rounded bg-orange-100 text-xs font-semibold leading-none text-orange-600 shadow-sm">
                         ⋮⋮
                       </span>
                       <span className="font-medium">Réorganiser</span>
@@ -2058,18 +2058,18 @@ function ActivitySelector(): JSX.Element {
                       <button
                         onClick={() => handleMoveActivity(index, Math.max(0, index - 1))}
                         disabled={index === 0}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white text-base font-semibold leading-none text-gray-600 shadow-sm transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-300 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:opacity-70 disabled:shadow-none"
                         aria-label="Monter l’activité"
                       >
-                        ↑
+                        <span aria-hidden="true">↑</span>
                       </button>
                       <button
                         onClick={() => handleMoveActivity(index, Math.min(activitiesToDisplay.length - 1, index + 1))}
                         disabled={index === activitiesToDisplay.length - 1}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white text-base font-semibold leading-none text-gray-600 shadow-sm transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-300 disabled:cursor-not-allowed disabled:border-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:opacity-70 disabled:shadow-none"
                         aria-label="Descendre l’activité"
                       >
-                        ↓
+                        <span aria-hidden="true">↓</span>
                       </button>
                     </div>
                   </div>
@@ -2211,18 +2211,18 @@ function ActivitySelector(): JSX.Element {
               {activity.card.highlights.map((item, highlightIndex) => (
                 <li
                   key={`${activity.id}-highlight-${highlightIndex}`}
-                  className="flex items-center gap-3"
+                  className="flex items-start gap-3"
                 >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[color:var(--brand-red)]/10 text-base font-semibold leading-none text-[color:var(--brand-red)]">
                     +
                   </span>
                   {isEditMode ? (
-                    <div className="flex flex-1 items-center gap-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
                       <input
                         type="text"
                         value={item}
                         onChange={(e) => handleUpdateHighlight(activity.id, highlightIndex, e.target.value)}
-                        className="flex-1 border-b border-gray-200 bg-transparent text-sm focus:border-orange-400 focus:outline-none"
+                        className="flex-1 min-w-0 border-b border-gray-200 bg-transparent text-sm focus:border-orange-400 focus:outline-none"
                       />
                       <button
                         onClick={() => handleRemoveHighlight(activity.id, highlightIndex)}
@@ -2232,13 +2232,13 @@ function ActivitySelector(): JSX.Element {
                       </button>
                     </div>
                   ) : (
-                    <span>{item}</span>
+                    <span className="min-w-0 flex-1 break-words leading-relaxed">{item}</span>
                   )}
                 </li>
               ))}
               {isEditMode ? (
                 <li className="flex items-center gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-base font-semibold leading-none text-gray-400">
                     +
                   </span>
                   <button
