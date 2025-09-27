@@ -1793,7 +1793,15 @@ function ActivitySelector(): JSX.Element {
             Annuler
           </button>
         </>
-      ) : null}
+      ) : (
+        <button
+          onClick={() => setEditMode(true)}
+          disabled={isLoading}
+          className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isLoading ? "Chargement..." : "Mode édition"}
+        </button>
+      )}
       <Link
         to="/admin"
         className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
@@ -2336,17 +2344,6 @@ function ActivitySelector(): JSX.Element {
         ) : null}
       </div>
       </ActivityLayout>
-      {canShowAdminButton && !isEditMode ? (
-        <div className="flex justify-center px-4 pb-10 sm:px-6">
-          <button
-            onClick={() => setEditMode(true)}
-            disabled={isLoading}
-            className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-5 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isLoading ? "Chargement..." : "Mode édition"}
-          </button>
-        </div>
-      ) : null}
       <AdminModal
         open={Boolean(stepSequenceEditorActivityId)}
         onClose={handleCloseStepSequenceEditor}
