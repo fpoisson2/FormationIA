@@ -103,6 +103,14 @@ export function StepSequenceRenderer({
     [currentIndex, onStepConfigChange, steps]
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentIndex]);
+
   const goToStep = useCallback(
     (target: number | string) => {
       if (steps.length === 0) {
