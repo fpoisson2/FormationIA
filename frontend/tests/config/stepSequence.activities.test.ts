@@ -54,9 +54,14 @@ describe("Step sequence activities", () => {
     const definition = resolveActivityDefinition(entry);
 
     expect(definition.stepSequence).toEqual([
-      { id: "intro", component: "introduction", config: { order: 0 } },
-      { id: "practice", component: "practice", config: { order: 1, score: 5 } },
-      { id: "bonus", component: "bonus" },
+      { id: "intro", component: "introduction", type: "introduction", config: { order: 0 } },
+      {
+        id: "practice",
+        component: "practice",
+        type: "practice",
+        config: { order: 1, score: 5 },
+      },
+      { id: "bonus", component: "bonus", type: "bonus" },
     ]);
   });
 
@@ -73,7 +78,7 @@ describe("Step sequence activities", () => {
     const definition = resolveActivityDefinition(entry);
 
     expect(definition.stepSequence).toEqual([
-      { id: "practice", component: "practice", config: { order: 1 } },
+      { id: "practice", component: "practice", type: "practice", config: { order: 1 } },
     ]);
   });
 
@@ -94,9 +99,57 @@ describe("Step sequence activities", () => {
 
     const expectedSteps = updatedSteps.map((step) => ({
       ...step,
+      type: step.component ?? step.id,
       __replaceSequence: true,
     }));
 
     expect(serialized.overrides?.stepSequence).toEqual(expectedSteps);
+  });
+
+  it("persists clarity module visibility toggles", () => {
+    const clarityDefinition = resolveActivityDefinition({ id: "clarity" });
+
+    expect(clarityDefinition.stepSequence?.length).toBeGreaterThan(0);
+
+    const updatedSteps = clarityDefinition.stepSequence!.map((step) => {
+      if (step.id === "clarity:map") {
+        const config = {
+          ...((step as { config?: Record<string, unknown> }).config ?? {}),
+          showPlanPlaceholder: false,
+        };
+        return { ...step, config } satisfies StepDefinition;
+      }
+
+      if (step.id === "clarity:instruction") {
+        const config = {
+          ...((step as { config?: Record<string, unknown> }).config ?? {}),
+          helperTextEnabled: false,
+        };
+        return { ...step, config } satisfies StepDefinition;
+      }
+
+      return step;
+    });
+
+    const updatedDefinition: ActivityDefinition = {
+      ...clarityDefinition,
+      stepSequence: updatedSteps,
+    };
+
+    const serialized = serializeActivityDefinition(updatedDefinition);
+    expect(serialized.overrides?.stepSequence).toBeDefined();
+
+    const rehydrated = resolveActivityDefinition(serialized);
+    const mapStep = rehydrated.stepSequence?.find((step) => step.id === "clarity:map") as
+      | { config?: Record<string, unknown> }
+      | undefined;
+    const promptStep = rehydrated.stepSequence?.find((step) => step.id === "clarity:instruction") as
+      | { config?: Record<string, unknown> }
+      | undefined;
+
+    expect(mapStep?.config).toBeDefined();
+    expect(promptStep?.config).toBeDefined();
+    expect((mapStep?.config as { showPlanPlaceholder?: boolean })?.showPlanPlaceholder).toBe(false);
+    expect((promptStep?.config as { helperTextEnabled?: boolean })?.helperTextEnabled).toBe(false);
   });
 });
