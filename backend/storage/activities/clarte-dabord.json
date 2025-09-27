@@ -1,0 +1,143 @@
+{
+  "id": "clarte-dabord",
+  "componentKey": "clarte-dabord",
+  "path": "/clarte-dabord",
+  "completionId": "clarte-dabord",
+  "enabled": true,
+  "header": {
+    "eyebrow": "Clarté d'abord !",
+    "title": "Identifie ce qu'il fallait dire dès la première consigne",
+    "subtitle": "Tu joues l'IA : l'usager précise son besoin manche après manche. Observe ce qui manquait au brief initial et retiens la checklist idéale.",
+    "badge": "Trois manches guidées"
+  },
+  "layout": {
+    "contentAs": "div",
+    "contentClassName": "gap-10"
+  },
+  "card": {
+    "title": "Clarté d’abord !",
+    "description": "Objectif : mesurer l’impact d’un brief incomplet et révéler la checklist idéale.",
+    "highlights": [
+      "Deux missions thématiques en trois manches",
+      "Champs guidés avec validations pédagogiques",
+      "Révélation finale et export JSON du menu"
+    ],
+    "cta": {
+      "label": "Lancer Clarté d’abord !",
+      "to": "/clarte-dabord"
+    }
+  },
+  "stepSequence": [
+    {
+      "id": "clarte-dabord:introduction",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Clarifie la demande dès la première manche",
+        "body": "Tu joues l’IA : l’usager formule une requête incomplète pour préparer un menu étudiant. Trois manches successives apportent des précisions. Ton objectif est d’améliorer ta réponse à chaque étape tout en notant ce qu’il aurait fallu demander dès le départ.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Approche recommandée",
+          "tips": [
+            "Repère les informations manquantes dès la première manche.",
+            "Structure tes réponses dans les tableaux proposés pour éviter les oublis.",
+            "À la fin, rédige ta checklist idéale pour guider l’usager la prochaine fois."
+          ]
+        }
+      }
+    },
+    {
+      "id": "clarte-dabord:stage-1",
+      "type": "form",
+      "component": "form",
+      "config": {
+        "submitLabel": "Valider la manche 1",
+        "allowEmpty": false,
+        "fields": [
+          {
+            "id": "menu_jour1_idees",
+            "label": "Jour 1 — Idées de plats (1–3 puces)",
+            "type": "bulleted_list",
+            "minBullets": 1,
+            "maxBullets": 3,
+            "maxWordsPerBullet": 6,
+            "mustContainAny": ["pain", "pâtes", "tomates", "pommes", "lait", "poulet"]
+          },
+          {
+            "id": "menu_jour2_idees",
+            "label": "Jour 2 — Idées de plats (1–3 puces)",
+            "type": "bulleted_list",
+            "minBullets": 1,
+            "maxBullets": 3,
+            "maxWordsPerBullet": 6,
+            "mustContainAny": ["pain", "pâtes", "tomates", "pommes", "lait", "poulet"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "clarte-dabord:stage-2",
+      "type": "form",
+      "component": "form",
+      "config": {
+        "submitLabel": "Valider la manche 2",
+        "allowEmpty": false,
+        "fields": [
+          {
+            "id": "menu_jour1_table",
+            "label": "Jour 1 — 3 repas (plat uniquement)",
+            "type": "table_menu_day",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          },
+          {
+            "id": "menu_jour2_table",
+            "label": "Jour 2 — 3 repas (plat uniquement)",
+            "type": "table_menu_day",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "clarte-dabord:stage-3",
+      "type": "form",
+      "component": "form",
+      "config": {
+        "submitLabel": "Valider la manche 3",
+        "allowEmpty": false,
+        "fields": [
+          {
+            "id": "menu_jour1_complet",
+            "label": "Jour 1 — plat / boisson / dessert",
+            "type": "table_menu_full",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          },
+          {
+            "id": "menu_jour2_complet",
+            "label": "Jour 2 — plat / boisson / dessert",
+            "type": "table_menu_full",
+            "meals": ["Déjeuner", "Dîner", "Souper"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "clarte-dabord:debrief",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Révèle la checklist idéale",
+        "body": "Ce qui aurait dû être demandé dès le départ :\n- Crée un menu complet de 2 jours.\n- Chaque jour doit comporter 3 repas : déjeuner, dîner, souper.\n- Chaque repas doit inclure un plat, une boisson et un dessert.\n- Utilise uniquement les aliments listés : pain, pâtes, tomates, pommes, lait, poulet.\n- Présente le tout en JSON structuré : jour → repas → {plat, boisson, dessert}.",
+        "sidebar": {
+          "type": "tips",
+          "title": "À retenir",
+          "tips": [
+            "Une bonne consigne précise le format (ici : tableau JSON structuré).",
+            "Mentionne les contraintes incontournables (ingrédients, nombre de repas, éléments à inclure).",
+            "Teste ta checklist sur un autre scénario pour vérifier qu’elle fonctionne vraiment."
+          ]
+        }
+      }
+    }
+  ]
+}

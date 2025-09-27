@@ -1,0 +1,173 @@
+{
+  "id": "prompt-dojo",
+  "componentKey": "prompt-dojo",
+  "path": "/prompt-dojo",
+  "completionId": "prompt-dojo",
+  "enabled": true,
+  "header": {
+    "eyebrow": "Prompt Dojo",
+    "title": "Affûte ton prompt mission par mission",
+    "subtitle": "Choisis un défi parmi les missions et franchis les étapes pour décrocher ton badge en atteignant le score IA visé.",
+    "badge": "Mode entraînement"
+  },
+  "layout": {
+    "contentAs": "div",
+    "contentClassName": "gap-0"
+  },
+  "card": {
+    "title": "Prompt Dojo — Mission débutant",
+    "description": "Objectif : t’entraîner à affiner une consigne en suivant des défis progressifs.",
+    "highlights": [
+      "Défis à difficulté graduelle",
+      "Retour immédiat sur la qualité du prompt",
+      "Construction d’une version finale personnalisée"
+    ],
+    "cta": {
+      "label": "Entrer dans le dojo",
+      "to": "/prompt-dojo"
+    }
+  },
+  "stepSequence": [
+    {
+      "id": "prompt-dojo:introduction",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Affûte ta consigne mission par mission",
+        "body": "Chaque mission te plonge dans un contexte différent. Tu disposes d’un briefing, de points de contrôle et d’un score cible à atteindre. Parcours les cartes ci-dessous, choisis la mission qui te motive puis prépare ton brief dans la zone guidée avant d’évaluer ton prompt final.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Comment progresser ?",
+          "tips": [
+            "Observe les objectifs et contraintes propres à chaque mission.",
+            "Note les points à vérifier dans ton prompt avant l’évaluation IA.",
+            "Révise ton texte jusqu’à dépasser le score cible indiqué."
+          ]
+        }
+      }
+    },
+    {
+      "id": "prompt-dojo:missions",
+      "type": "info-cards",
+      "component": "info-cards",
+      "config": {
+        "eyebrow": "Sélectionne un défi",
+        "title": "Trois missions inspirées du Prompt Dojo",
+        "description": "Compare les badges et niveaux pour choisir le défi correspondant à ta maîtrise actuelle. Les cibles de score te donnent un repère pour itérer.",
+        "columns": 3,
+        "cards": [
+          {
+            "title": "🎯 Clarté Mission 1 · Atelier campus",
+            "description": "Préparer un atelier de révision pour aider la cohorte de Techniques de l’informatique à réussir l’intra.",
+            "tone": "sand",
+            "items": [
+              "Objectif : Construire un plan d’atelier d’une heure incluant une activité d’ouverture, un segment pratique et une conclusion claire.",
+              "Contexte : Tu es pair-aidant au centre d’aide. L’atelier aura lieu en fin de journée avec 18 collègues un peu fatigués.",
+              "Score cible : 75%"
+            ]
+          },
+          {
+            "title": "🧭 Adaptation Mission 2 · Résumé associatif",
+            "description": "Rédiger un résumé pour l’infolettre de l’association étudiante à partir d’un article sur le sommeil et les écrans.",
+            "tone": "sand",
+            "items": [
+              "Objectif : Synthétiser l’article en trois points faciles à lire et proposer une mini-action pour la vie de campus.",
+              "Contexte : Le résumé sera envoyé par courriel à des étudiantes et étudiants de première année. Temps de lecture cible : 4 minutes.",
+              "Score cible : 82%"
+            ]
+          },
+          {
+            "title": "🚀 Créativité Mission 3 · Courriel de stage",
+            "description": "Annonce un léger retard à ton superviseur de stage tout en proposant un plan d’action crédible.",
+            "tone": "sand",
+            "items": [
+              "Objectif : Informer d’un retard de trois jours sur le rapport de stage en rassurant sur les étapes suivantes.",
+              "Contexte : Tu es en Techniques de laboratoire. L’accès au labo a été restreint, d’où le retard.",
+              "Score cible : 88%"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "prompt-dojo:draft",
+      "type": "form",
+      "component": "form",
+      "config": {
+        "submitLabel": "Enregistrer mon brief",
+        "allowEmpty": false,
+        "fields": [
+          {
+            "id": "mission",
+            "label": "Choisis la mission que tu veux relever",
+            "type": "single_choice",
+            "options": [
+              {
+                "value": "brief-clarity",
+                "label": "Mission 1 · Atelier campus (Débutant)",
+                "description": "Préparer un atelier de révision pour aider la cohorte de Techniques de l’informatique à réussir l’intra."
+              },
+              {
+                "value": "audience-adapt",
+                "label": "Mission 2 · Résumé associatif (Intermédiaire)",
+                "description": "Rédiger un résumé pour l’infolettre de l’association étudiante à partir d’un article sur le sommeil et les écrans."
+              },
+              {
+                "value": "creative-brief",
+                "label": "Mission 3 · Courriel de stage (Avancé)",
+                "description": "Annonce un léger retard à ton superviseur de stage tout en proposant un plan d’action crédible."
+              }
+            ]
+          },
+          {
+            "id": "objectif",
+            "label": "Formule ton objectif en 40 à 90 mots",
+            "type": "textarea_with_counter",
+            "minWords": 40,
+            "maxWords": 90,
+            "tone": "professionnel et motivant"
+          },
+          {
+            "id": "checklist",
+            "label": "Checklist du prompt final (3 à 5 puces)",
+            "type": "bulleted_list",
+            "minBullets": 3,
+            "maxBullets": 5,
+            "maxWordsPerBullet": 12,
+            "mustContainAny": ["ton", "format", "contrainte", "objectif"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "prompt-dojo:evaluate",
+      "type": "prompt-evaluation",
+      "component": "prompt-evaluation",
+      "config": {
+        "defaultText": "Rôle: Tu es un tuteur pair qui anime un atelier dynamique.\nTâche: Proposer un plan d’atelier de 60 minutes pour revoir les structures de données avant l’intra.\nPublic: Étudiantes et étudiants de première année au cégep.\nContraintes: Prévoir trois segments (accroche, pratique guidée, conclusion). Mentionner un outil collaboratif utilisé.\nFormat attendu: Liste numérotée avec durées estimées.\nRéponds uniquement avec le plan.",
+        "developerMessage": "Tu es un évaluateur pédagogique spécialisé dans la rédaction de prompts. Analyse le prompt suivant et attribue un score global ainsi que quatre sous-scores (0-100). Réponds uniquement avec un JSON strict, sans commentaire supplémentaire.\n\nFormat attendu (JSON strict): {\"total\":int,\"clarity\":int,\"specificity\":int,\"structure\":int,\"length\":int,\"comments\":\"string\",\"advice\":[\"string\",...]}.\n- \"comments\" : synthèse en 2 phrases max.\n- \"advice\" : pistes concrètes (3 max).\n- Utilise des entiers pour les scores.\n- Pas d’autre texte hors du JSON.",
+        "model": "gpt-5-mini",
+        "verbosity": "medium",
+        "thinking": "medium"
+      }
+    },
+    {
+      "id": "prompt-dojo:debrief",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Analyse ton score IA",
+        "body": "Utilise le rapport pour comprendre où ton prompt excelle et où il reste flou. Ajuste ensuite ton brief : reformule les consignes manquantes, précise les contraintes ou ajoute un exemple. Quand tu dépasses la cible de la mission, exporte ton prompt gagnant pour ton portfolio.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Prochaines étapes",
+          "tips": [
+            "Refais la mission avec un autre niveau pour varier les contextes.",
+            "Compare deux prompts différents dans l’atelier pour voir l’impact des paramètres.",
+            "Note les tournures qui te donnent systématiquement de bons scores."
+          ]
+        }
+      }
+    }
+  ]
+}

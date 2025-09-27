@@ -1,0 +1,68 @@
+{
+  "id": "atelier",
+  "componentKey": "step-sequence",
+  "path": "/atelier",
+  "completionId": "atelier",
+  "enabled": true,
+  "header": {
+    "eyebrow": "Atelier comparatif IA",
+    "title": "Cadrez, comparez, synthétisez vos essais IA",
+    "subtitle": "Suivez une progression claire pour préparer votre contexte, explorer deux profils IA en flux continu puis transformer les sorties en ressources réutilisables.",
+    "badge": "Trois étapes guidées"
+  },
+  "layout": {
+    "activityId": "atelier",
+    "headerClassName": "space-y-8",
+    "contentClassName": "space-y-12"
+  },
+  "card": {
+    "title": "Atelier comparatif IA",
+    "description": "Objectif : cadrer ta demande, comparer deux configurations IA et capitaliser sur les essais.",
+    "highlights": [
+      "Définir le contexte et les attentes",
+      "Tester modèle, verbosité et raisonnement",
+      "Assembler une synthèse réutilisable"
+    ],
+    "cta": {
+      "label": "Lancer l’atelier",
+      "to": "/atelier"
+    }
+  },
+  "stepSequence": [
+    {
+      "id": "workshop-prepare-context",
+      "type": "workshop-context",
+      "component": "workshop-context",
+      "config": {
+        "defaultText": "L'automatisation est particulièrement utile pour structurer des notes de cours, créer des rappels et générer des résumés ciblés. Les étudiantes et étudiants qui savent dialoguer avec l'IA peuvent obtenir des analyses précises, du survol rapide jusqu'à des synthèses détaillées. Comprendre comment ajuster les paramètres du modèle aide à mieux contrôler la production, à gagner du temps et à repérer les limites de l'outil."
+      }
+    },
+    {
+      "id": "workshop-compare-models",
+      "type": "workshop-comparison",
+      "component": "workshop-comparison",
+      "config": {
+        "contextStepId": "workshop-prepare-context",
+        "defaultConfigA": {
+          "model": "gpt-5-nano",
+          "verbosity": "medium",
+          "thinking": "minimal"
+        },
+        "defaultConfigB": {
+          "model": "gpt-5-mini",
+          "verbosity": "high",
+          "thinking": "high"
+        }
+      }
+    },
+    {
+      "id": "workshop-synthesis",
+      "type": "workshop-synthesis",
+      "component": "workshop-synthesis",
+      "config": {
+        "contextStepId": "workshop-prepare-context",
+        "comparisonStepId": "workshop-compare-models"
+      }
+    }
+  ]
+}

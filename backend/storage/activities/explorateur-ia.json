@@ -1,0 +1,80 @@
+{
+  "id": "explorateur-ia",
+  "componentKey": "explorateur-ia",
+  "path": "/explorateur-ia",
+  "completionId": "explorateur-ia",
+  "enabled": true,
+  "header": {
+    "eyebrow": "Activité 5",
+    "title": "L’Explorateur IA",
+    "subtitle": "Parcours une mini-ville façon Game Boy pour valider quatre compétences IA sans jamais taper au clavier.",
+    "badge": "Ville interactive"
+  },
+  "layout": {
+    "outerClassName": "flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden px-0 pt-0 pb-0",
+    "innerClassName": "flex h-full min-h-0 flex-1 w-full max-w-none gap-0",
+    "headerClassName": "hidden",
+    "contentClassName": "flex h-full min-h-0 flex-1 flex-col space-y-0",
+    "withLandingGradient": false,
+    "useDynamicViewportHeight": true,
+    "withBasePadding": false,
+    "withBaseContentSpacing": false,
+    "withBaseInnerGap": false
+  },
+  "card": {
+    "title": "L’Explorateur IA",
+    "description": "Objectif : compléter un parcours ludique mêlant quiz, drag-and-drop, décisions et dilemmes éthiques.",
+    "highlights": [
+      "Déplacements façon jeu vidéo et interactions à la souris",
+      "Quatre mini-activités pédagogiques sans saisie de texte",
+      "Export JSON immédiat et impression PDF du bilan"
+    ],
+    "cta": {
+      "label": "Entrer dans la ville",
+      "to": "/explorateur-ia"
+    }
+  },
+  "stepSequence": [
+    {
+      "id": "explorateur:introduction",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Prépare ton exploration pixelisée",
+        "body": "Bienvenue dans Tiny Town, une mini-ville en pixel art où chaque quartier correspond à une compétence IA.\n\n• Déplace-toi avec les flèches du clavier ou les touches WASD. Sur mobile, utilise le joystick flottant.\n• Clique sur un bâtiment pour lancer la mission associée et suis les consignes à l'écran.\n• Termine les quatre quartiers thématiques pour débloquer la mairie et valider ton parcours.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Astuces de navigation",
+          "tips": [
+            "Observe les couleurs des bâtiments : elles rappellent la compétence évaluée.",
+            "Rouvre un quartier quand tu veux pour compléter un objectif manquant.",
+            "L’inventaire en haut à droite conserve tes objets de mission."
+          ]
+        }
+      }
+    },
+    {
+      "id": "explorateur:world",
+      "type": "explorateur-world",
+      "component": "explorateur-world"
+    },
+    {
+      "id": "explorateur:debrief",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Capture ton bilan d’explorateur ou d’exploratrice",
+        "body": "Bravo pour cette exploration !\n\nDepuis la ville, ouvre la mairie pour afficher ta carte de compétences. Utilise les boutons JSON et PDF pour exporter ton rapport, l’ajouter à ton portfolio ou le partager avec ton équipe.\n\nTu peux revenir dans n’importe quel quartier pour améliorer un score ou récolter les idées à transformer en prompts.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Et après ?",
+          "tips": [
+            "Note trois apprentissages clés dans ton portfolio.",
+            "Transforme les meilleures stratégies en consignes prêtes à réutiliser.",
+            "Anime un atelier en montrant comment tu as débloqué la mairie."
+          ]
+        }
+      }
+    }
+  ]
+}

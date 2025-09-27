@@ -1,0 +1,95 @@
+{
+  "id": "clarity",
+  "componentKey": "clarity-path",
+  "path": "/parcours-clarte",
+  "completionId": "clarity",
+  "enabled": true,
+  "header": {
+    "eyebrow": "Parcours de la clarté",
+    "title": "Guide le bonhomme avec une consigne limpide",
+    "subtitle": "Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas.",
+    "badge": "Mode jeu"
+  },
+  "layout": {
+    "innerClassName": "relative",
+    "contentAs": "div",
+    "contentClassName": "gap-10"
+  },
+  "card": {
+    "title": "Parcours de la clarté",
+    "description": "Objectif : expérimenter la précision des consignes sur un parcours 10×10.",
+    "highlights": [
+      "Plan d’action IA généré avant l’animation",
+      "Visualisation pas à pas avec obstacles",
+      "Analyse des tentatives et du surcoût"
+    ],
+    "cta": {
+      "label": "Tester la clarté",
+      "to": "/parcours-clarte"
+    }
+  },
+  "stepSequence": [
+    {
+      "id": "clarity:introduction",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Écris une consigne limpide pour guider le personnage",
+        "body": "Observe la grille 10×10. Ta mission consiste à formuler une instruction assez claire pour que l’IA trace un trajet optimal sans se cogner aux obstacles. Utilise les étapes suivantes pour positionner la cible, visualiser un plan puis rédiger ta consigne finale.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Conseils express",
+          "tips": [
+            "Indique la direction et la distance plutôt que de vagues intentions.",
+            "Mentionne les obstacles importants afin d’éviter les collisions.",
+            "Utilise un vocabulaire simple : haut, bas, gauche, droite, nombre de cases."
+          ]
+        }
+      }
+    },
+    {
+      "id": "clarity:map",
+      "type": "clarity-map",
+      "component": "clarity-map",
+      "config": {
+        "obstacleCount": 6,
+        "initialTarget": { "x": 7, "y": 3 },
+        "promptStepId": "clarity:instruction",
+        "allowInstructionInput": true,
+        "instructionLabel": "Consigne transmise à l’IA",
+        "instructionPlaceholder": "Depuis le départ, avance de deux cases vers le bas, contourne l’obstacle par la droite puis remonte jusqu’à la cible…"
+      }
+    },
+    {
+      "id": "clarity:instruction",
+      "type": "clarity-prompt",
+      "component": "clarity-prompt",
+      "config": {
+        "promptLabel": "Rédige ta consigne finale",
+        "promptPlaceholder": "Exemple : ‘Depuis la case de départ, descends de trois cases, va deux cases à droite, monte de deux cases puis avance une case à droite pour atteindre la cible.’",
+        "model": "gpt-5-mini",
+        "verbosity": "medium",
+        "thinking": "medium",
+        "settingsMode": "read-only"
+      }
+    },
+    {
+      "id": "clarity:debrief",
+      "type": "rich-content",
+      "component": "rich-content",
+      "config": {
+        "title": "Débrief et pistes d’amélioration",
+        "body": "Analyse les statistiques générées : nombre d’essais, surcoût de parcours et fidélité au plan. Si le personnage se bloque, identifie les zones ambiguës de ta consigne (direction manquante, distance imprécise, obstacle oublié). Réécris ensuite l’instruction et relance une exécution jusqu’à atteindre la cible sans détour.",
+        "sidebar": {
+          "type": "tips",
+          "title": "Pour aller plus loin",
+          "tips": [
+            "Teste une version plus concise de ta consigne pour voir l’impact sur le plan.",
+            "Ajoute des contraintes bonus (ex : passer par une case particulière) et vérifie le comportement.",
+            "Compare deux consignes différentes dans l’atelier pour voir laquelle est la plus efficace."
+          ]
+        }
+      }
+    }
+  ]
+}
