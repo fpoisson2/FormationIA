@@ -33,16 +33,33 @@ interface AdminAuthContextValue {
   error: string | null;
   isProcessing: boolean;
   isEditMode: boolean;
+  isTestMode: boolean;
   login: (
     payload: AdminLoginPayload
   ) => Promise<{ ok: true; user: AdminUser } | { ok: false; error: string }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   applySession: (session: AdminSession) => void;
+  startTestSession: () => AdminSession | null;
   setEditMode: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "formationia.admin.session";
+const rawTestMode = import.meta.env?.VITE_ADMIN_TEST_MODE;
+const isAdminTestMode =
+  typeof rawTestMode === "string" &&
+  ["1", "true", "on", "yes"].includes(rawTestMode.toLowerCase());
+
+const TEST_SESSION_BLUEPRINT: AdminSession = {
+  token: "__admin_test_mode__",
+  expiresAt: null,
+  user: {
+    username: "demo-admin",
+    roles: ["admin"],
+    isActive: true,
+    fromEnv: true,
+  },
+};
 
 const AdminAuthContext = createContext<AdminAuthContextValue | undefined>(undefined);
 
@@ -89,11 +106,17 @@ interface AdminAuthProviderProps {
 }
 
 export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Element {
-  const stored = useMemo(() => readStoredSession(), []);
-  const [status, setStatus] = useState<AdminAuthStatus>("loading");
+  const stored = useMemo(() => (isAdminTestMode ? null : readStoredSession()), []);
+  const [status, setStatus] = useState<AdminAuthStatus>(
+    isAdminTestMode ? "unauthenticated" : "loading"
+  );
   const [user, setUser] = useState<AdminUser | null>(null);
-  const [token, setToken] = useState<string | null>(stored?.token ?? null);
-  const [expiresAt, setExpiresAt] = useState<string | null>(stored?.expiresAt ?? null);
+  const [token, setToken] = useState<string | null>(
+    isAdminTestMode ? null : stored?.token ?? null
+  );
+  const [expiresAt, setExpiresAt] = useState<string | null>(
+    isAdminTestMode ? null : stored?.expiresAt ?? null
+  );
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -103,23 +126,32 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     tokenRef.current = token;
   }, [token]);
 
-  const applySession = useCallback(
-    (session: AdminSession) => {
-      setUser(session.user);
-      setToken(session.token);
-      setExpiresAt(session.expiresAt ?? null);
-      setStatus("authenticated");
-      setError(null);
-      if (session.token) {
-        persistSession({ token: session.token, expiresAt: session.expiresAt ?? null });
-      } else {
-        persistSession(null);
-      }
-    },
-    []
-  );
+  const applySession = useCallback((session: AdminSession) => {
+    setUser(session.user);
+    setToken(session.token);
+    setExpiresAt(session.expiresAt ?? null);
+    setStatus("authenticated");
+    setError(null);
+    if (isAdminTestMode) {
+      return;
+    }
+    if (session.token) {
+      persistSession({ token: session.token, expiresAt: session.expiresAt ?? null });
+    } else {
+      persistSession(null);
+    }
+  }, []);
 
   useEffect(() => {
+    if (isAdminTestMode) {
+      setStatus("unauthenticated");
+      setUser(null);
+      setToken(null);
+      setExpiresAt(null);
+      setError(null);
+      return () => undefined;
+    }
+
     let cancelled = false;
     const bootstrap = async () => {
       setStatus("loading");
@@ -159,6 +191,20 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       setIsProcessing(true);
       setError(null);
       try {
+        if (isAdminTestMode) {
+          const session: AdminSession = {
+            ...TEST_SESSION_BLUEPRINT,
+            token: TEST_SESSION_BLUEPRINT.token,
+            user: {
+              ...TEST_SESSION_BLUEPRINT.user,
+              username:
+                payload.username.trim() || TEST_SESSION_BLUEPRINT.user.username,
+            },
+          };
+          applySession(session);
+          return { ok: true, user: session.user } as const;
+        }
+
         const response: AdminAuthResponse = await admin.auth.login(payload);
         const session: AdminSession = {
           token: response.token,
@@ -186,7 +232,9 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
   const logout = useCallback(async () => {
     setIsProcessing(true);
     try {
-      await admin.auth.logout(tokenRef.current);
+      if (!isAdminTestMode) {
+        await admin.auth.logout(tokenRef.current);
+      }
     } catch (err) {
       console.warn("Failed to logout admin", err);
     } finally {
@@ -203,6 +251,15 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
   const refresh = useCallback(async () => {
     setIsProcessing(true);
     try {
+      if (isAdminTestMode) {
+        const session: AdminSession = {
+          ...TEST_SESSION_BLUEPRINT,
+          token: TEST_SESSION_BLUEPRINT.token,
+        };
+        applySession(session);
+        return;
+      }
+
       const response: AdminMeResponse = await admin.auth.me(tokenRef.current);
       const session: AdminSession = {
         token: tokenRef.current,
@@ -223,6 +280,20 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     }
   }, [applySession]);
 
+  const startTestSession = useCallback(() => {
+    if (!isAdminTestMode) {
+      return null;
+    }
+    setIsProcessing(true);
+    const session: AdminSession = {
+      ...TEST_SESSION_BLUEPRINT,
+      token: TEST_SESSION_BLUEPRINT.token,
+    };
+    applySession(session);
+    setIsProcessing(false);
+    return session;
+  }, [applySession]);
+
   const setEditMode = useCallback((enabled: boolean) => {
     setIsEditMode(enabled);
   }, []);
@@ -236,13 +307,29 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       error,
       isProcessing,
       isEditMode,
+      isTestMode: isAdminTestMode,
       login,
       logout,
       refresh,
       applySession,
+      startTestSession,
       setEditMode,
     }),
-    [status, user, token, expiresAt, error, isProcessing, isEditMode, login, logout, refresh, applySession, setEditMode]
+    [
+      status,
+      user,
+      token,
+      expiresAt,
+      error,
+      isProcessing,
+      isEditMode,
+      login,
+      logout,
+      refresh,
+      applySession,
+      startTestSession,
+      setEditMode,
+    ]
   );
 
   return <AdminAuthContext.Provider value={value}>{children}</AdminAuthContext.Provider>;
