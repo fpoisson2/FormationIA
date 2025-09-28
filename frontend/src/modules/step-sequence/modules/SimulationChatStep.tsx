@@ -115,6 +115,35 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
   }
 }
 
+const TEMPORARY_FIELD_LABEL = "__simulation_chat_field_label__";
+
+function normalizeFieldSpecForStage(spec: unknown): FieldSpec | null {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    return null;
+  }
+
+  const original = spec as Record<string, unknown>;
+  const rawLabel = typeof original.label === "string" ? original.label : "";
+  const labelForValidation =
+    rawLabel.trim().length > 0 ? rawLabel : TEMPORARY_FIELD_LABEL;
+
+  const candidate = {
+    ...original,
+    label: labelForValidation,
+  };
+
+  if (!validateFieldSpec(candidate)) {
+    return null;
+  }
+
+  const normalized = {
+    ...candidate,
+    label: rawLabel,
+  } as FieldSpec;
+
+  return cloneFieldSpec(normalized);
+}
+
 function isStageAnswerLike(value: unknown): value is StageAnswer {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -149,8 +178,8 @@ function normalizeStage(
 
   const rawFields = Array.isArray(base.fields) ? base.fields : [];
   const fields = rawFields
-    .filter(validateFieldSpec)
-    .map((spec) => cloneFieldSpec(spec as FieldSpec));
+    .map(normalizeFieldSpecForStage)
+    .filter((field): field is FieldSpec => field !== null);
 
   const prompt = typeof base.prompt === "string" ? base.prompt : "";
   const allowEmpty = Boolean(base.allowEmpty);

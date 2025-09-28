@@ -1,0 +1,93 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import type { SimulationChatConfig } from "../../src/modules/step-sequence/modules";
+import SimulationChatStep from "../../src/modules/step-sequence/modules/SimulationChatStep";
+import type { StepComponentProps } from "../../src/modules/step-sequence/types";
+
+function renderSimulationChatStep(config: SimulationChatConfig) {
+  const props: StepComponentProps = {
+    definition: { id: "simulation", component: "simulation-chat", config },
+    config,
+    payload: null,
+    isActive: true,
+    isEditMode: true,
+    onAdvance: vi.fn(),
+    onUpdateConfig: vi.fn(),
+  };
+
+  return render(<SimulationChatStep {...props} />);
+}
+
+describe("SimulationChatStep", () => {
+  const baseConfig: Omit<SimulationChatConfig, "stages"> = {
+    title: "Simulation",
+    help: "Aide",
+    roles: { ai: "IA", user: "Participant" },
+  };
+
+  it("keeps fields whose labels are temporarily empty during normalization", async () => {
+    const config: SimulationChatConfig = {
+      ...baseConfig,
+      stages: [
+        {
+          id: "stage-1",
+          prompt: "",
+          allowEmpty: false,
+          fields: [
+            {
+              id: "field-1",
+              label: "",
+              type: "textarea_with_counter",
+              minWords: 0,
+              maxWords: 120,
+            },
+          ],
+        },
+      ],
+    };
+
+    renderSimulationChatStep(config);
+
+    const [submitLabelInput] = await screen.findAllByLabelText("Libellé du bouton");
+    const settingsPanel = submitLabelInput.closest("aside");
+    expect(settingsPanel).not.toBeNull();
+    const fieldInputs = within(settingsPanel as HTMLElement).getAllByLabelText("Libellé");
+    expect(fieldInputs).toHaveLength(1);
+    expect(fieldInputs[0]).toHaveValue("");
+  });
+
+  it("preserves the field input after clearing its label in edit mode", async () => {
+    const config: SimulationChatConfig = {
+      ...baseConfig,
+      stages: [
+        {
+          id: "stage-1",
+          prompt: "",
+          allowEmpty: false,
+          fields: [
+            {
+              id: "field-1",
+              label: "Titre du champ",
+              type: "textarea_with_counter",
+              minWords: 0,
+              maxWords: 120,
+            },
+          ],
+        },
+      ],
+    };
+
+    renderSimulationChatStep(config);
+
+    const [submitLabelInput] = await screen.findAllByLabelText("Libellé du bouton");
+    const settingsPanel = submitLabelInput.closest("aside");
+    expect(settingsPanel).not.toBeNull();
+    const input = within(settingsPanel as HTMLElement).getByLabelText("Libellé");
+    fireEvent.change(input, { target: { value: "" } });
+
+    const remainingInputs = within(settingsPanel as HTMLElement).getAllByLabelText("Libellé");
+    expect(remainingInputs).toHaveLength(1);
+    expect(remainingInputs[0]).toHaveValue("");
+  });
+});
