@@ -89,16 +89,16 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           className="relative text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{ height: gridExtent }}
         >
-          <div className="flex h-full w-full flex-col items-end">
+          <div
+            className="grid h-full w-full justify-items-end"
+            style={{
+              gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+            }}
+          >
             {axis.map((value) => (
               <span
                 key={`row-${value}`}
-                className="flex w-full items-center justify-end"
-                style={{
-                  height: tileSize,
-                  lineHeight: `${tileSize}px`,
-                  flex: tileSize > 0 ? `0 0 ${tileSize}px` : undefined,
-                }}
+                className="flex h-full w-full items-center justify-end"
               >
                 {value}
               </span>
@@ -167,17 +167,16 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
         className="mt-2 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
         style={{ width: gridExtent }}
       >
-        <div className="grid grid-cols-10">
+        <div
+          className="grid"
+          style={{
+            gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+          }}
+        >
           {axis.map((value) => (
             <span
               key={`col-${value}`}
-              className="flex items-center justify-center"
-              style={{
-                height: tileSize,
-                lineHeight: `${tileSize}px`,
-                width: tileSize,
-                minWidth: tileSize,
-              }}
+              className="flex h-full w-full items-center justify-center"
             >
               {value}
             </span>
