@@ -214,6 +214,8 @@ export function PromptEvaluationStep({
   const context = useContext(StepSequenceContext);
   const effectiveOnUpdateConfig = context?.onUpdateConfig ?? onUpdateConfig;
   const isDesigner = context?.isEditMode ?? isEditMode;
+  const setManualAdvanceHandler = context?.setManualAdvanceHandler;
+  const setManualAdvanceDisabled = context?.setManualAdvanceDisabled;
 
   const typedConfig = useMemo(() => normalizeConfig(config), [config]);
   const { onChange, ...content } = typedConfig;
@@ -412,8 +414,6 @@ export function PromptEvaluationStep({
 
   const promptFieldId = `${definition.id}-prompt`;
   const developerFieldId = `${definition.id}-developer-message`;
-  const setManualAdvanceHandler = context?.setManualAdvanceHandler;
-  const setManualAdvanceDisabled = context?.setManualAdvanceDisabled;
 
   const configIds = useMemo(
     () => ({
