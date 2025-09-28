@@ -224,13 +224,9 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
       : DEFAULT_HELP;
 
   const aiRole =
-    typeof base.roles?.ai === "string" && base.roles.ai.trim().length > 0
-      ? base.roles.ai
-      : DEFAULT_ROLE_AI;
+    typeof base.roles?.ai === "string" ? base.roles.ai : DEFAULT_ROLE_AI;
   const userRole =
-    typeof base.roles?.user === "string" && base.roles.user.trim().length > 0
-      ? base.roles.user
-      : DEFAULT_ROLE_USER;
+    typeof base.roles?.user === "string" ? base.roles.user : DEFAULT_ROLE_USER;
 
   const missionId =
     typeof base.missionId === "string" && base.missionId.trim().length > 0

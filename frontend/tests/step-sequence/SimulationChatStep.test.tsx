@@ -90,4 +90,19 @@ describe("SimulationChatStep", () => {
     expect(remainingInputs).toHaveLength(1);
     expect(remainingInputs[0]).toHaveValue("");
   });
+
+  it("preserves the AI role label while editing", async () => {
+    const config: SimulationChatConfig = {
+      ...baseConfig,
+      roles: { ai: "Intelligence", user: "Participant" },
+      stages: [],
+    };
+
+    renderSimulationChatStep(config);
+
+    const [input] = await screen.findAllByLabelText("Libellé du rôle IA");
+    fireEvent.change(input, { target: { value: "" } });
+
+    expect(input).toHaveValue("");
+  });
 });
