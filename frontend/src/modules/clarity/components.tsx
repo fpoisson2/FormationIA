@@ -1,5 +1,11 @@
 import { useMemo } from "react";
 
+import castleTile from "../../assets/kenney_map-pack/PNG/mapTile_100.png";
+import explorerToken from "../../assets/kenney_map-pack/PNG/mapTile_136.png";
+import grassTile from "../../assets/kenney_map-pack/PNG/mapTile_022.png";
+import startMarkerTile from "../../assets/kenney_map-pack/PNG/mapTile_179.png";
+import treeTile from "../../assets/kenney_map-pack/PNG/mapTile_115.png";
+import waterTile from "../../assets/kenney_map-pack/PNG/mapTile_188.png";
 import { CLARITY_TIPS, DIRECTION_LABELS, GRID_SIZE, START_POSITION } from "./constants";
 import { formatDuration } from "./utils";
 import type { ClientStats, GridCoord, PlanAction } from "./types";
@@ -31,61 +37,70 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           ))}
         </div>
         <div className="relative">
-          <div className="relative aspect-square h-[clamp(160px,calc(100vw-120px),360px)] rounded-3xl border border-white/60 bg-white/70 p-2 shadow-inner">
-            <div className="grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl border border-white/40">
-              {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
-                const x = index % GRID_SIZE;
-                const y = Math.floor(index / GRID_SIZE);
-                const key = `${x}-${y}`;
-                const isVisited = visited.has(key);
-                const isStart = x === START_POSITION.x && y === START_POSITION.y;
-                const isTarget = x === target.x && y === target.y;
-                const isBlocked = blockedSet.has(key);
-                return (
-                  <div
-                    key={key}
-                    className={`relative overflow-hidden border border-white/40 ${
-                      isVisited ? "bg-[color:var(--brand-yellow)]/30" : "bg-white/60"
-                    }`}
-                  >
-                    {isBlocked && (
-                      <span className="absolute inset-0 flex items-center justify-center bg-[color:var(--brand-red)]/70 text-sm font-semibold text-white">
-                        🧱
-                      </span>
-                    )}
-                    {isStart && (
-                      <span className="absolute left-1 top-1 z-[1] text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]">
-                        Start
-                      </span>
-                    )}
-                    {isTarget && (
-                      <span className="absolute right-1 top-1 z-[1] text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
-                        Goal
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
+          <div
+            className="relative aspect-square h-[clamp(160px,calc(100vw-120px),360px)] rounded-[36px] border border-white/50 bg-white/30 p-3 shadow-inner"
+            style={{
+              backgroundImage: `url(${waterTile})`,
+              backgroundRepeat: "repeat",
+              backgroundSize: "96px",
+            }}
+          >
+            <div className="h-full w-full rounded-[28px] border border-white/60 bg-white/60 p-1">
+              <div
+                className="grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-[24px] border border-white/40 bg-white/10"
+                style={{
+                  backgroundImage: `url(${grassTile})`,
+                  backgroundSize: `${100 / GRID_SIZE}% ${100 / GRID_SIZE}%`,
+                }}
+              >
+                {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
+                  const x = index % GRID_SIZE;
+                  const y = Math.floor(index / GRID_SIZE);
+                  const key = `${x}-${y}`;
+                  const isVisited = visited.has(key);
+                  const isStart = x === START_POSITION.x && y === START_POSITION.y;
+                  const isBlocked = blockedSet.has(key);
+                  return (
+                    <div key={key} className="relative border border-white/30">
+                      {isVisited && (
+                        <span className="absolute inset-0 bg-[color:var(--brand-yellow)]/25 mix-blend-soft-light" aria-hidden="true" />
+                      )}
+                      {isBlocked && (
+                        <img
+                          src={treeTile}
+                          alt="Arbre bloquant"
+                          className="absolute inset-0 h-full w-full object-contain p-1"
+                        />
+                      )}
+                      {isStart && (
+                        <span className="absolute left-1 top-1 z-[1] flex h-7 w-7 items-center justify-center">
+                          <img
+                            src={startMarkerTile}
+                            alt="Point de départ"
+                            className="h-full w-full object-contain drop-shadow"
+                          />
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <div className="clarity-grid-overlay" />
           </div>
           <div className="pointer-events-none absolute inset-0">
-            <span
-              className="absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-2xl transition-transform duration-300 ease-out"
+            <img
+              src={explorerToken}
+              alt="Explorateur"
+              className="absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg transition-transform duration-300 ease-out"
               style={{ left: `${playerLeft}%`, top: `${playerTop}%` }}
-              role="img"
-              aria-label="Bonhomme"
-            >
-              👤
-            </span>
-            <span
-              className="absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-2xl"
+            />
+            <img
+              src={castleTile}
+              alt="Château objectif"
+              className="absolute h-14 w-14 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg"
               style={{ left: `${targetLeft}%`, top: `${targetTop}%` }}
-              role="img"
-              aria-label="Objectif"
-            >
-              🎯
-            </span>
+            />
           </div>
         </div>
       </div>
