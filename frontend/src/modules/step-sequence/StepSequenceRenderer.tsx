@@ -121,6 +121,20 @@ export function StepSequenceRenderer({
     buildInitialConfigs(steps)
   );
 
+  const [manualAdvanceState, setManualAdvanceState] = useState<ManualAdvanceState>({
+    handler: null,
+    disabled: false,
+  });
+  const manualAdvanceStateRef = useRef(manualAdvanceState);
+
+  useEffect(() => {
+    manualAdvanceStateRef.current = manualAdvanceState;
+  }, [manualAdvanceState]);
+
+  const resetManualAdvanceState = useCallback(() => {
+    setManualAdvanceState({ handler: null, disabled: false });
+  }, []);
+
   const stepIdsKey = useMemo(() => steps.map((step) => step.id).join("|"), [steps]);
   const stepsSignature = useMemo(() => buildStepsSignature(steps), [steps]);
   const latestStepsRef = useRef(steps);
@@ -153,11 +167,13 @@ export function StepSequenceRenderer({
         return nextPayloads;
       });
 
+      resetManualAdvanceState();
+
       if (currentIndex < steps.length - 1) {
         setCurrentIndex(currentIndex + 1);
       }
     },
-    [currentIndex, onComplete, steps]
+    [currentIndex, onComplete, resetManualAdvanceState, steps]
   );
 
   const handleConfigUpdate = useCallback(
@@ -185,6 +201,8 @@ export function StepSequenceRenderer({
         return;
       }
 
+      resetManualAdvanceState();
+
       setCurrentIndex((previousIndex) => {
         if (typeof target === "number") {
           if (Number.isNaN(target)) {
@@ -201,33 +219,19 @@ export function StepSequenceRenderer({
         return resolvedIndex === -1 ? previousIndex : resolvedIndex;
       });
     },
-    [steps]
+    [resetManualAdvanceState, steps]
   );
 
-  const manualAdvanceStateRef = useRef<ManualAdvanceState>({
-    handler: null,
-    disabled: false,
-  });
-
   const setManualAdvanceHandler = useCallback((handler: ManualAdvanceHandler | null) => {
-    manualAdvanceStateRef.current = {
-      ...manualAdvanceStateRef.current,
-      handler,
-    };
+    setManualAdvanceState((previous) => ({ ...previous, handler }));
   }, []);
 
   const setManualAdvanceDisabled = useCallback((disabled: boolean) => {
-    manualAdvanceStateRef.current = {
-      ...manualAdvanceStateRef.current,
-      disabled,
-    };
+    setManualAdvanceState((previous) => ({ ...previous, disabled }));
   }, []);
 
   const getManualAdvanceState = useCallback((): ManualAdvanceState => {
-    return {
-      handler: manualAdvanceStateRef.current.handler,
-      disabled: manualAdvanceStateRef.current.disabled,
-    };
+    return manualAdvanceStateRef.current;
   }, []);
 
   const contextValue = useMemo(
@@ -264,8 +268,8 @@ export function StepSequenceRenderer({
   const activeStepId = activeStep?.id ?? null;
 
   useEffect(() => {
-    manualAdvanceStateRef.current = { handler: null, disabled: false };
-  }, [activeStepId]);
+    resetManualAdvanceState();
+  }, [activeStepId, resetManualAdvanceState]);
   if (!activeStep) {
     return null;
   }
