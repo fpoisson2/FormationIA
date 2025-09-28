@@ -38,11 +38,9 @@ function isCompositeConfig(value: unknown): value is CompositeStepConfig {
 
 const COMPLETION_REQUIRED_COMPONENTS = new Set<string>([
   "form",
-  "simulation-chat",
   "video",
   "prompt-evaluation",
   "ai-comparison",
-  "clarity-map",
   "clarity-prompt",
   "explorateur-world",
   "workshop-context",
