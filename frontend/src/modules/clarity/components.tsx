@@ -88,21 +88,36 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
     <div className="relative mx-auto w-full max-w-[520px]">
       <div className="grid grid-cols-[auto,1fr] grid-rows-[1fr,auto] items-start gap-x-2 gap-y-2 sm:gap-x-3 sm:gap-y-3 md:gap-x-4 md:gap-y-4">
         <div
-          className="grid grid-rows-10 justify-items-end text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+          className="relative w-6 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 sm:w-7 md:w-8 md:text-xs"
           style={{
             height: gridExtent > 0 ? gridExtent : undefined,
-            gridTemplateRows:
-              tileSize > 0 ? `repeat(${GRID_SIZE}, ${tileSize}px)` : undefined,
           }}
         >
-          {axis.map((value) => (
-            <span
-              key={`row-${value}`}
-              className="grid h-full w-full items-center justify-items-end text-right leading-none"
-            >
-              {value}
-            </span>
-          ))}
+          {tileSize > 0 ? (
+            axis.map((value) => (
+              <span
+                key={`row-${value}`}
+                className="pointer-events-none absolute right-0 flex w-full items-center justify-end leading-none"
+                style={{
+                  top: value * tileSize,
+                  height: tileSize,
+                }}
+              >
+                {value}
+              </span>
+            ))
+          ) : (
+            <div className="grid h-full w-full grid-rows-10 justify-items-end">
+              {axis.map((value) => (
+                <span
+                  key={`row-${value}`}
+                  className="flex h-full w-full items-center justify-end leading-none"
+                >
+                  {value}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="relative flex justify-center">
           <div
