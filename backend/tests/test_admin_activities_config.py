@@ -314,6 +314,22 @@ def test_explorateur_world_structure_is_normalized(tmp_path, monkeypatch) -> Non
                         "id": "world",
                         "config": {
                             "terrain": {"layout": "grid"},
+                            "steps": [
+                                {
+                                    "id": "clarte:quiz",
+                                    "component": "custom",
+                                    "config": {"type": "clarte-quiz"},
+                                }
+                            ],
+                            "quarterDesignerSteps": {
+                                "clarte": [
+                                    {
+                                        "id": "clarte:designer:basics",
+                                        "component": "custom",
+                                        "config": {"type": "explorateur-quarter-basics"},
+                                    }
+                                ]
+                            },
                             "customData": {"foo": "bar"},
                         },
                     }
@@ -335,9 +351,15 @@ def test_explorateur_world_structure_is_normalized(tmp_path, monkeypatch) -> Non
             assert step["component"] == "explorateur-world"
             config = step["config"]
             assert config["terrain"] == {"layout": "grid"}
-            assert config["steps"] == []
+            assert len(config["steps"]) == 1
+            assert config["steps"][0]["component"] == "clarte-quiz"
+            assert config["steps"][0]["config"]["type"] == "clarte-quiz"
             assert config["quarters"] == []
-            assert config["quarterDesignerSteps"] is None
+            assert isinstance(config["quarterDesignerSteps"], dict)
+            assert (
+                config["quarterDesignerSteps"]["clarte"][0]["component"]
+                == "explorateur-quarter-basics"
+            )
             assert config["customData"] == {"foo": "bar"}
 
             list_response = client.get("/api/admin/activities")
@@ -345,6 +367,9 @@ def test_explorateur_world_structure_is_normalized(tmp_path, monkeypatch) -> Non
             list_payload = list_response.json()
             stored_step = list_payload["activities"][0]["stepSequence"][0]
             assert stored_step["config"] == config
+            assert stored_step["config"]["steps"][0]["component"] == "clarte-quiz"
+            quarter_steps = stored_step["config"]["quarterDesignerSteps"]["clarte"]
+            assert quarter_steps[0]["component"] == "explorateur-quarter-basics"
 
             activity_path = main._activity_file_path("explorateur")
             assert activity_path.exists()
