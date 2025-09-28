@@ -4,6 +4,7 @@ import type { ComponentType } from "react";
 import {
   registerStepComponent,
   type StepComponentProps,
+  type StepComponentWithMetadata,
 } from "../../../modules/step-sequence";
 
 export interface ExplorateurIAModuleConfig {
@@ -26,6 +27,23 @@ export function registerExplorateurIAModule(
   component: ExplorateurIAModuleComponent
 ): void {
   MODULE_REGISTRY.set(type, component);
+
+  const StepComponent = ((props: StepComponentProps) => {
+    const handleUpdate = (next: ExplorateurIAModuleConfig) => {
+      const payload =
+        next && typeof next === "object"
+          ? { ...next, type: (next as { type?: string }).type ?? type }
+          : { type };
+      props.onUpdateConfig?.(payload);
+    };
+
+    return component({
+      ...(props as ExplorateurIAModuleProps),
+      onUpdateConfig: handleUpdate,
+    });
+  }) as StepComponentWithMetadata;
+
+  registerStepComponent(type, StepComponent);
 }
 
 function getExplorateurIAModule(

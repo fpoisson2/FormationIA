@@ -89,7 +89,7 @@ const CLARTE_STEPS: StepDefinition[] = [
   },
   {
     id: "clarte:quiz",
-    component: "custom",
+    component: "clarte-quiz",
     config: DEFAULT_CLARTE_QUIZ_CONFIG,
   },
 ];
@@ -115,7 +115,7 @@ const CREATION_STEPS: StepDefinition[] = [
   },
   {
     id: "creation:builder",
-    component: "custom",
+    component: "creation-builder",
     config: DEFAULT_CREATION_BUILDER_CONFIG,
   },
   {
@@ -155,7 +155,7 @@ const DECISION_STEPS: StepDefinition[] = [
   },
   {
     id: "decision:path",
-    component: "custom",
+    component: "decision-path",
     config: DEFAULT_DECISION_PATH_CONFIG,
   },
 ];
@@ -171,7 +171,7 @@ const ETHIQUE_STEPS: StepDefinition[] = [
   },
   {
     id: "ethique:dilemmas",
-    component: "custom",
+    component: "ethics-dilemmas",
     config: DEFAULT_ETHICS_DILEMMAS_CONFIG,
   },
   {

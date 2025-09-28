@@ -107,6 +107,20 @@ export function createNewQuarterTemplate(
   } satisfies ExplorateurIAQuarterConfig;
 }
 
+function resolveStepComponent(step: StepDefinition): string | null {
+  if (typeof step.component === "string" && step.component.trim().length > 0) {
+    return step.component.trim();
+  }
+  const rawConfig = step.config;
+  if (rawConfig && typeof rawConfig === "object") {
+    const maybeType = (rawConfig as { type?: unknown }).type;
+    if (typeof maybeType === "string" && maybeType.trim().length > 0) {
+      return maybeType.trim();
+    }
+  }
+  return null;
+}
+
 export function ensureDesignerStepId(
   quarterId: QuarterId,
   step: StepDefinition,
@@ -116,10 +130,7 @@ export function ensureDesignerStepId(
     typeof step.id === "string" && step.id.trim().length > 0
       ? ensureStepHasQuarterPrefix(step.id, quarterId)
       : `${quarterId}:designer:${index + 1}`;
-  const component =
-    typeof step.component === "string" && step.component.trim().length > 0
-      ? step.component
-      : "custom";
+  const component = resolveStepComponent(step) ?? "rich-content";
   if (step.composite != null) {
     return {
       id,
@@ -173,7 +184,7 @@ export function createBasicsDesignerStep(
   const baseId = quarter.id;
   return {
     id: `${baseId}:designer:basics`,
-    component: "custom",
+    component: "explorateur-quarter-basics",
     config: {
       type: "explorateur-quarter-basics",
       quarterId: baseId,
@@ -191,7 +202,7 @@ export function createInventoryDesignerStep(
   const baseId = quarter.id;
   return {
     id: `${baseId}:designer:inventory`,
-    component: "custom",
+    component: "explorateur-quarter-inventory",
     config: {
       type: "explorateur-quarter-inventory",
       quarterId: baseId,
@@ -334,10 +345,7 @@ export function ensureQuarterSequenceStep(
   quarterId: QuarterId
 ): StepDefinition {
   const id = ensureStepHasQuarterPrefix(step.id, quarterId);
-  const component =
-    typeof step.component === "string" && step.component.trim().length > 0
-      ? step.component
-      : "custom";
+  const component = resolveStepComponent(step) ?? "rich-content";
 
   if (step.composite != null) {
     return {

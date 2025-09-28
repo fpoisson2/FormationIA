@@ -89,19 +89,37 @@ export function sanitizeSteps(
     if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) {
       continue;
     }
-    if (
-      typeof candidate.component !== "string" ||
-      candidate.component.trim().length === 0
-    ) {
+    const clonedConfig =
+      candidate.config == null
+        ? candidate.config
+        : cloneStepConfig(candidate.config);
+
+    let inferredType: string | null = null;
+    if (clonedConfig && typeof clonedConfig === "object") {
+      const maybeType = (clonedConfig as { type?: unknown }).type;
+      if (typeof maybeType === "string" && maybeType.trim().length > 0) {
+        inferredType = maybeType.trim();
+        (clonedConfig as { type: string }).type = inferredType;
+      }
+    }
+
+    const rawComponent =
+      typeof candidate.component === "string"
+        ? candidate.component.trim()
+        : "";
+    const component =
+      rawComponent && rawComponent !== "custom"
+        ? rawComponent
+        : inferredType ?? rawComponent;
+
+    if (!component) {
       continue;
     }
+
     steps.push({
       id: candidate.id,
-      component: candidate.component,
-      config:
-        candidate.config == null
-          ? candidate.config
-          : cloneStepConfig(candidate.config),
+      component,
+      config: clonedConfig,
       composite: null,
     });
   }

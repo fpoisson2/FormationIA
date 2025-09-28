@@ -295,6 +295,36 @@ def test_create_explorateur_world_step_defaults_structure() -> None:
     assert config["steps"] == []
 
 
+def test_create_explorateur_world_step_normalizes_custom_modules() -> None:
+    step = create_explorateur_world_step(
+        step_id="explorateur",
+        config={
+            "steps": [
+                {
+                    "id": "clarte:quiz",
+                    "component": "custom",
+                    "config": {"type": "clarte-quiz", "question": "?"},
+                }
+            ],
+            "quarterDesignerSteps": {
+                "clarte": [
+                    {
+                        "id": "clarte:designer:basics",
+                        "component": "custom",
+                        "config": {"type": "explorateur-quarter-basics"},
+                    }
+                ]
+            },
+        },
+    )
+
+    config = step["config"]
+    assert config["steps"][0]["component"] == "clarte-quiz"
+    assert config["steps"][0]["config"]["type"] == "clarte-quiz"
+    designer_step = config["quarterDesignerSteps"]["clarte"][0]
+    assert designer_step["component"] == "explorateur-quarter-basics"
+
+
 def test_create_composite_step_wraps_modules() -> None:
     step = create_composite_step(
         step_id="composite",
