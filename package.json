@@ -1,0 +1,10 @@
+{
+  "name": "formationia",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "install:frontend": "npm --prefix frontend install",
+    "build:frontend": "npm --prefix frontend run build",
+    "test:frontend": "npm --prefix frontend test -- --run"
+  }
+}
