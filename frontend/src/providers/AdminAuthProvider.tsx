@@ -25,6 +25,15 @@ interface StoredSession {
   expiresAt: string | null;
 }
 
+interface StoredTestSession {
+  user: {
+    username: string;
+    roles: string[];
+    isActive?: boolean;
+    fromEnv?: boolean;
+  };
+}
+
 interface AdminAuthContextValue {
   status: AdminAuthStatus;
   user: AdminUser | null;
@@ -45,6 +54,7 @@ interface AdminAuthContextValue {
 }
 
 const STORAGE_KEY = "formationia.admin.session";
+const TEST_STORAGE_KEY = `${STORAGE_KEY}.test`;
 const rawTestMode = import.meta.env?.VITE_ADMIN_TEST_MODE;
 const isAdminTestMode =
   typeof rawTestMode === "string" &&
@@ -86,6 +96,42 @@ function readStoredSession(): StoredSession | null {
   }
 }
 
+function readStoredTestSession(): AdminSession | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(TEST_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<StoredTestSession>;
+    const storedUser = parsed?.user;
+    if (!storedUser || typeof storedUser.username !== "string" || !Array.isArray(storedUser.roles)) {
+      return null;
+    }
+    return {
+      ...TEST_SESSION_BLUEPRINT,
+      user: {
+        ...TEST_SESSION_BLUEPRINT.user,
+        username: storedUser.username.trim() || TEST_SESSION_BLUEPRINT.user.username,
+        roles: storedUser.roles,
+        isActive:
+          typeof storedUser.isActive === "boolean"
+            ? storedUser.isActive
+            : TEST_SESSION_BLUEPRINT.user.isActive,
+        fromEnv:
+          typeof storedUser.fromEnv === "boolean"
+            ? storedUser.fromEnv
+            : TEST_SESSION_BLUEPRINT.user.fromEnv,
+      },
+    };
+  } catch (error) {
+    console.warn("Invalid admin test session in storage", error);
+    return null;
+  }
+}
+
 function persistSession(session: StoredSession | null): void {
   if (typeof window === "undefined") {
     return;
@@ -101,12 +147,36 @@ function persistSession(session: StoredSession | null): void {
   }
 }
 
+function persistTestSession(session: AdminSession | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (!session) {
+      window.sessionStorage.removeItem(TEST_STORAGE_KEY);
+      return;
+    }
+    const payload: StoredTestSession = {
+      user: {
+        username: session.user.username,
+        roles: session.user.roles,
+        isActive: session.user.isActive,
+        fromEnv: session.user.fromEnv,
+      },
+    };
+    window.sessionStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Unable to persist admin test session", error);
+  }
+}
+
 interface AdminAuthProviderProps {
   children: ReactNode;
 }
 
 export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Element {
   const stored = useMemo(() => (isAdminTestMode ? null : readStoredSession()), []);
+  const storedTestSession = useMemo(() => (isAdminTestMode ? readStoredTestSession() : null), []);
   const [status, setStatus] = useState<AdminAuthStatus>(
     isAdminTestMode ? "unauthenticated" : "loading"
   );
@@ -133,6 +203,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     setStatus("authenticated");
     setError(null);
     if (isAdminTestMode) {
+      persistTestSession(session.token === TEST_SESSION_BLUEPRINT.token ? session : null);
       return;
     }
     if (session.token) {
@@ -144,11 +215,15 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
 
   useEffect(() => {
     if (isAdminTestMode) {
-      setStatus("unauthenticated");
-      setUser(null);
-      setToken(null);
-      setExpiresAt(null);
-      setError(null);
+      if (storedTestSession) {
+        applySession(storedTestSession);
+      } else {
+        setStatus("unauthenticated");
+        setUser(null);
+        setToken(null);
+        setExpiresAt(null);
+        setError(null);
+      }
       return () => undefined;
     }
 
@@ -184,7 +259,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     return () => {
       cancelled = true;
     };
-  }, [applySession, stored?.token]);
+  }, [applySession, stored?.token, storedTestSession]);
 
   const login = useCallback(
     async (payload: AdminLoginPayload) => {
@@ -244,6 +319,9 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       setStatus("unauthenticated");
       setError(null);
       persistSession(null);
+      if (isAdminTestMode) {
+        persistTestSession(null);
+      }
       setIsProcessing(false);
     }
   }, []);
