@@ -57,25 +57,35 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       return;
     }
 
-    const updateTileSize = () => {
-      const width = element.clientWidth;
+    const measureExtent = () => {
+      const { width } = element.getBoundingClientRect();
       if (width <= 0) {
         return;
       }
       setGridExtent(width);
     };
 
-    updateTileSize();
+    measureExtent();
 
     if (typeof ResizeObserver === "undefined") {
-      const handleResize = () => updateTileSize();
+      const handleResize = () => measureExtent();
       window.addEventListener("resize", handleResize);
       return () => {
         window.removeEventListener("resize", handleResize);
       };
     }
 
-    const observer = new ResizeObserver(() => updateTileSize());
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      const { width } = entry.contentRect;
+      if (width <= 0) {
+        return;
+      }
+      setGridExtent(width);
+    });
     observer.observe(element);
     return () => {
       observer.disconnect();
