@@ -48,8 +48,11 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   const blockedSet = useMemo(() => new Set(blocked.map((cell) => `${cell.x}-${cell.y}`)), [blocked]);
   const axis = useMemo(() => Array.from({ length: GRID_SIZE }, (_, index) => index), []);
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const [gridExtent, setGridExtent] = useState(0);
-  const tileSize = gridExtent > 0 ? gridExtent / GRID_SIZE : 0;
+  const [gridRect, setGridRect] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const tileWidth = gridRect.width > 0 ? gridRect.width / GRID_SIZE : 0;
+  const tileHeight = gridRect.height > 0 ? gridRect.height / GRID_SIZE : 0;
+  const tileSize = tileWidth > 0 && tileHeight > 0 ? Math.min(tileWidth, tileHeight) : 0;
+  const hasTileMeasurements = tileWidth > 0 && tileHeight > 0;
 
   useEffect(() => {
     const gridElement = gridRef.current;
@@ -58,11 +61,11 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
     }
 
     const measureExtent = () => {
-      const gridRect = gridElement.getBoundingClientRect();
-      if (gridRect.width <= 0 || gridRect.height <= 0) {
+      const nextRect = gridElement.getBoundingClientRect();
+      if (nextRect.width <= 0 || nextRect.height <= 0) {
         return;
       }
-      setGridExtent(gridRect.width);
+      setGridRect({ width: nextRect.width, height: nextRect.height });
     };
 
     measureExtent();
@@ -85,36 +88,54 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   }, []);
 
   return (
-    <div className="relative mx-auto w-full max-w-[520px]">
+    <div className="relative mx-auto w-full max-w-[560px]">
       <div className="grid grid-cols-[auto,1fr] grid-rows-[1fr,auto] items-start gap-x-2 gap-y-2 sm:gap-x-3 sm:gap-y-3 md:gap-x-4 md:gap-y-4">
         <div
           className="relative w-6 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 sm:w-7 md:w-8 md:text-xs"
           style={{
-            height: gridExtent > 0 ? gridExtent : undefined,
+            height: gridRect.height > 0 ? gridRect.height : undefined,
           }}
         >
-          <div
-            className="grid h-full w-full justify-items-end"
-            style={{
-              gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
-            }}
-          >
-            {axis.map((value) => (
-              <span
-                key={`row-${value}`}
-                className="flex h-full w-full items-center justify-end leading-none"
-              >
-                {value}
-              </span>
-            ))}
-          </div>
+          {hasTileMeasurements ? (
+            <div className="pointer-events-none absolute inset-0">
+              {axis.map((value) => (
+                <span
+                  key={`row-${value}`}
+                  className="absolute flex w-full justify-end text-right"
+                  style={{
+                    top: tileHeight * value + tileHeight / 2,
+                    transform: "translateY(-50%)",
+                    lineHeight: 1,
+                  }}
+                >
+                  {value}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div
+              className="grid h-full w-full justify-items-end"
+              style={{
+                gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+              }}
+            >
+              {axis.map((value) => (
+                <span
+                  key={`row-${value}`}
+                  className="flex h-full w-full items-center justify-end leading-none"
+                >
+                  {value}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="relative flex justify-center">
           <div
-            className="relative w-full max-w-[400px] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner"
+            className="relative w-full max-w-[460px] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner"
             style={{
-              width: "clamp(180px, calc(100vw - 120px), 400px)",
-              height: "clamp(180px, calc(100vw - 120px), 400px)",
+              width: "clamp(200px, calc(100vw - 96px), 460px)",
+              height: "clamp(200px, calc(100vw - 96px), 460px)",
             }}
           >
             <div
@@ -174,17 +195,43 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
         </div>
         <div aria-hidden />
         <div
-          className="mx-auto grid justify-items-center text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+          className="relative mx-auto text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{
-            width: gridExtent > 0 ? gridExtent : undefined,
-            gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+            width: gridRect.width > 0 ? gridRect.width : undefined,
+            height: hasTileMeasurements ? tileHeight : undefined,
           }}
         >
-          {axis.map((value) => (
-            <span key={`col-${value}`} className="flex h-full w-full items-center justify-center">
-              {value}
-            </span>
-          ))}
+          {hasTileMeasurements ? (
+            <div className="pointer-events-none relative h-full w-full">
+              {axis.map((value) => (
+                <span
+                  key={`col-${value}`}
+                  className="absolute flex h-full items-center justify-center"
+                  style={{
+                    left: tileWidth * value + tileWidth / 2,
+                    transform: "translateX(-50%)",
+                    width: tileWidth,
+                    lineHeight: 1,
+                  }}
+                >
+                  {value}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div
+              className="grid justify-items-center"
+              style={{
+                gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+              }}
+            >
+              {axis.map((value) => (
+                <span key={`col-${value}`} className="flex h-full w-full items-center justify-center">
+                  {value}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
