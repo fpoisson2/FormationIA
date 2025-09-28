@@ -1061,7 +1061,7 @@ const DEFAULT_COMPARISON_SUMMARY: Required<DualModelComparisonCopyConfig["summar
   resetLabel: "Réinitialiser l’aperçu",
 };
 
-const DEFAULT_COMPARISON_TITLE = "Comparez deux configurations IA";
+const DEFAULT_COMPARISON_TITLE = "";
 const DEFAULT_COMPARISON_PROMPT_LABEL = "Décrivez la consigne à soumettre";
 const DEFAULT_COMPARISON_PROMPT_PLACEHOLDER =
   "Décrivez le besoin ou la tâche attendue pour vos deux variantes.";

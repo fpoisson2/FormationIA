@@ -184,7 +184,7 @@ const DEFAULT_SUMMARY: NormalizedSummaryConfig = {
 };
 
 const DEFAULT_COPY: NormalizedCopyConfig = {
-  title: "Comparez deux configurations IA",
+  title: "",
   promptLabel: "Décrivez la consigne à soumettre",
   promptPlaceholder: "Décrivez le besoin ou la tâche attendue pour vos deux variantes.",
   launchCta: DEFAULT_LAUNCH_CTA,
@@ -763,9 +763,11 @@ export function DualModelComparisonStep({
                 {normalizedConfig.copy.badge}
               </span>
             )}
-            <h2 className="text-2xl leading-tight text-[color:var(--brand-black)]">
-              {normalizedConfig.copy.title}
-            </h2>
+            {normalizedConfig.copy.title && (
+              <h2 className="text-2xl leading-tight text-[color:var(--brand-black)]">
+                {normalizedConfig.copy.title}
+              </h2>
+            )}
             {normalizedConfig.copy.description && (
               <p className="text-sm text-[color:var(--brand-charcoal)]">
                 {normalizedConfig.copy.description}
