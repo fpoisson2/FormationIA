@@ -91,6 +91,8 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           className="grid grid-rows-10 justify-items-end text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{
             height: gridExtent > 0 ? gridExtent : undefined,
+            gridTemplateRows:
+              tileSize > 0 ? `repeat(${GRID_SIZE}, ${tileSize}px)` : undefined,
           }}
         >
           {axis.map((value) => (
@@ -167,6 +169,8 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           className="mx-auto grid grid-cols-10 justify-items-center text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{
             width: gridExtent > 0 ? gridExtent : undefined,
+            gridTemplateColumns:
+              tileSize > 0 ? `repeat(${GRID_SIZE}, ${tileSize}px)` : undefined,
           }}
         >
           {axis.map((value) => (
