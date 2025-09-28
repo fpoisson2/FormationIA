@@ -5,7 +5,8 @@ import explorerToken from "../../assets/kenney_map-pack/PNG/mapTile_136.png";
 import grassTile from "../../assets/kenney_map-pack/PNG/mapTile_022.png";
 import startMarkerTile from "../../assets/kenney_map-pack/PNG/mapTile_179.png";
 import treeTile from "../../assets/kenney_map-pack/PNG/mapTile_115.png";
-import waterTile from "../../assets/kenney_map-pack/PNG/mapTile_188.png";
+import shoreWaterTile from "../../assets/kenney_map-pack/PNG/mapTile_171.png";
+import deepWaterTile from "../../assets/kenney_map-pack/PNG/mapTile_188.png";
 import cliffBottomEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_037.png";
 import cliffBottomLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_036.png";
 import cliffBottomRightTile from "../../assets/kenney_map-pack/PNG/mapTile_038.png";
@@ -23,38 +24,6 @@ export interface ClarityGridProps {
   target: GridCoord;
   blocked: GridCoord[];
   visited: Set<string>;
-}
-
-function resolveBorderTile(
-  gridX: number,
-  gridY: number,
-  extendedSize: number,
-): string | null {
-  if (gridX === 0 && gridY === 0) {
-    return cliffTopLeftTile;
-  }
-  if (gridX === extendedSize - 1 && gridY === 0) {
-    return cliffTopRightTile;
-  }
-  if (gridX === 0 && gridY === extendedSize - 1) {
-    return cliffBottomLeftTile;
-  }
-  if (gridX === extendedSize - 1 && gridY === extendedSize - 1) {
-    return cliffBottomRightTile;
-  }
-  if (gridY === 0) {
-    return cliffTopEdgeTile;
-  }
-  if (gridY === extendedSize - 1) {
-    return cliffBottomEdgeTile;
-  }
-  if (gridX === 0) {
-    return cliffLeftEdgeTile;
-  }
-  if (gridX === extendedSize - 1) {
-    return cliffRightEdgeTile;
-  }
-  return null;
 }
 
 export function ClarityGrid({ player, target, blocked, visited }: ClarityGridProps): JSX.Element {
@@ -86,7 +55,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           <div
             className="relative aspect-square h-[clamp(160px,calc(100vw-120px),360px)] rounded-[36px] border border-white/50 bg-white/30 p-3 shadow-inner"
             style={{
-              backgroundImage: `url(${waterTile})`,
+              backgroundImage: `url(${deepWaterTile})`,
               backgroundRepeat: "repeat",
               backgroundSize: "96px",
             }}
@@ -102,13 +71,31 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                 {Array.from({ length: extendedGridSize * extendedGridSize }).map((_, index) => {
                   const gridX = index % extendedGridSize;
                   const gridY = Math.floor(index / extendedGridSize);
-                  const borderTile = resolveBorderTile(gridX, gridY, extendedGridSize);
+                  const isOuterWater =
+                    gridX === 0 ||
+                    gridY === 0 ||
+                    gridX === extendedGridSize - 1 ||
+                    gridY === extendedGridSize - 1;
 
-                  if (borderTile) {
+                  if (isOuterWater) {
+                    let touchesLand =
+                      (gridX === 0 && gridY > 0 && gridY < extendedGridSize - 1) ||
+                      (gridX === extendedGridSize - 1 && gridY > 0 && gridY < extendedGridSize - 1) ||
+                      (gridY === 0 && gridX > 0 && gridX < extendedGridSize - 1) ||
+                      (gridY === extendedGridSize - 1 && gridX > 0 && gridX < extendedGridSize - 1);
+
+                    if (!touchesLand) {
+                      touchesLand =
+                        (gridX === 0 && gridY === 0) ||
+                        (gridX === extendedGridSize - 1 && gridY === 0) ||
+                        (gridX === 0 && gridY === extendedGridSize - 1) ||
+                        (gridX === extendedGridSize - 1 && gridY === extendedGridSize - 1);
+                    }
+
                     return (
-                      <div key={`border-${gridX}-${gridY}`} className="relative">
+                      <div key={`water-${gridX}-${gridY}`} className="relative">
                         <img
-                          src={borderTile}
+                          src={touchesLand ? shoreWaterTile : deepWaterTile}
                           alt=""
                           aria-hidden="true"
                           className="h-full w-full object-cover"
@@ -125,10 +112,35 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                   const isStart = x === START_POSITION.x && y === START_POSITION.y;
                   const isBlocked = blockedSet.has(key);
 
+                  const isTopEdge = y === 0;
+                  const isBottomEdge = y === GRID_SIZE - 1;
+                  const isLeftEdge = x === 0;
+                  const isRightEdge = x === GRID_SIZE - 1;
+
+                  let terrainTile = grassTile;
+
+                  if (isTopEdge && isLeftEdge) {
+                    terrainTile = cliffTopLeftTile;
+                  } else if (isTopEdge && isRightEdge) {
+                    terrainTile = cliffTopRightTile;
+                  } else if (isBottomEdge && isLeftEdge) {
+                    terrainTile = cliffBottomLeftTile;
+                  } else if (isBottomEdge && isRightEdge) {
+                    terrainTile = cliffBottomRightTile;
+                  } else if (isTopEdge) {
+                    terrainTile = cliffTopEdgeTile;
+                  } else if (isBottomEdge) {
+                    terrainTile = cliffBottomEdgeTile;
+                  } else if (isLeftEdge) {
+                    terrainTile = cliffLeftEdgeTile;
+                  } else if (isRightEdge) {
+                    terrainTile = cliffRightEdgeTile;
+                  }
+
                   return (
                     <div key={key} className="relative overflow-hidden border border-white/30">
                       <img
-                        src={grassTile}
+                        src={terrainTile}
                         alt=""
                         aria-hidden="true"
                         className="h-full w-full object-cover"
