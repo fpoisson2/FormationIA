@@ -12,6 +12,13 @@ import {
 import type { StepComponentProps } from "../../types";
 import { StepSequenceContext } from "../../types";
 
+const DEFAULT_PROMPT_LABEL = "Consigne à transmettre";
+const DEFAULT_PROMPT_PLACEHOLDER = "Décris l'action à effectuer…";
+const DEFAULT_AUTO_PUBLISH_HELPER_TEXT =
+  'Clique sur "Lancer la consigne" pour envoyer le prompt au module carte.';
+const DEFAULT_MANUAL_PUBLISH_HELPER_TEXT =
+  'Clique sur "Continuer" pour transmettre la consigne au module suivant.';
+
 export interface ClarityPromptStepPayload {
   instruction: string;
   triggerId?: string;
@@ -52,28 +59,28 @@ interface NormalizedPromptConfig {
 function sanitizeConfig(config: unknown): NormalizedPromptConfig {
   if (!config || typeof config !== "object") {
     return {
-      promptLabel: "Consigne à transmettre",
-      promptPlaceholder: "Décris l'action à effectuer…",
+      promptLabel: DEFAULT_PROMPT_LABEL,
+      promptPlaceholder: DEFAULT_PROMPT_PLACEHOLDER,
       model: "gpt-5-mini",
       verbosity: "medium",
       thinking: "medium",
       developerPrompt: "",
       settingsMode: "hidden",
       helperTextEnabled: true,
-      autoPublishHelperText: "Clique sur \"Lancer la consigne\" pour envoyer le prompt au module carte.",
-      manualPublishHelperText: "Clique sur \"Continuer\" pour transmettre la consigne au module suivant.",
+      autoPublishHelperText: DEFAULT_AUTO_PUBLISH_HELPER_TEXT,
+      manualPublishHelperText: DEFAULT_MANUAL_PUBLISH_HELPER_TEXT,
     };
   }
 
   const raw = config as ClarityPromptStepConfig;
   const promptLabel =
-    typeof raw.promptLabel === "string" && raw.promptLabel.trim()
-      ? raw.promptLabel.trim()
-      : "Consigne à transmettre";
+    typeof raw.promptLabel === "string"
+      ? raw.promptLabel.trim() || ""
+      : DEFAULT_PROMPT_LABEL;
   const promptPlaceholder =
-    typeof raw.promptPlaceholder === "string" && raw.promptPlaceholder.trim()
-      ? raw.promptPlaceholder.trim()
-      : "Décris l'action à effectuer…";
+    typeof raw.promptPlaceholder === "string"
+      ? raw.promptPlaceholder.trim() || ""
+      : DEFAULT_PROMPT_PLACEHOLDER;
 
   const model = typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "gpt-5-mini";
 
@@ -93,13 +100,13 @@ function sanitizeConfig(config: unknown): NormalizedPromptConfig {
       : "hidden";
   const helperTextEnabled = raw.helperTextEnabled !== false;
   const autoPublishHelperText =
-    typeof raw.autoPublishHelperText === "string" && raw.autoPublishHelperText.trim()
+    typeof raw.autoPublishHelperText === "string"
       ? raw.autoPublishHelperText.trim()
-      : "Clique sur \"Lancer la consigne\" pour envoyer le prompt au module carte.";
+      : DEFAULT_AUTO_PUBLISH_HELPER_TEXT;
   const manualPublishHelperText =
-    typeof raw.manualPublishHelperText === "string" && raw.manualPublishHelperText.trim()
+    typeof raw.manualPublishHelperText === "string"
       ? raw.manualPublishHelperText.trim()
-      : "Clique sur \"Continuer\" pour transmettre la consigne au module suivant.";
+      : DEFAULT_MANUAL_PUBLISH_HELPER_TEXT;
 
   return {
     promptLabel,

@@ -32,6 +32,11 @@ import type {
 } from "../../types";
 import { StepSequenceContext } from "../../types";
 
+const DEFAULT_INSTRUCTION_LABEL = "Commande transmise";
+const DEFAULT_INSTRUCTION_PLACEHOLDER = "La consigne reçue s'affichera ici…";
+const DEFAULT_PLAN_PLACEHOLDER_MESSAGE =
+  "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.";
+
 import type { ClarityPromptStepPayload } from "./ClarityPromptStep";
 
 export interface ClarityMapStepPayload {
@@ -246,10 +251,10 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
       initialTarget: null,
       promptStepId: "",
       allowInstructionInput: true,
-      instructionLabel: "Commande transmise",
-      instructionPlaceholder: "La consigne reçue s'affichera ici…",
+      instructionLabel: DEFAULT_INSTRUCTION_LABEL,
+      instructionPlaceholder: DEFAULT_INSTRUCTION_PLACEHOLDER,
       showPlanPlaceholder: true,
-      planPlaceholderMessage: "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.",
+      planPlaceholderMessage: DEFAULT_PLAN_PLACEHOLDER_MESSAGE,
       hideInstructionPanel: false,
     };
   }
@@ -264,18 +269,18 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
   const promptStepId = typeof raw.promptStepId === "string" ? raw.promptStepId.trim() : "";
   const allowInstructionInput = raw.allowInstructionInput !== false;
   const instructionLabel =
-    typeof raw.instructionLabel === "string" && raw.instructionLabel.trim()
-      ? raw.instructionLabel.trim()
-      : "Commande transmise";
+    typeof raw.instructionLabel === "string"
+      ? raw.instructionLabel.trim() || ""
+      : DEFAULT_INSTRUCTION_LABEL;
   const instructionPlaceholder =
-    typeof raw.instructionPlaceholder === "string" && raw.instructionPlaceholder.trim()
-      ? raw.instructionPlaceholder.trim()
-      : "La consigne reçue s'affichera ici…";
+    typeof raw.instructionPlaceholder === "string"
+      ? raw.instructionPlaceholder.trim() || ""
+      : DEFAULT_INSTRUCTION_PLACEHOLDER;
   const showPlanPlaceholder = raw.showPlanPlaceholder !== false;
   const planPlaceholderMessage =
-    typeof raw.planPlaceholderMessage === "string" && raw.planPlaceholderMessage.trim()
-      ? raw.planPlaceholderMessage.trim()
-      : "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.";
+    typeof raw.planPlaceholderMessage === "string"
+      ? raw.planPlaceholderMessage.trim() || ""
+      : DEFAULT_PLAN_PLACEHOLDER_MESSAGE;
   const hideInstructionPanel = raw.hideInstructionPanel === true;
 
   return {
