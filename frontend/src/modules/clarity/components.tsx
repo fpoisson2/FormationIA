@@ -6,6 +6,14 @@ import grassTile from "../../assets/kenney_map-pack/PNG/mapTile_022.png";
 import startMarkerTile from "../../assets/kenney_map-pack/PNG/mapTile_179.png";
 import treeTile from "../../assets/kenney_map-pack/PNG/mapTile_115.png";
 import waterTile from "../../assets/kenney_map-pack/PNG/mapTile_188.png";
+import coastBottomEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_176.png";
+import coastBottomLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_172.png";
+import coastBottomRightTile from "../../assets/kenney_map-pack/PNG/mapTile_173.png";
+import coastLeftEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_177.png";
+import coastRightEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_178.png";
+import coastTopEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_159.png";
+import coastTopLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_155.png";
+import coastTopRightTile from "../../assets/kenney_map-pack/PNG/mapTile_156.png";
 import { CLARITY_TIPS, DIRECTION_LABELS, GRID_SIZE, START_POSITION } from "./constants";
 import { formatDuration } from "./utils";
 import type { ClientStats, GridCoord, PlanAction } from "./types";
@@ -17,14 +25,48 @@ export interface ClarityGridProps {
   visited: Set<string>;
 }
 
+function resolveBorderTile(
+  gridX: number,
+  gridY: number,
+  extendedSize: number,
+): string | null {
+  if (gridX === 0 && gridY === 0) {
+    return coastTopLeftTile;
+  }
+  if (gridX === extendedSize - 1 && gridY === 0) {
+    return coastTopRightTile;
+  }
+  if (gridX === 0 && gridY === extendedSize - 1) {
+    return coastBottomLeftTile;
+  }
+  if (gridX === extendedSize - 1 && gridY === extendedSize - 1) {
+    return coastBottomRightTile;
+  }
+  if (gridY === 0) {
+    return coastTopEdgeTile;
+  }
+  if (gridY === extendedSize - 1) {
+    return coastBottomEdgeTile;
+  }
+  if (gridX === 0) {
+    return coastLeftEdgeTile;
+  }
+  if (gridX === extendedSize - 1) {
+    return coastRightEdgeTile;
+  }
+  return null;
+}
+
 export function ClarityGrid({ player, target, blocked, visited }: ClarityGridProps): JSX.Element {
   const blockedSet = useMemo(() => new Set(blocked.map((cell) => `${cell.x}-${cell.y}`)), [blocked]);
   const axis = useMemo(() => Array.from({ length: GRID_SIZE }, (_, index) => index), []);
-  const cellPercent = 100 / GRID_SIZE;
-  const playerLeft = (player.x + 0.5) * cellPercent;
-  const playerTop = (player.y + 0.5) * cellPercent;
-  const targetLeft = (target.x + 0.5) * cellPercent;
-  const targetTop = (target.y + 0.5) * cellPercent;
+  const extendedGridSize = GRID_SIZE + 2;
+  const cellPercent = 100 / extendedGridSize;
+  const borderOffset = 1;
+  const playerLeft = (player.x + borderOffset + 0.5) * cellPercent;
+  const playerTop = (player.y + borderOffset + 0.5) * cellPercent;
+  const targetLeft = (target.x + borderOffset + 0.5) * cellPercent;
+  const targetTop = (target.y + borderOffset + 0.5) * cellPercent;
 
   return (
     <div className="relative mx-auto w-full max-w-[480px]">
@@ -47,21 +89,41 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           >
             <div className="h-full w-full rounded-[28px] border border-white/60 bg-white/60 p-1">
               <div
-                className="grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-[24px] border border-white/40 bg-white/10"
+                className="grid h-full w-full overflow-hidden rounded-[24px] border border-white/40 bg-white/10"
                 style={{
-                  backgroundImage: `url(${grassTile})`,
-                  backgroundSize: `${100 / GRID_SIZE}% ${100 / GRID_SIZE}%`,
+                  gridTemplateColumns: `repeat(${extendedGridSize}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${extendedGridSize}, minmax(0, 1fr))`,
                 }}
               >
-                {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
-                  const x = index % GRID_SIZE;
-                  const y = Math.floor(index / GRID_SIZE);
+                {Array.from({ length: extendedGridSize * extendedGridSize }).map((_, index) => {
+                  const gridX = index % extendedGridSize;
+                  const gridY = Math.floor(index / extendedGridSize);
+                  const borderTile = resolveBorderTile(gridX, gridY, extendedGridSize);
+
+                  if (borderTile) {
+                    return (
+                      <div key={`border-${gridX}-${gridY}`} className="relative">
+                        <img src={borderTile} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+                      </div>
+                    );
+                  }
+
+                  const x = gridX - 1;
+                  const y = gridY - 1;
                   const key = `${x}-${y}`;
                   const isVisited = visited.has(key);
                   const isStart = x === START_POSITION.x && y === START_POSITION.y;
                   const isBlocked = blockedSet.has(key);
+
                   return (
-                    <div key={key} className="relative border border-white/30">
+                    <div
+                      key={key}
+                      className="relative border border-white/30"
+                      style={{
+                        backgroundImage: `url(${grassTile})`,
+                        backgroundSize: "cover",
+                      }}
+                    >
                       {isVisited && (
                         <span className="absolute inset-0 bg-[color:var(--brand-yellow)]/25 mix-blend-soft-light" aria-hidden="true" />
                       )}
@@ -69,7 +131,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                         <img
                           src={treeTile}
                           alt="Arbre bloquant"
-                          className="absolute inset-0 h-full w-full object-contain p-1"
+                          className="absolute inset-0 h-full w-full object-contain drop-shadow"
                         />
                       )}
                       {isStart && (
@@ -98,7 +160,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
             <img
               src={castleTile}
               alt="Château objectif"
-              className="absolute h-14 w-14 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg"
+              className="absolute h-11 w-11 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg"
               style={{ left: `${targetLeft}%`, top: `${targetTop}%` }}
             />
           </div>
