@@ -1073,6 +1073,7 @@ const CLARITY_START_POSITION = { x: 0, y: 0 } as const;
 interface CreatePromptEvaluationStepInput extends ToolBaseInput {
   defaultText?: string;
   developerMessage?: string;
+  showDeveloperMessage?: boolean;
   model?: string;
   verbosity?: VerbosityChoice;
   thinking?: ThinkingChoice;
@@ -1100,6 +1101,7 @@ const createPromptEvaluationStep: StepSequenceFunctionTool<
         },
         defaultText: { type: "string" },
         developerMessage: { type: "string" },
+        showDeveloperMessage: { type: "boolean" },
         model: { type: "string" },
         verbosity: { type: "string", enum: Array.from(VERBOSITY_CHOICES) },
         thinking: { type: "string", enum: Array.from(THINKING_CHOICES) },
@@ -1116,6 +1118,10 @@ const createPromptEvaluationStep: StepSequenceFunctionTool<
       DEFAULT_PROMPT_EVALUATION_DEVELOPER,
       { allowEmpty: false }
     );
+    const showDeveloperMessage =
+      typeof input.showDeveloperMessage === "boolean"
+        ? input.showDeveloperMessage
+        : true;
     const model = sanitizeString(input.model, DEFAULT_MODEL, { allowEmpty: false });
     const verbosity =
       typeof input.verbosity === "string" && VERBOSITY_CHOICES.has(input.verbosity)
@@ -1129,6 +1135,7 @@ const createPromptEvaluationStep: StepSequenceFunctionTool<
     const config: PromptEvaluationStepConfig = {
       defaultText,
       developerMessage,
+      showDeveloperMessage,
       model,
       verbosity,
       thinking,

@@ -35,6 +35,7 @@ const THINKING_VALUES: ThinkingChoice[] = ["minimal", "medium", "high"];
 interface PromptEvaluationStepContent {
   defaultText: string;
   developerMessage: string;
+  showDeveloperMessage: boolean;
   model: string;
   verbosity: VerbosityChoice;
   thinking: ThinkingChoice;
@@ -67,7 +68,6 @@ export interface PromptEvaluationStepPayload {
   prompt: string;
   rawResponse: string;
   evaluation: PromptEvaluationScore | null;
-  comment: string;
 }
 
 interface PromptEvaluationApiResponse {
@@ -88,6 +88,7 @@ function normalizeConfig(config: unknown): PromptEvaluationStepConfig {
     return {
       defaultText: DEFAULT_PROMPT_TEXT,
       developerMessage: DEFAULT_DEVELOPER_MESSAGE,
+      showDeveloperMessage: true,
       model: MODEL_OPTIONS[0]?.value ?? "gpt-5-nano",
       verbosity: "low",
       thinking: "minimal",
@@ -111,6 +112,8 @@ function normalizeConfig(config: unknown): PromptEvaluationStepConfig {
       typeof base.developerMessage === "string" && base.developerMessage.trim().length > 0
         ? base.developerMessage
         : DEFAULT_DEVELOPER_MESSAGE,
+    showDeveloperMessage:
+      typeof base.showDeveloperMessage === "boolean" ? base.showDeveloperMessage : true,
     model:
       typeof base.model === "string" && base.model.trim().length > 0
         ? base.model.trim()
@@ -156,7 +159,6 @@ function normalizePayload(payload: unknown): PromptEvaluationStepPayload {
       prompt: "",
       rawResponse: "",
       evaluation: null,
-      comment: "",
     } satisfies PromptEvaluationStepPayload;
   }
 
@@ -166,7 +168,6 @@ function normalizePayload(payload: unknown): PromptEvaluationStepPayload {
     prompt: typeof base.prompt === "string" ? base.prompt : "",
     rawResponse: typeof base.rawResponse === "string" ? base.rawResponse : "",
     evaluation: isPromptEvaluationScore(base.evaluation) ? base.evaluation : null,
-    comment: typeof base.comment === "string" ? base.comment : "",
   } satisfies PromptEvaluationStepPayload;
 }
 
@@ -207,11 +208,10 @@ export function PromptEvaluationStep({
   config,
   payload,
   isEditMode,
-  onAdvance,
+  onAdvance: _onAdvance,
   onUpdateConfig,
 }: StepComponentProps): JSX.Element {
   const context = useContext(StepSequenceContext);
-  const effectiveOnAdvance = context?.onAdvance ?? onAdvance;
   const effectiveOnUpdateConfig = context?.onUpdateConfig ?? onUpdateConfig;
   const isDesigner = context?.isEditMode ?? isEditMode;
 
@@ -227,7 +227,6 @@ export function PromptEvaluationStep({
     () => typedPayload.evaluation,
   );
   const [rawResponse, setRawResponse] = useState<string>(() => typedPayload.rawResponse);
-  const [comment, setComment] = useState<string>(() => typedPayload.comment);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,12 +234,10 @@ export function PromptEvaluationStep({
     setPromptText(typedPayload.prompt || content.defaultText);
     setEvaluation(typedPayload.evaluation);
     setRawResponse(typedPayload.rawResponse);
-    setComment(typedPayload.comment);
   }, [
     typedPayload.prompt,
     typedPayload.evaluation,
     typedPayload.rawResponse,
-    typedPayload.comment,
     content.defaultText,
   ]);
 
@@ -249,7 +246,6 @@ export function PromptEvaluationStep({
       setPromptText(content.defaultText);
       setEvaluation(null);
       setRawResponse("");
-      setComment("");
       setError(null);
     }
   }, [isDesigner, content.defaultText]);
@@ -259,6 +255,7 @@ export function PromptEvaluationStep({
       const nextContent: PromptEvaluationStepContent = {
         defaultText: content.defaultText,
         developerMessage: content.developerMessage,
+        showDeveloperMessage: content.showDeveloperMessage,
         model: content.model,
         verbosity: content.verbosity,
         thinking: content.thinking,
@@ -275,12 +272,7 @@ export function PromptEvaluationStep({
     setPromptText(value);
     setEvaluation(null);
     setRawResponse("");
-    setComment("");
     setError(null);
-  }, []);
-
-  const handleCommentChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
-    setComment(event.target.value);
   }, []);
 
   const modelOption = useMemo(
@@ -302,8 +294,6 @@ export function PromptEvaluationStep({
 
   const canRequestEvaluation = !isDesigner && !loading && trimmedPrompt.length > 0;
   const hasEvaluation = evaluation !== null;
-  const canContinue =
-    !isDesigner && !loading && hasEvaluation && trimmedPrompt.length > 0;
 
   const formattedRawResponse = useMemo(() => {
     if (!rawResponse) {
@@ -316,6 +306,41 @@ export function PromptEvaluationStep({
       return rawResponse;
     }
   }, [rawResponse]);
+
+  useEffect(() => {
+    if (!setManualAdvanceHandler) {
+      return;
+    }
+
+    if (isDesigner) {
+      setManualAdvanceHandler(null);
+      setManualAdvanceDisabled?.(false);
+      return () => {
+        setManualAdvanceHandler(null);
+        setManualAdvanceDisabled?.(false);
+      };
+    }
+
+    setManualAdvanceHandler(() => ({
+      prompt: trimmedPrompt,
+      rawResponse,
+      evaluation,
+    }));
+    setManualAdvanceDisabled?.(loading);
+
+    return () => {
+      setManualAdvanceHandler(null);
+      setManualAdvanceDisabled?.(false);
+    };
+  }, [
+    evaluation,
+    isDesigner,
+    loading,
+    rawResponse,
+    setManualAdvanceDisabled,
+    setManualAdvanceHandler,
+    trimmedPrompt,
+  ]);
 
   const handleEvaluate = useCallback(async () => {
     if (isDesigner) {
@@ -332,7 +357,6 @@ export function PromptEvaluationStep({
     setError(null);
     setEvaluation(null);
     setRawResponse("");
-    setComment("");
 
     try {
       const headers: HeadersInit = { "Content-Type": "application/json" };
@@ -386,33 +410,16 @@ export function PromptEvaluationStep({
     content.verbosity,
   ]);
 
-  const handleAdvanceClick = useCallback(() => {
-    if (!canContinue || !evaluation) {
-      return;
-    }
-
-    effectiveOnAdvance({
-      prompt: trimmedPrompt,
-      rawResponse,
-      evaluation,
-      comment: comment.trim(),
-    });
-  }, [
-    canContinue,
-    effectiveOnAdvance,
-    evaluation,
-    rawResponse,
-    comment,
-    trimmedPrompt,
-  ]);
-
   const promptFieldId = `${definition.id}-prompt`;
   const developerFieldId = `${definition.id}-developer-message`;
+  const setManualAdvanceHandler = context?.setManualAdvanceHandler;
+  const setManualAdvanceDisabled = context?.setManualAdvanceDisabled;
 
   const configIds = useMemo(
     () => ({
       defaultText: `${definition.id}-config-default-text`,
       developerMessage: `${definition.id}-config-developer-message`,
+      showDeveloperMessage: `${definition.id}-config-show-developer-message`,
       model: `${definition.id}-config-model`,
       verbosity: `${definition.id}-config-verbosity`,
       thinking: `${definition.id}-config-thinking`,
@@ -430,6 +437,13 @@ export function PromptEvaluationStep({
   const handleDeveloperMessageConfigChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       updateConfig({ developerMessage: event.target.value });
+    },
+    [updateConfig],
+  );
+
+  const handleShowDeveloperMessageConfigChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      updateConfig({ showDeveloperMessage: event.target.checked });
     },
     [updateConfig],
   );
@@ -610,34 +624,6 @@ export function PromptEvaluationStep({
     </section>
   );
 
-  const commentCard = (
-    <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Commentaire
-          </p>
-          <p className="text-sm text-slate-600">
-            Note tes observations après avoir pris connaissance du score IA.
-          </p>
-        </div>
-      </div>
-      <textarea
-        id={`${definition.id}-review-comment`}
-        value={comment}
-        onChange={hasEvaluation && !loading ? handleCommentChange : undefined}
-        readOnly={!hasEvaluation || loading}
-        rows={5}
-        placeholder={
-          hasEvaluation
-            ? "Ajoute ton appréciation ou les prochaines étapes."
-            : "Déclenche d’abord l’évaluation pour consigner un commentaire."
-        }
-        className="w-full rounded-3xl border border-slate-200 bg-white p-4 text-sm leading-relaxed text-slate-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-      />
-    </section>
-  );
-
   const mainContent = (
     <div className="space-y-8">
       <section className="space-y-4">
@@ -664,7 +650,7 @@ export function PromptEvaluationStep({
         </p>
       </section>
 
-      {developerCard}
+      {content.showDeveloperMessage ? developerCard : null}
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -696,18 +682,6 @@ export function PromptEvaluationStep({
 
       {evaluationCard}
 
-      {commentCard}
-
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={handleAdvanceClick}
-          disabled={!canContinue}
-          className="inline-flex items-center gap-2 rounded-full bg-[color:var(--brand-black)] px-5 py-2 text-sm font-semibold text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Continuer
-        </button>
-      </div>
     </div>
   );
 
@@ -760,6 +734,32 @@ export function PromptEvaluationStep({
             <p className="text-xs text-slate-500">
               Ce texte précède le prompt de l’étudiant pour demander le score.
             </p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white/80 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">
+                  Afficher le message développeur
+                </p>
+                <p className="text-xs text-slate-500">
+                  Masque le bloc côté apprenant tout en conservant l’instruction système.
+                </p>
+              </div>
+              <label
+                htmlFor={configIds.showDeveloperMessage}
+                className="inline-flex items-center gap-2 text-sm font-medium text-slate-700"
+              >
+                <input
+                  id={configIds.showDeveloperMessage}
+                  type="checkbox"
+                  checked={content.showDeveloperMessage}
+                  onChange={handleShowDeveloperMessageConfigChange}
+                  className="h-4 w-4 rounded border border-slate-300 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
+                />
+                {content.showDeveloperMessage ? "Visible" : "Masqué"}
+              </label>
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
