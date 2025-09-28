@@ -68,6 +68,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   const targetLeft = (target.x + borderOffset + 0.5) * cellPercent;
   const targetTop = (target.y + borderOffset + 0.5) * cellPercent;
   const overlaySize = `${cellPercent}%`;
+  const overlayBackgroundSize = `calc(100% / ${extendedGridSize}) calc(100% / ${extendedGridSize})`;
 
   return (
     <div className="relative mx-auto w-full max-w-[480px]">
@@ -162,7 +163,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                 })}
               </div>
             </div>
-            <div className="clarity-grid-overlay" />
+            <div className="clarity-grid-overlay" style={{ backgroundSize: overlayBackgroundSize }} />
           </div>
           <div className="pointer-events-none absolute inset-0">
             <img
