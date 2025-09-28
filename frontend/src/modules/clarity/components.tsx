@@ -93,31 +93,21 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
             height: gridExtent > 0 ? gridExtent : undefined,
           }}
         >
-          {tileSize > 0 ? (
-            axis.map((value) => (
+          <div
+            className="grid h-full w-full justify-items-end"
+            style={{
+              gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+            }}
+          >
+            {axis.map((value) => (
               <span
                 key={`row-${value}`}
-                className="pointer-events-none absolute right-0 flex w-full items-center justify-end leading-none"
-                style={{
-                  top: value * tileSize,
-                  height: tileSize,
-                }}
+                className="flex h-full w-full items-center justify-end leading-none"
               >
                 {value}
               </span>
-            ))
-          ) : (
-            <div className="grid h-full w-full grid-rows-10 justify-items-end">
-              {axis.map((value) => (
-                <span
-                  key={`row-${value}`}
-                  className="flex h-full w-full items-center justify-end leading-none"
-                >
-                  {value}
-                </span>
-              ))}
-            </div>
-          )}
+            ))}
+          </div>
         </div>
         <div className="relative flex justify-center">
           <div
@@ -184,11 +174,10 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
         </div>
         <div aria-hidden />
         <div
-          className="mx-auto grid grid-cols-10 justify-items-center text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+          className="mx-auto grid justify-items-center text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{
             width: gridExtent > 0 ? gridExtent : undefined,
-            gridTemplateColumns:
-              tileSize > 0 ? `repeat(${GRID_SIZE}, ${tileSize}px)` : undefined,
+            gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
           }}
         >
           {axis.map((value) => (
