@@ -35,6 +35,6 @@ Le frontend React dispose d'un mode test permettant de contourner la page de con
 ## Tests frontend
 
 - `npm run build --prefix frontend` : garantit que Vite/Babel peut analyser le bundle (utile avant toute capture d'écran).
-- `npm test -- --run --prefix frontend` : lance Vitest en mode run. Certaines suites (`ClarityMapStep` / `VideoStep`) peuvent être instables ; documentez toute erreur connue dans vos comptes rendus.
+- `npm --prefix frontend test -- --run` : lance Vitest en mode run. Vous pouvez désormais utiliser `npm run test:frontend` depuis la racine du dépôt (scripts déclarés dans `package.json`). Pensez à exécuter `npm run install:frontend` si le binaire Vitest n'est pas encore installé. Certaines suites (`ClarityMapStep` / `VideoStep`) peuvent être instables ; documentez toute erreur connue dans vos comptes rendus.
 
 Respectez ces indications lors de la mise à jour du projet ou de la préparation de démonstrations.
