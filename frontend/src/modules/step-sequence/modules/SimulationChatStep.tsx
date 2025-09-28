@@ -872,7 +872,7 @@ export function SimulationChatStep({
 
         <section className="space-y-6">
           <div className="rounded-3xl border border-white/70 bg-white/90 p-6 shadow-sm">
-            <div className="flex max-h-[60vh] flex-col gap-5 overflow-y-auto pr-2">
+            <div className="flex max-h-none flex-col gap-5 overflow-visible pr-2 lg:max-h-[60vh] lg:overflow-y-auto">
               {historyEntries.map((entry) => {
                 const stageTemplate = activeConfig.stages[entry.stageIndex];
                 return (
