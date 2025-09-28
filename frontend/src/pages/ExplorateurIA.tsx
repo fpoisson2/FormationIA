@@ -30,7 +30,6 @@ import {
   cloneStepConfig,
   cloneStepDefinition,
   ensureStepHasQuarterPrefix,
-  sanitizeSteps,
 } from "./explorateurIA/configUtils";
 import {
   cloneQuarter,
@@ -2532,21 +2531,15 @@ export function sanitizeExplorateurIAConfig(
     quarterDesignerSteps?: unknown;
   };
   const terrain = sanitizeTerrainConfig(base.terrain);
-  const steps = sanitizeSteps(base.steps);
   const quarters = sanitizeQuarterConfigs(
     base.quarters,
     DEFAULT_EXPLORATEUR_QUARTERS
   );
   const derived = deriveQuarterData(quarters);
-  const expandedQuarterSteps = expandQuarterSteps(
-    steps.length > 0 ? steps : getDefaultExplorateurSteps(),
-    WORLD1_QUARTER_STEPS,
-    derived.quarterOrder
-  );
-  const { designerSteps, quarterSteps } = sanitizeQuarterDesignerSteps(
-    base.quarterDesignerSteps,
+  const quarterSteps = cloneQuarterStepMap(WORLD1_QUARTER_STEPS);
+  const designerSteps = createDefaultQuarterDesignerStepMap(
     quarters,
-    expandedQuarterSteps
+    quarterSteps
   );
   return {
     terrain,

@@ -1,4 +1,4 @@
-import { isQuarterId, normalizeQuarterId, type QuarterId } from "./types";
+import { normalizeQuarterId, type QuarterId } from "./types";
 
 export type RewardStage = Exclude<QuarterId, "mairie">;
 
@@ -147,51 +147,6 @@ function sanitizeInventoryConfig(
   } satisfies ExplorateurIAInventoryConfig;
 }
 
-function makeUniqueQuarterId(baseId: QuarterId, used: Set<QuarterId>): QuarterId {
-  let candidate = baseId;
-  let suffix = 2;
-  while (used.has(candidate)) {
-    candidate = `${baseId}-${suffix}` as QuarterId;
-    suffix += 1;
-  }
-  return candidate;
-}
-
-function resolveQuarterId(
-  candidate: Partial<ExplorateurIAQuarterConfig>,
-  used: Set<QuarterId>,
-  defaultsById: Map<QuarterId, ExplorateurIAQuarterConfig>
-): { id: QuarterId; defaults?: ExplorateurIAQuarterConfig } | null {
-  const rawId =
-    typeof candidate.id === "string" && candidate.id.trim().length > 0
-      ? candidate.id.trim()
-      : undefined;
-
-  let normalizedId: QuarterId | null = null;
-  if (rawId && isQuarterId(rawId)) {
-    normalizedId = rawId as QuarterId;
-  } else if (rawId) {
-    normalizedId = normalizeQuarterId(rawId);
-  }
-
-  if (!normalizedId) {
-    const label =
-      typeof candidate.label === "string" && candidate.label.trim().length > 0
-        ? candidate.label
-        : undefined;
-    normalizedId = label ? normalizeQuarterId(label) : null;
-  }
-
-  if (!normalizedId) {
-    return null;
-  }
-
-  const defaults = defaultsById.get(normalizedId) ?? undefined;
-
-  const id = makeUniqueQuarterId(normalizedId, used);
-  return { id, defaults };
-}
-
 export function sanitizeQuarterConfigs(
   value: unknown,
   fallback: readonly ExplorateurIAQuarterConfig[] = DEFAULT_EXPLORATEUR_QUARTERS
@@ -201,76 +156,86 @@ export function sanitizeQuarterConfigs(
     defaultsById.set(quarter.id, quarter);
   }
 
-  const sanitized: ExplorateurIAQuarterConfig[] = [];
-  const used = new Set<QuarterId>();
+  const overrides = new Map<QuarterId, ExplorateurIAInventoryConfig | null>();
 
   if (Array.isArray(value)) {
     for (const item of value) {
       if (!item || typeof item !== "object") {
         continue;
       }
+
       const candidate = item as Partial<ExplorateurIAQuarterConfig> & {
         id?: unknown;
+        label?: unknown;
         inventory?: unknown;
       };
 
-      const resolved = resolveQuarterId(candidate, used, defaultsById);
-      if (!resolved) {
+      const rawId =
+        typeof candidate.id === "string" && candidate.id.trim().length > 0
+          ? candidate.id.trim()
+          : undefined;
+
+      let resolvedId: QuarterId | null = null;
+      if (rawId && defaultsById.has(rawId as QuarterId)) {
+        resolvedId = rawId as QuarterId;
+      } else if (rawId) {
+        const normalized = normalizeQuarterId(rawId);
+        if (defaultsById.has(normalized)) {
+          resolvedId = normalized;
+        }
+      } else if (
+        typeof candidate.label === "string" &&
+        candidate.label.trim().length > 0
+      ) {
+        const normalized = normalizeQuarterId(candidate.label);
+        if (defaultsById.has(normalized)) {
+          resolvedId = normalized;
+        }
+      }
+
+      if (!resolvedId) {
         continue;
       }
-      const { id, defaults } = resolved;
 
-      const label =
-        typeof candidate.label === "string" && candidate.label.trim().length > 0
-          ? candidate.label
-          : defaults?.label ?? id;
-      const color =
-        typeof candidate.color === "string" && candidate.color.trim().length > 0
-          ? candidate.color
-          : defaults?.color ?? "#ffffff";
-      const isGoal =
-        typeof candidate.isGoal === "boolean"
-          ? candidate.isGoal
-          : defaults?.isGoal ?? false;
-      const buildingNumber = !isGoal
-        ? typeof candidate.buildingNumber === "number" &&
-          Number.isFinite(candidate.buildingNumber)
-          ? Math.trunc(candidate.buildingNumber)
-          : defaults?.buildingNumber ?? null
-        : null;
+      const defaults = defaultsById.get(resolvedId);
+      if (!defaults || defaults.isGoal) {
+        overrides.set(resolvedId, null);
+        continue;
+      }
 
-      const inventory = !isGoal
-        ? sanitizeInventoryConfig(candidate.inventory, defaults?.inventory ?? null)
-        : null;
-
-      sanitized.push({
-        id,
-        label,
-        color,
-        buildingNumber,
-        isGoal,
-        inventory,
-      });
-      used.add(id);
+      const sanitizedInventory = sanitizeInventoryConfig(
+        candidate.inventory,
+        defaults.inventory ?? null
+      );
+      overrides.set(resolvedId, sanitizedInventory);
     }
   }
 
-  for (const defaults of fallback) {
-    if (used.has(defaults.id)) {
-      continue;
+  return fallback.map((defaults) => {
+    if (defaults.isGoal) {
+      return {
+        id: defaults.id,
+        label: defaults.label,
+        color: defaults.color,
+        buildingNumber: defaults.buildingNumber ?? null,
+        isGoal: true,
+        inventory: null,
+      } satisfies ExplorateurIAQuarterConfig;
     }
-    sanitized.push({
+
+    const override = overrides.get(defaults.id);
+    const inventory =
+      override ?? cloneInventoryConfig(defaults.inventory ?? null);
+
+    return {
       id: defaults.id,
       label: defaults.label,
       color: defaults.color,
       buildingNumber: defaults.buildingNumber ?? null,
-      isGoal: defaults.isGoal ?? false,
-      inventory: cloneInventoryConfig(defaults.inventory),
-    });
-    used.add(defaults.id);
-  }
-
-  return sanitized;
+      isGoal: Boolean(defaults.isGoal),
+      inventory,
+    } satisfies ExplorateurIAQuarterConfig;
+  });
 }
 
 export interface DerivedQuarterData {
