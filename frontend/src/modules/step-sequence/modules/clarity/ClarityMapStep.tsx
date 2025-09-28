@@ -60,7 +60,7 @@ export interface ClarityMapStepConfig {
   instructionPlaceholder?: string;
   showPlanPlaceholder?: boolean;
   planPlaceholderMessage?: string;
-  hideInstructionInEditMode?: boolean;
+  hideInstructionPanel?: boolean;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -73,7 +73,7 @@ interface NormalizedClarityMapConfig {
   instructionPlaceholder: string;
   showPlanPlaceholder: boolean;
   planPlaceholderMessage: string;
-  hideInstructionInEditMode: boolean;
+  hideInstructionPanel: boolean;
   onChange?: (config: ClarityMapStepConfig) => void;
 }
 
@@ -250,7 +250,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
       instructionPlaceholder: "La consigne reçue s'affichera ici…",
       showPlanPlaceholder: true,
       planPlaceholderMessage: "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.",
-      hideInstructionInEditMode: false,
+      hideInstructionPanel: false,
     };
   }
 
@@ -276,7 +276,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     typeof raw.planPlaceholderMessage === "string" && raw.planPlaceholderMessage.trim()
       ? raw.planPlaceholderMessage.trim()
       : "Le plan validé apparaîtra ici dès que le backend aura converti ta consigne.";
-  const hideInstructionInEditMode = raw.hideInstructionInEditMode === true;
+  const hideInstructionPanel = raw.hideInstructionPanel === true;
 
   return {
     obstacleCount,
@@ -287,7 +287,7 @@ function sanitizeConfig(config: unknown): NormalizedClarityMapConfig {
     instructionPlaceholder,
     showPlanPlaceholder,
     planPlaceholderMessage,
-    hideInstructionInEditMode,
+    hideInstructionPanel,
     onChange: raw.onChange,
   };
 }
@@ -506,7 +506,7 @@ export function ClarityMapStep({
   const obstacleCount = normalizedConfig.obstacleCount;
   const planPlaceholderMessage = normalizedConfig.planPlaceholderMessage;
   const showPlanPlaceholder = normalizedConfig.showPlanPlaceholder;
-  const shouldShowInstructionPanel = !(isEditMode && normalizedConfig.hideInstructionInEditMode);
+  const shouldShowInstructionPanel = !normalizedConfig.hideInstructionPanel;
 
   useEffect(() => {
     if (mapPayload || !targetFromConfig) {
@@ -584,6 +584,11 @@ export function ClarityMapStep({
 
   const applyConfigPatch = useCallback(
     (patch: Partial<ClarityMapStepConfig>) => {
+      const hideInstructionPanel =
+        typeof patch.hideInstructionPanel === "boolean"
+          ? patch.hideInstructionPanel
+          : normalizedConfig.hideInstructionPanel;
+
       const nextConfig: ClarityMapStepConfig = {
         obstacleCount: patch.obstacleCount ?? normalizedConfig.obstacleCount,
         initialTarget: patch.initialTarget ?? normalizedConfig.initialTarget,
@@ -599,10 +604,7 @@ export function ClarityMapStep({
             ? patch.showPlanPlaceholder
             : normalizedConfig.showPlanPlaceholder,
         planPlaceholderMessage: patch.planPlaceholderMessage ?? normalizedConfig.planPlaceholderMessage,
-        hideInstructionInEditMode:
-          typeof patch.hideInstructionInEditMode === "boolean"
-            ? patch.hideInstructionInEditMode
-            : normalizedConfig.hideInstructionInEditMode,
+        hideInstructionPanel,
       };
 
       normalizedConfig.onChange?.(nextConfig);
@@ -865,12 +867,12 @@ export function ClarityMapStep({
             <label className="flex items-center gap-2 md:col-span-2">
               <input
                 type="checkbox"
-                checked={normalizedConfig.hideInstructionInEditMode}
-                onChange={(event) => applyConfigPatch({ hideInstructionInEditMode: event.target.checked })}
+                checked={normalizedConfig.hideInstructionPanel}
+                onChange={(event) => applyConfigPatch({ hideInstructionPanel: event.target.checked })}
                 className="h-4 w-4 rounded border border-white/60 text-[color:var(--brand-red)] focus:border-[color:var(--brand-red)] focus:outline-none"
               />
               <span className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
-                Cacher le bloc commande transmise en mode édition
+                Cacher le bloc commande transmise
               </span>
             </label>
             <label className="flex flex-col gap-1 md:col-span-2">
