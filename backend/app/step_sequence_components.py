@@ -85,7 +85,7 @@ def _strict_object_schema(
     }
 
 
-VIDEO_SOURCE_TYPE_ENUM = ["mp4", "hls", "youtube"]
+VIDEO_SOURCE_TYPE_ENUM = ["mp4", "youtube"]
 
 
 VIDEO_SOURCE_SCHEMA = _strict_object_schema(
