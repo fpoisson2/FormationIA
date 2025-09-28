@@ -30,6 +30,7 @@ Le frontend React dispose d'un mode test permettant de contourner la page de con
 
 - Définissez `VITE_ADMIN_TEST_MODE=true` dans `.env.local` ou via la ligne de commande avant de lancer `npm run dev --prefix frontend`.
 - Depuis `/admin/connexion`, utilisez le bandeau « mode test » pour déclencher la session de démonstration. Le routeur préserve automatiquement la destination initialement demandée.
+- Après ouverture du bandeau, cliquez sur « Lancer la session de démonstration » pour accéder aux captures d'écran et à l'ensemble des interfaces protégées.
 - Les tests et captures d'écran peuvent être réalisés sans véritables identifiants ni appels réseau aux APIs d'authentification.
 
 ## Tests frontend
