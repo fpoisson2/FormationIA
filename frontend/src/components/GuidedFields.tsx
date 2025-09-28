@@ -311,7 +311,26 @@ function GuidedFields({
                   </label>
                   <span className="text-xs text-[color:var(--brand-charcoal)]/80">1 à 4 mots par plat</span>
                 </div>
-                <div className="w-full overflow-hidden rounded-2xl border border-slate-200">
+                <div className="flex flex-col gap-3 md:hidden">
+                  {meals.map((meal) => (
+                    <div key={meal} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                      <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                        {meal}
+                      </p>
+                      <input
+                        type="text"
+                        value={current[meal] ?? ""}
+                        onChange={(event) => {
+                          onChange(field.id, { ...current, [meal]: event.target.value });
+                        }}
+                        maxLength={80}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+                        placeholder="Plat"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="hidden w-full overflow-hidden rounded-2xl border border-slate-200 md:block">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <tbody>
                       {meals.map((meal) => (
@@ -351,7 +370,49 @@ function GuidedFields({
                   </label>
                   <span className="text-xs text-[color:var(--brand-charcoal)]/80">1 à 4 mots par cellule</span>
                 </div>
-                <div className="w-full overflow-hidden rounded-2xl border border-slate-200">
+                <div className="flex flex-col gap-3 md:hidden">
+                  {meals.map((meal) => {
+                    const value: TableMenuFullMealValue = current[meal] ?? {
+                      plat: "",
+                      boisson: "",
+                      dessert: "",
+                    };
+                    return (
+                      <div key={meal} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                        <p className="text-[0.7rem] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+                          {meal}
+                        </p>
+                        <div className="mt-2 space-y-3 text-sm">
+                          {(["plat", "boisson", "dessert"] as const).map((column) => (
+                            <label
+                              key={column}
+                              className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70"
+                            >
+                              {column.charAt(0).toUpperCase() + column.slice(1)}
+                              <input
+                                type="text"
+                                value={value[column]}
+                                onChange={(event) => {
+                                  onChange(field.id, {
+                                    ...current,
+                                    [meal]: {
+                                      ...value,
+                                      [column]: event.target.value,
+                                    },
+                                  });
+                                }}
+                                maxLength={80}
+                                className="rounded-2xl border border-slate-200 px-4 py-2 text-sm focus:border-[color:var(--brand-red)] focus:outline-none"
+                                placeholder={column.charAt(0).toUpperCase() + column.slice(1)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="hidden w-full overflow-hidden rounded-2xl border border-slate-200 md:block">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50 text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]">
                       <tr>

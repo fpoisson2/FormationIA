@@ -727,6 +727,68 @@ export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
       ],
     },
   },
+  "simulation-menu": {
+    componentKey: "step-sequence",
+    path: "/simulation-menu",
+    defaults: {
+      completionId: "simulation-menu",
+      enabled: true,
+      header: {
+        eyebrow: "Simulation menus",
+        title: "Compose un menu complet sans défilement",
+        subtitle:
+          "Teste la mise en forme du chat de simulation avec un tableau de menus afin de vérifier son rendu sur mobile.",
+        badge: "Étape unique",
+      },
+      layout: {
+        activityId: "simulation-menu",
+        headerClassName: "space-y-6",
+        contentClassName: "space-y-8",
+      },
+      card: {
+        title: "Simulation menu du jour",
+        description:
+          "Objectif : discuter avec le chef IA et valider un tableau de menus complet, sans débordement sur mobile.",
+        highlights: [
+          "Brief en contexte restauration",
+          "Tableau menu plat / boisson / dessert",
+          "Interface de simulation en une étape",
+        ],
+        cta: {
+          label: "Tester la simulation",
+          to: "/simulation-menu",
+        },
+      },
+      stepSequence: [
+        {
+          id: "simulation-menu:chat",
+          component: "simulation-chat",
+          config: {
+            title: "Simulation menu complet",
+            help:
+              "Échange avec le chef virtuel et complète le tableau pour valider chaque repas de la journée.",
+            roles: { ai: "Chef IA", user: "Participant" },
+            stages: [
+              {
+                id: "simulation-menu:stage-1",
+                prompt:
+                  "Le chef IA te propose un menu initial. Ajuste-le si nécessaire et renvoie la version finale dans le tableau ci-dessous.",
+                allowEmpty: false,
+                fields: [
+                  {
+                    id: "menu-jour",
+                    label: "Menu du jour",
+                    type: "table_menu_full",
+                    meals: ["Petit-déjeuner", "Déjeuner", "Dîner"],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+  },
 };
 
 export interface ActivityCardOverrides

@@ -303,48 +303,84 @@ function renderHistoryValue(field: FieldSpec, value: unknown): JSX.Element | nul
     case "table_menu_day": {
       const table = (value as TableMenuDayValue) ?? {};
       return (
-        <table className="mt-3 min-w-full divide-y divide-white/20 text-xs">
-          <tbody>
+        <div className="mt-3 text-xs">
+          <div className="flex flex-col gap-3 md:hidden">
             {field.meals.map((meal) => (
-              <tr key={meal} className="divide-x divide-white/10">
-                <th className="bg-white/10 px-3 py-2 text-left font-semibold uppercase tracking-wide">
-                  {meal}
-                </th>
-                <td className="px-3 py-2">{table[meal] ?? "—"}</td>
-              </tr>
+              <div key={meal} className="rounded-2xl bg-white/5 p-3">
+                <p className="text-[0.6rem] font-semibold uppercase tracking-wide text-white/70">{meal}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm text-white">{table[meal] ?? "—"}</p>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+          <table className="hidden w-full divide-y divide-white/20 md:table">
+            <tbody>
+              {field.meals.map((meal) => (
+                <tr key={meal} className="divide-x divide-white/10">
+                  <th className="bg-white/10 px-3 py-2 text-left font-semibold uppercase tracking-wide align-top">
+                    {meal}
+                  </th>
+                  <td className="px-3 py-2 whitespace-pre-wrap break-words text-sm">{table[meal] ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       );
     }
     case "table_menu_full": {
       const table = (value as TableMenuFullValue) ?? {};
       return (
-        <table className="mt-3 min-w-full divide-y divide-white/20 text-xs">
-          <thead className="bg-white/10">
-            <tr>
-              <th className="px-3 py-2 text-left">Repas</th>
-              <th className="px-3 py-2 text-left">Plat</th>
-              <th className="px-3 py-2 text-left">Boisson</th>
-              <th className="px-3 py-2 text-left">Dessert</th>
-            </tr>
-          </thead>
-          <tbody>
+        <div className="mt-3 text-xs">
+          <div className="flex flex-col gap-3 md:hidden">
             {field.meals.map((meal) => {
               const row = table[meal] ?? { plat: "—", boisson: "—", dessert: "—" };
               return (
-                <tr key={meal} className="divide-x divide-white/10">
-                  <th className="bg-white/10 px-3 py-2 text-left font-semibold uppercase tracking-wide">
-                    {meal}
-                  </th>
-                  <td className="px-3 py-2">{row.plat || "—"}</td>
-                  <td className="px-3 py-2">{row.boisson || "—"}</td>
-                  <td className="px-3 py-2">{row.dessert || "—"}</td>
-                </tr>
+                <div key={meal} className="rounded-2xl bg-white/5 p-3">
+                  <p className="text-[0.6rem] font-semibold uppercase tracking-wide text-white/70">{meal}</p>
+                  <dl className="mt-2 space-y-2 text-sm text-white">
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-white/60">Plat</dt>
+                      <dd className="mt-1 whitespace-pre-wrap break-words">{row.plat || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-white/60">Boisson</dt>
+                      <dd className="mt-1 whitespace-pre-wrap break-words">{row.boisson || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold uppercase tracking-wide text-white/60">Dessert</dt>
+                      <dd className="mt-1 whitespace-pre-wrap break-words">{row.dessert || "—"}</dd>
+                    </div>
+                  </dl>
+                </div>
               );
             })}
-          </tbody>
-        </table>
+          </div>
+          <table className="hidden w-full divide-y divide-white/20 md:table">
+            <thead className="bg-white/10">
+              <tr>
+                <th className="px-3 py-2 text-left align-top">Repas</th>
+                <th className="px-3 py-2 text-left align-top">Plat</th>
+                <th className="px-3 py-2 text-left align-top">Boisson</th>
+                <th className="px-3 py-2 text-left align-top">Dessert</th>
+              </tr>
+            </thead>
+            <tbody>
+              {field.meals.map((meal) => {
+                const row = table[meal] ?? { plat: "—", boisson: "—", dessert: "—" };
+                return (
+                  <tr key={meal} className="divide-x divide-white/10">
+                    <th className="bg-white/10 px-3 py-2 text-left font-semibold uppercase tracking-wide align-top">
+                      {meal}
+                    </th>
+                    <td className="px-3 py-2 whitespace-pre-wrap break-words text-sm">{row.plat || "—"}</td>
+                    <td className="px-3 py-2 whitespace-pre-wrap break-words text-sm">{row.boisson || "—"}</td>
+                    <td className="px-3 py-2 whitespace-pre-wrap break-words text-sm">{row.dessert || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       );
     }
     case "textarea_with_counter":
