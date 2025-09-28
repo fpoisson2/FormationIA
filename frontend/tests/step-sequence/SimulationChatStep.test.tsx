@@ -105,4 +105,25 @@ describe("SimulationChatStep", () => {
 
     expect(input).toHaveValue("");
   });
+
+  it("allows clearing the title and help without restoring defaults", async () => {
+    const config: SimulationChatConfig = {
+      ...baseConfig,
+      stages: [],
+    };
+
+    renderSimulationChatStep(config);
+
+    const [submitLabelInput] = await screen.findAllByLabelText("Libellé du bouton");
+    const settingsPanel = submitLabelInput.closest("aside");
+    expect(settingsPanel).not.toBeNull();
+
+    const titleInput = within(settingsPanel as HTMLElement).getByLabelText("Titre");
+    fireEvent.change(titleInput, { target: { value: "" } });
+    expect(titleInput).toHaveValue("");
+
+    const helpTextarea = within(settingsPanel as HTMLElement).getByLabelText("Aide contextuelle");
+    fireEvent.change(helpTextarea, { target: { value: "" } });
+    expect(helpTextarea).toHaveValue("");
+  });
 });

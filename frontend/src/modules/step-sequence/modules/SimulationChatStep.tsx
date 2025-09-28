@@ -204,11 +204,11 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
   };
 
   const title =
-    typeof base.title === "string" && base.title.trim().length > 0
+    typeof base.title === "string"
       ? base.title
       : DEFAULT_TITLE;
   const help =
-    typeof base.help === "string" && base.help.trim().length > 0
+    typeof base.help === "string"
       ? base.help
       : DEFAULT_HELP;
 
