@@ -115,33 +115,22 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
   }
 }
 
-const TEMPORARY_FIELD_LABEL = "__simulation_chat_field_label__";
-
 function normalizeFieldSpecForStage(spec: unknown): FieldSpec | null {
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
     return null;
   }
 
   const original = spec as Record<string, unknown>;
-  const rawLabel = typeof original.label === "string" ? original.label : "";
-  const labelForValidation =
-    rawLabel.trim().length > 0 ? rawLabel : TEMPORARY_FIELD_LABEL;
-
   const candidate = {
     ...original,
-    label: labelForValidation,
+    label: typeof original.label === "string" ? original.label : "",
   };
 
   if (!validateFieldSpec(candidate)) {
     return null;
   }
 
-  const normalized = {
-    ...candidate,
-    label: rawLabel,
-  } as FieldSpec;
-
-  return cloneFieldSpec(normalized);
+  return cloneFieldSpec(candidate as FieldSpec);
 }
 
 function isStageAnswerLike(value: unknown): value is StageAnswer {
