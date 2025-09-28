@@ -164,7 +164,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
         </div>
         <div aria-hidden />
         <div
-          className="grid grid-cols-10 justify-items-center text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+          className="mx-auto grid grid-cols-10 justify-items-center text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{
             width: gridExtent > 0 ? gridExtent : undefined,
           }}
