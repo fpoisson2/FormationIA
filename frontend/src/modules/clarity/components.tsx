@@ -99,21 +99,38 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           className="relative text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{ height: gridExtent }}
         >
-          <div
-            className="grid h-full w-full justify-items-end"
-            style={{
-              gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
-            }}
-          >
-            {axis.map((value) => (
-              <span
-                key={`row-${value}`}
-                className="flex h-full w-full items-center justify-end"
-              >
-                {value}
-              </span>
-            ))}
-          </div>
+          {tileSize > 0 ? (
+            <div className="relative h-full w-full">
+              {axis.map((value) => (
+                <span
+                  key={`row-${value}`}
+                  className="absolute flex w-full items-center justify-end"
+                  style={{
+                    top: `${value * tileSize}px`,
+                    height: `${tileSize}px`,
+                  }}
+                >
+                  {value}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div
+              className="grid h-full w-full justify-items-end"
+              style={{
+                gridTemplateRows: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+              }}
+            >
+              {axis.map((value) => (
+                <span
+                  key={`row-${value}`}
+                  className="flex h-full w-full items-center justify-end"
+                >
+                  {value}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="relative">
           <div className="relative aspect-square h-[clamp(180px,calc(100vw-120px),400px)] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner">
@@ -175,23 +192,40 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       </div>
       <div
         className="mt-2 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
-        style={{ width: gridExtent }}
+        style={{ width: gridExtent, height: tileSize > 0 ? tileSize : undefined }}
       >
-        <div
-          className="grid"
-          style={{
-            gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
-          }}
-        >
-          {axis.map((value) => (
-            <span
-              key={`col-${value}`}
-              className="flex h-full w-full items-center justify-center"
-            >
-              {value}
-            </span>
-          ))}
-        </div>
+        {tileSize > 0 ? (
+          <div className="relative h-full w-full">
+            {axis.map((value) => (
+              <span
+                key={`col-${value}`}
+                className="absolute flex h-full items-center justify-center"
+                style={{
+                  left: `${value * tileSize}px`,
+                  width: `${tileSize}px`,
+                }}
+              >
+                {value}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div
+            className="grid"
+            style={{
+              gridTemplateColumns: `repeat(${GRID_SIZE}, minmax(0, 1fr))`,
+            }}
+          >
+            {axis.map((value) => (
+              <span
+                key={`col-${value}`}
+                className="flex h-full w-full items-center justify-center"
+              >
+                {value}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
