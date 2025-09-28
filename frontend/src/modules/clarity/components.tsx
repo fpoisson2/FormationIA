@@ -68,7 +68,9 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   const targetLeft = (target.x + borderOffset + 0.5) * cellPercent;
   const targetTop = (target.y + borderOffset + 0.5) * cellPercent;
   const overlaySize = `${cellPercent}%`;
-  const overlayBackgroundSize = `calc(100% / ${extendedGridSize}) calc(100% / ${extendedGridSize})`;
+  const overlayInset = `${cellPercent}%`;
+  const overlayCellSize = `calc(100% / ${GRID_SIZE}) calc(100% / ${GRID_SIZE})`;
+  const overlayBackgroundSize = `${overlayCellSize}, ${overlayCellSize}`;
 
   return (
     <div className="relative mx-auto w-full max-w-[480px]">
@@ -163,7 +165,16 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                 })}
               </div>
             </div>
-            <div className="clarity-grid-overlay" style={{ backgroundSize: overlayBackgroundSize }} />
+            <div
+              className="clarity-grid-overlay"
+              style={{
+                backgroundSize: overlayBackgroundSize,
+                top: overlayInset,
+                bottom: overlayInset,
+                left: overlayInset,
+                right: overlayInset,
+              }}
+            />
           </div>
           <div className="pointer-events-none absolute inset-0">
             <img
