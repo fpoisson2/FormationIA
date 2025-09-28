@@ -47,22 +47,29 @@ export interface ClarityGridProps {
 export function ClarityGrid({ player, target, blocked, visited }: ClarityGridProps): JSX.Element {
   const blockedSet = useMemo(() => new Set(blocked.map((cell) => `${cell.x}-${cell.y}`)), [blocked]);
   const axis = useMemo(() => Array.from({ length: GRID_SIZE }, (_, index) => index), []);
+  const boardWrapperRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const [gridExtent, setGridExtent] = useState(0);
-  const tileSize = gridExtent > 0 ? gridExtent / GRID_SIZE : 0;
+  const [gridMetrics, setGridMetrics] = useState({ extent: 0, offsetX: 0, offsetY: 0 });
+  const tileSize = gridMetrics.extent > 0 ? gridMetrics.extent / GRID_SIZE : 0;
 
   useEffect(() => {
-    const element = gridRef.current;
-    if (!element) {
+    const gridElement = gridRef.current;
+    const wrapperElement = boardWrapperRef.current;
+    if (!gridElement || !wrapperElement) {
       return;
     }
 
     const measureExtent = () => {
-      const { width } = element.getBoundingClientRect();
-      if (width <= 0) {
+      const gridRect = gridElement.getBoundingClientRect();
+      const wrapperRect = wrapperElement.getBoundingClientRect();
+      if (gridRect.width <= 0 || gridRect.height <= 0) {
         return;
       }
-      setGridExtent(width);
+      setGridMetrics({
+        extent: gridRect.width,
+        offsetX: gridRect.left - wrapperRect.left,
+        offsetY: gridRect.top - wrapperRect.top,
+      });
     };
 
     measureExtent();
@@ -80,13 +87,9 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       if (!entry) {
         return;
       }
-      const { width } = entry.contentRect;
-      if (width <= 0) {
-        return;
-      }
-      setGridExtent(width);
+      measureExtent();
     });
-    observer.observe(element);
+    observer.observe(wrapperElement);
     return () => {
       observer.disconnect();
     };
@@ -97,7 +100,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
         <div
           className="relative text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
-          style={{ height: gridExtent }}
+          style={{ height: gridMetrics.extent, marginTop: gridMetrics.offsetY }}
         >
           {tileSize > 0 ? (
             <div className="pointer-events-none relative h-full w-full">
@@ -130,7 +133,10 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           )}
         </div>
         <div className="relative">
-          <div className="relative aspect-square h-[clamp(180px,calc(100vw-120px),400px)] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner">
+          <div
+            ref={boardWrapperRef}
+            className="relative aspect-square h-[clamp(180px,calc(100vw-120px),400px)] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner"
+          >
             <div
               ref={gridRef}
               className="relative grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl bg-slate-50/40"
@@ -189,7 +195,11 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       </div>
       <div
         className="mt-2 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
-        style={{ width: gridExtent, height: tileSize > 0 ? tileSize : undefined }}
+        style={{
+          width: gridMetrics.extent,
+          height: tileSize > 0 ? tileSize : undefined,
+          marginLeft: gridMetrics.offsetX,
+        }}
       >
         {tileSize > 0 ? (
           <div className="pointer-events-none relative h-full w-full">
