@@ -48,8 +48,8 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   const blockedSet = useMemo(() => new Set(blocked.map((cell) => `${cell.x}-${cell.y}`)), [blocked]);
   const axis = useMemo(() => Array.from({ length: GRID_SIZE }, (_, index) => index), []);
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const [tileSize, setTileSize] = useState(32);
-  const axisExtent = tileSize > 0 ? tileSize * GRID_SIZE : 0;
+  const [gridExtent, setGridExtent] = useState(0);
+  const tileSize = gridExtent > 0 ? gridExtent / GRID_SIZE : 0;
 
   useEffect(() => {
     const element = gridRef.current;
@@ -62,8 +62,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       if (width <= 0) {
         return;
       }
-      const nextSize = width / GRID_SIZE;
-      setTileSize(nextSize > 0 ? nextSize : 0);
+      setGridExtent(width);
     };
 
     updateTileSize();
@@ -88,14 +87,18 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
       <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
         <div
           className="relative text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
-          style={{ height: axisExtent }}
+          style={{ height: gridExtent }}
         >
-          <div className="grid h-full grid-rows-10 content-start justify-items-end gap-0">
+          <div className="flex h-full w-full flex-col items-end">
             {axis.map((value) => (
               <span
                 key={`row-${value}`}
                 className="flex w-full items-center justify-end"
-                style={{ height: tileSize, lineHeight: `${tileSize}px` }}
+                style={{
+                  height: tileSize,
+                  lineHeight: `${tileSize}px`,
+                  flex: tileSize > 0 ? `0 0 ${tileSize}px` : undefined,
+                }}
               >
                 {value}
               </span>
@@ -152,21 +155,29 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                   </div>
                 );
               })}
+              <div
+                className="clarity-grid-overlay"
+                style={tileSize > 0 ? { backgroundSize: `${tileSize}px ${tileSize}px` } : undefined}
+              />
             </div>
-            <div className="clarity-grid-overlay" />
           </div>
         </div>
       </div>
       <div
         className="mt-2 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
-        style={{ width: axisExtent }}
+        style={{ width: gridExtent }}
       >
         <div className="grid grid-cols-10">
           {axis.map((value) => (
             <span
               key={`col-${value}`}
               className="flex items-center justify-center"
-              style={{ height: tileSize, lineHeight: `${tileSize}px` }}
+              style={{
+                height: tileSize,
+                lineHeight: `${tileSize}px`,
+                width: tileSize,
+                minWidth: tileSize,
+              }}
             >
               {value}
             </span>
