@@ -6,32 +6,32 @@ import { useLTI } from "../hooks/useLTI";
 
 const heroHighlights = [
   {
-    title: "Ateliers guidés",
+    title: "Séquence unique",
     description:
-      "Quatre parcours prêts à l'emploi pour cadrer une demande, tester des prompts ou clarifier une consigne d'évaluation.",
+      "StepSequence guide l'apprenant de la préparation du contexte à la synthèse finale en trois étapes coordonnées.",
   },
   {
     title: "Accompagnement humain",
     description:
-      "Chaque activité contient des repères pédagogiques et des rappels méthodologiques pour garder l'esprit critique face à l'IA.",
+      "Le parcours est ponctué de repères pédagogiques pour cultiver l'esprit critique face aux suggestions de l'IA.",
   },
 ];
 
 const featureCards = [
   {
-    title: "Clarté d'abord",
+    title: "Étape 1 — Préparer",
     description:
-      "Formalisez votre intention pédagogique en quelques étapes. L'interface suggère des formulations clés pour cadrer l'IA et éviter les dérives.",
+      "Cadrez la demande et identifiez les attentes clés : StepSequence vérifie la clarté du contexte partagé à l'IA.",
   },
   {
-    title: "Prompt Dojo",
+    title: "Étape 2 — Explorer",
     description:
-      "Comparez plusieurs prompts et mesurez leur impact. Les pistes d'amélioration sont affichées à chaque itération pour ancrer les bonnes pratiques.",
+      "Comparez deux profils IA en flux continu et observez leurs réponses côte à côte pour éclairer vos choix.",
   },
   {
-    title: "Parcours de la clarté",
+    title: "Étape 3 — Synthétiser",
     description:
-      "Un environnement ludique qui confronte l'étudiant à des cas ambigus et l'aide à cartographier ses choix argumentés.",
+      "Assemblez une synthèse réutilisable, exportable et argumentée pour capitaliser sur vos essais IA.",
   },
 ];
 
@@ -44,12 +44,12 @@ const integrationHighlights = [
   {
     title: "Deep Linking simplifié",
     description:
-      "Insérez une activité Formation IA dans n'importe quel cours Moodle en deux clics. Les paramètres sont transmis automatiquement à vos étudiants.",
+      "Insérez StepSequence dans n'importe quel cours Moodle en deux clics. Les paramètres sont transmis automatiquement à vos étudiants.",
   },
   {
     title: "Suivi des parcours",
     description:
-      "Remontez les traces d'apprentissage dans Moodle : achèvements, activités consultées et progression par atelier.",
+      "Remontez les traces d'apprentissage dans Moodle : achèvements, séquence consultée et progression détaillée.",
   },
 ];
 
@@ -62,12 +62,12 @@ const onboardingSteps = [
   {
     title: "Partager via Deep Link",
     description:
-      "Depuis un cours, utilisez l'insertion LTI pour sélectionner l'activité désirée et personnaliser son intitulé.",
+      "Depuis un cours, utilisez l'insertion LTI pour sélectionner StepSequence et personnaliser son intitulé.",
   },
   {
     title: "Accompagner la cohorte",
     description:
-      "Les apprenants accèdent instantanément aux parcours guidés et bénéficient des repères pédagogiques intégrés.",
+      "Les apprenants accèdent instantanément au parcours guidé et bénéficient des repères pédagogiques intégrés.",
   },
 ];
 
@@ -100,7 +100,7 @@ function LandingPage(): JSX.Element {
               to="/activites"
               className="rounded-full border border-white/60 bg-white/60 px-4 py-2 transition hover:bg-white"
             >
-              Parcours disponibles
+              StepSequence
             </Link>
             <a
               href="#integrations"
@@ -121,14 +121,14 @@ function LandingPage(): JSX.Element {
                 Plateforme pédagogique
               </span>
               <h1 className="text-4xl font-semibold leading-tight md:text-5xl">
-                L'atelier pour apprendre à collaborer avec l'IA, pensé pour la formation supérieure.
+                StepSequence : l'atelier pour apprendre à collaborer avec l'IA en formation supérieure.
               </h1>
               <p className="text-base leading-relaxed text-[color:var(--brand-charcoal)]">
-                Formation IA accompagne enseignants et apprenants dans la découverte responsable de l'intelligence artificielle générative. Chaque activité combine une progression scénarisée, des repères pédagogiques et des espaces de réflexion.
+                Formation IA accompagne enseignants et apprenants dans la découverte responsable de l'intelligence artificielle générative. Le parcours StepSequence combine narration, repères pédagogiques et espaces de réflexion pour ancrer les bonnes pratiques.
               </p>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Link to="/activites" className="cta-button cta-button--primary">
-                  Explorer les activités
+                  Découvrir StepSequence
                 </Link>
                 <Link to="/connexion" className="cta-button cta-button--light">
                   Se connecter ou activer via Moodle
@@ -190,13 +190,13 @@ function LandingPage(): JSX.Element {
           >
             <div className="space-y-3">
               <span className="brand-chip bg-[color:var(--brand-black)] text-white">
-                Parcours immersifs
+                Parcours StepSequence
               </span>
               <h2 className="text-3xl font-semibold leading-tight">
-                Des expériences prêtes à l'emploi pour apprivoiser l'IA en classe.
+                Un chemin unique pour apprivoiser l'IA en classe.
               </h2>
               <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
-                Chaque activité propose une narration, des exemples annotés et des espaces d'analyse afin de faire émerger la stratégie numérique propre à votre établissement.
+                StepSequence offre une narration continue, des exemples annotés et des espaces d'analyse pour ancrer la stratégie numérique propre à votre établissement.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
@@ -212,7 +212,7 @@ function LandingPage(): JSX.Element {
                     {card.description}
                   </p>
                   <div className="mt-auto flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-red)]">
-                    <span aria-hidden="true">→</span> Disponible dans le catalogue
+                    <span aria-hidden="true">→</span> Intégré à StepSequence
                   </div>
                 </article>
               ))}

@@ -11,11 +11,7 @@ import { useNavigate } from "react-router-dom";
 import ActivityLayout from "../components/ActivityLayout";
 import { admin, activities as activitiesClient } from "../api";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
-import ClarityPath from "../pages/ClarityPath";
-import ClarteDabord from "../pages/ClarteDabord";
-import PromptDojo from "../pages/PromptDojo";
-import WorkshopExperience from "../pages/WorkshopExperience";
-import ExplorateurIA from "../pages/ExplorateurIA";
+import StepSequence from "../pages/WorkshopExperience";
 
 export interface ActivityHeaderConfig {
   eyebrow: string;
@@ -66,11 +62,7 @@ export interface ActivityProps {
 }
 
 export const COMPONENT_REGISTRY = {
-  "workshop-experience": WorkshopExperience,
-  "prompt-dojo": PromptDojo,
-  "clarity-path": ClarityPath,
-  "clarte-dabord": ClarteDabord,
-  "explorateur-ia": ExplorateurIA,
+  stepsequence: StepSequence,
 } as const satisfies Record<string, ComponentType<ActivityProps>>;
 
 export type ActivityComponentKey = keyof typeof COMPONENT_REGISTRY;
@@ -90,165 +82,36 @@ interface ActivityCatalogEntry {
 }
 
 export const ACTIVITY_CATALOG: Record<string, ActivityCatalogEntry> = {
-  atelier: {
-    componentKey: "workshop-experience",
-    path: "/atelier/*",
+  stepsequence: {
+    componentKey: "stepsequence",
+    path: "/stepsequence/*",
     defaults: {
-      completionId: "atelier",
+      completionId: "stepsequence",
       enabled: true,
       header: {
-        eyebrow: "Atelier comparatif IA",
-        title: "Cadrez, comparez, synthétisez vos essais IA",
+        eyebrow: "Parcours StepSequence",
+        title: "Construisez vos analyses IA en trois étapes guidées",
         subtitle:
-          "Suivez une progression claire pour préparer votre contexte, explorer deux profils IA en flux continu puis transformer les sorties en ressources réutilisables.",
-        badge: "Trois étapes guidées",
+          "Préparez votre contexte, comparez deux profils IA en flux continu puis transformez les résultats en synthèse réutilisable.",
+        badge: "Séquence pas à pas",
       },
       layout: {
-        activityId: "atelier",
+        activityId: "stepsequence",
         headerClassName: "space-y-8",
         contentClassName: "space-y-12",
       },
       card: {
-        title: "Atelier comparatif IA",
+        title: "StepSequence — Parcours guidé IA",
         description:
-          "Objectif : cadrer ta demande, comparer deux configurations IA et capitaliser sur les essais.",
+          "Objectif : cadrer la demande, tester deux configurations IA puis assembler une synthèse exploitable.",
         highlights: [
-          "Définir le contexte et les attentes",
-          "Tester modèle, verbosité et raisonnement",
-          "Assembler une synthèse réutilisable",
+          "Étape 1 : cadrer le contexte et les attentes",
+          "Étape 2 : comparer deux profils IA en temps réel",
+          "Étape 3 : structurer et exporter la synthèse finale",
         ],
         cta: {
-          label: "Lancer l’atelier",
-          to: "/atelier/etape-1",
-        },
-      },
-    },
-  },
-  "prompt-dojo": {
-    componentKey: "prompt-dojo",
-    path: "/prompt-dojo",
-    defaults: {
-      enabled: true,
-      header: {
-        eyebrow: "Prompt Dojo",
-        title: "Affûte ton prompt mission par mission",
-        subtitle:
-          "Choisis un défi parmi les missions et franchis les étapes pour décrocher ton badge en atteignant le score IA visé.",
-        badge: "Mode entraînement",
-      },
-      layout: {
-        contentAs: "div",
-        contentClassName: "gap-0",
-      },
-      card: {
-        title: "Prompt Dojo — Mission débutant",
-        description:
-          "Objectif : t’entraîner à affiner une consigne en suivant des défis progressifs.",
-        highlights: [
-          "Défis à difficulté graduelle",
-          "Retour immédiat sur la qualité du prompt",
-          "Construction d’une version finale personnalisée",
-        ],
-        cta: {
-          label: "Entrer dans le dojo",
-          to: "/prompt-dojo",
-        },
-      },
-    },
-  },
-  clarity: {
-    componentKey: "clarity-path",
-    path: "/parcours-clarte",
-    defaults: {
-      enabled: true,
-      header: {
-        eyebrow: "Parcours de la clarté",
-        title: "Guide le bonhomme avec une consigne limpide",
-        subtitle:
-          "Écris une instruction en langue naturelle. Le backend demande au modèle gpt-5-nano un plan complet, valide la trajectoire puis te montre l’exécution pas à pas.",
-        badge: "Mode jeu",
-      },
-      layout: {
-        innerClassName: "relative",
-        contentAs: "div",
-        contentClassName: "gap-10",
-      },
-      card: {
-        title: "Parcours de la clarté",
-        description:
-          "Objectif : expérimenter la précision des consignes sur un parcours 10×10.",
-        highlights: [
-          "Plan d’action IA généré avant l’animation",
-          "Visualisation pas à pas avec obstacles",
-          "Analyse des tentatives et du surcoût",
-        ],
-        cta: {
-          label: "Tester la clarté",
-          to: "/parcours-clarte",
-        },
-      },
-    },
-  },
-  "clarte-dabord": {
-    componentKey: "clarte-dabord",
-    path: "/clarte-dabord",
-    defaults: {
-      enabled: true,
-      header: {
-        eyebrow: "Clarté d'abord !",
-        title: "Identifie ce qu'il fallait dire dès la première consigne",
-        subtitle:
-          "Tu joues l'IA : l'usager précise son besoin manche après manche. Observe ce qui manquait au brief initial et retiens la checklist idéale.",
-        badge: "Trois manches guidées",
-      },
-      layout: {
-        contentAs: "div",
-        contentClassName: "gap-10",
-      },
-      card: {
-        title: "Clarté d’abord !",
-        description:
-          "Objectif : mesurer l’impact d’un brief incomplet et révéler la checklist idéale.",
-        highlights: [
-          "Deux missions thématiques en trois manches",
-          "Champs guidés avec validations pédagogiques",
-          "Révélation finale et export JSON du menu",
-        ],
-        cta: {
-          label: "Lancer Clarté d’abord !",
-          to: "/clarte-dabord",
-        },
-      },
-    },
-  },
-  "explorateur-ia": {
-    componentKey: "explorateur-ia",
-    path: "/explorateur-ia",
-    defaults: {
-      completionId: "explorateur-ia",
-      enabled: true,
-      header: {
-        eyebrow: "Activité 5",
-        title: "L’Explorateur IA",
-        subtitle:
-          "Parcours une mini-ville façon Game Boy pour valider quatre compétences IA sans jamais taper au clavier.",
-        badge: "Ville interactive",
-      },
-      layout: {
-        contentClassName: "space-y-12",
-      },
-      card: {
-        title: "L’Explorateur IA",
-        description:
-          "Objectif : compléter un parcours ludique mêlant quiz, drag-and-drop, décisions et dilemmes éthiques.",
-        highlights: [
-          "Déplacements façon jeu vidéo et interactions à la souris",
-          "Quatre mini-activités pédagogiques sans saisie de texte",
-          "Export JSON immédiat et impression PDF du bilan",
-        ],
-        cta: {
-          label: "Entrer dans la ville",
-          to: "/explorateur-ia",
+          label: "Démarrer StepSequence",
+          to: "/stepsequence/etape-1",
         },
       },
     },
