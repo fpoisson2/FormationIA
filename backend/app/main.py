@@ -778,36 +778,15 @@ _PROGRESS_COOKIE_MAX_AGE = int(os.getenv("PROGRESS_COOKIE_MAX_AGE", str(365 * 24
 
 DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
     {
-        "id": "atelier",
-        "title": "Atelier comparatif IA",
-        "description": "Comparer deux configurations de modèle et produire une synthèse finale.",
-        "route": "/atelier/etape-1",
-        "scoreMaximum": 1.0,
-    },
-    {
-        "id": "prompt-dojo",
-        "title": "Prompt Dojo — Mission débutant",
-        "description": "Affiner un prompt à travers une mission progressive et soumettre un score IA.",
-        "route": "/prompt-dojo",
-        "scoreMaximum": 1.0,
-    },
-    {
-        "id": "clarity",
-        "title": "Parcours de la clarté",
-        "description": "Tester la précision d’une consigne sur une grille 10×10 en temps réel.",
-        "route": "/parcours-clarte",
-        "scoreMaximum": 1.0,
-    },
-    {
-        "id": "clarte-dabord",
-        "title": "Clarté d’abord !",
-        "description": "Explorer trois manches guidées pour révéler la checklist idéale.",
-        "route": "/clarte-dabord",
+        "id": "stepsequence",
+        "title": "StepSequence",
+        "description": "Préparer, explorer et synthétiser un projet IA en trois étapes guidées.",
+        "route": "/stepsequence/etape-1",
         "scoreMaximum": 1.0,
     },
 ]
 _DEEP_LINK_ACTIVITY_MAP = {item["id"]: item for item in DEEP_LINK_ACTIVITIES}
-MAX_DEEP_LINK_SELECTION = 4
+MAX_DEEP_LINK_SELECTION = 1
 
 app.add_middleware(
     CORSMiddleware,

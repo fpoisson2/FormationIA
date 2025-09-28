@@ -16,9 +16,9 @@ interface LayoutProps {
 }
 
 const STEPS = [
-  { number: 1, label: "Préparer", path: "/atelier/etape-1" },
-  { number: 2, label: "Explorer", path: "/atelier/etape-2" },
-  { number: 3, label: "Synthétiser", path: "/atelier/etape-3" },
+  { number: 1, label: "Préparer", path: "/stepsequence/etape-1" },
+  { number: 2, label: "Explorer", path: "/stepsequence/etape-2" },
+  { number: 3, label: "Synthétiser", path: "/stepsequence/etape-3" },
 ];
 
 function Layout({ currentStep }: LayoutProps): JSX.Element {

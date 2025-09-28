@@ -93,7 +93,7 @@ Chaque page d’activité notifie désormais le backend via `POST /api/progress/
 - Les missions « Clarté d’abord » enregistrent aussi les réponses stade par stade (`POST /api/submit`) afin qu’un run puisse être repris ultérieurement.
 - `GET /api/progress` fournit l’état courant (utilisé sur l’écran `ActivitySelector` pour afficher un crochet vert).
 
-Lorsque l’activité est validée, le frontend déclenche automatiquement `POST /api/lti/score` (si une session LTI est active) pour envoyer un score « 1/1 » dans le carnet de notes de la plateforme. Chaque activité (« Parcours de la clarté », « Prompt Dojo », « Clarté d’abord », Atelier comparatif) renvoie ainsi son résultat au LMS pour alimenter le suivi global des apprenants.
+Lorsque l’activité est validée, le frontend déclenche automatiquement `POST /api/lti/score` (si une session LTI est active) pour envoyer un score « 1/1 » dans le carnet de notes de la plateforme. Le parcours StepSequence renvoie ainsi son résultat au LMS pour alimenter le suivi des apprenants.
 
 ## Lancer sans Docker
 

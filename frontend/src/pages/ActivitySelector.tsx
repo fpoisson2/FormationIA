@@ -24,11 +24,11 @@ import { useAdminAuth } from "../providers/AdminAuthProvider";
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
 
 const DEFAULT_ACTIVITY_SELECTOR_HEADER: ActivitySelectorHeaderConfig = {
-  eyebrow: "Choisis ton activité",
-  title: "Quelle compétence veux-tu travailler avec l'IA ?",
+  eyebrow: "Accès direct",
+  title: "Lance StepSequence pour orchestrer ta collaboration IA",
   subtitle:
-    "Chaque activité se concentre sur une intention distincte : cadrer une demande, affiner un prompt, tester une consigne ou vérifier l'exhaustivité d'un brief.",
-  badge: "Objectifs pédagogiques",
+    "Prépare le contexte, compare deux profils IA puis assemble une synthèse exploitable : tout est guidé étape par étape.",
+  badge: "Parcours unique",
 };
 
 const sanitizeHeaderConfig = (
