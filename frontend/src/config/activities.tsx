@@ -631,7 +631,28 @@ export function buildActivityElement(
 
     const handleSetOverrides = useCallback(
       (next: Partial<ActivityLayoutConfig>) => {
-        setOverrides(next);
+        setOverrides((prev) => {
+          if (!next || Object.keys(next).length === 0) {
+            return prev;
+          }
+
+          let didChange = false;
+          const updated: Partial<ActivityLayoutConfig> = { ...prev };
+          for (const key of Object.keys(next) as Array<keyof ActivityLayoutConfig>) {
+            const value = next[key];
+            if (value === undefined || value === null) {
+              if (key in updated) {
+                delete updated[key];
+                didChange = true;
+              }
+            } else if (updated[key] !== value) {
+              updated[key] = value;
+              didChange = true;
+            }
+          }
+
+          return didChange ? updated : prev;
+        });
       },
       []
     );
