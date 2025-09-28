@@ -128,7 +128,6 @@ function StepTwo({
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
             <span className="brand-chip bg-[color:var(--brand-red)]/10 text-[color:var(--brand-red)]">Étape 2</span>
-            <h2 className="text-2xl leading-tight text-[color:var(--brand-black)]">Réglez deux configurations et observez la production en direct</h2>
             <p className="text-sm text-[color:var(--brand-charcoal)]">
               Choisissez un modèle, la verbosité et l’effort de raisonnement pour vos variantes A et B. Suivez le flux en direct pour annoter les idées fortes et les tentatives plus audacieuses.
             </p>
