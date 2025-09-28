@@ -376,7 +376,7 @@ export function validateFieldSpec(spec: unknown): spec is FieldSpec {
   if (typeof base.id !== "string" || base.id.trim().length === 0) {
     return false;
   }
-  if (typeof base.label !== "string" || base.label.trim().length === 0) {
+  if (typeof base.label !== "string") {
     return false;
   }
 

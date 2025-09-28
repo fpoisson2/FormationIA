@@ -115,6 +115,24 @@ function cloneFieldSpec(field: FieldSpec): FieldSpec {
   }
 }
 
+function normalizeFieldSpecForStage(spec: unknown): FieldSpec | null {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+    return null;
+  }
+
+  const original = spec as Record<string, unknown>;
+  const candidate = {
+    ...original,
+    label: typeof original.label === "string" ? original.label : "",
+  };
+
+  if (!validateFieldSpec(candidate)) {
+    return null;
+  }
+
+  return cloneFieldSpec(candidate as FieldSpec);
+}
+
 function isStageAnswerLike(value: unknown): value is StageAnswer {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -149,8 +167,8 @@ function normalizeStage(
 
   const rawFields = Array.isArray(base.fields) ? base.fields : [];
   const fields = rawFields
-    .filter(validateFieldSpec)
-    .map((spec) => cloneFieldSpec(spec as FieldSpec));
+    .map(normalizeFieldSpecForStage)
+    .filter((field): field is FieldSpec => field !== null);
 
   const prompt = typeof base.prompt === "string" ? base.prompt : "";
   const allowEmpty = Boolean(base.allowEmpty);
@@ -186,22 +204,18 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
   };
 
   const title =
-    typeof base.title === "string" && base.title.trim().length > 0
+    typeof base.title === "string"
       ? base.title
       : DEFAULT_TITLE;
   const help =
-    typeof base.help === "string" && base.help.trim().length > 0
+    typeof base.help === "string"
       ? base.help
       : DEFAULT_HELP;
 
   const aiRole =
-    typeof base.roles?.ai === "string" && base.roles.ai.trim().length > 0
-      ? base.roles.ai
-      : DEFAULT_ROLE_AI;
+    typeof base.roles?.ai === "string" ? base.roles.ai : DEFAULT_ROLE_AI;
   const userRole =
-    typeof base.roles?.user === "string" && base.roles.user.trim().length > 0
-      ? base.roles.user
-      : DEFAULT_ROLE_USER;
+    typeof base.roles?.user === "string" ? base.roles.user : DEFAULT_ROLE_USER;
 
   const missionId =
     typeof base.missionId === "string" && base.missionId.trim().length > 0

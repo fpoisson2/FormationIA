@@ -279,6 +279,13 @@ describe("validateFieldSpec", () => {
     expect(validateFieldSpec(spec)).toBe(true);
   });
 
+  it("accepts specs whose labels are temporarily blank", () => {
+    const spec = createDefaultFieldSpec("textarea_with_counter");
+    spec.label = "";
+
+    expect(validateFieldSpec(spec)).toBe(true);
+  });
+
   it("rejects malformed specs", () => {
     const invalid = { id: "", label: "", type: "unknown" } as unknown;
     expect(validateFieldSpec(invalid)).toBe(false);
