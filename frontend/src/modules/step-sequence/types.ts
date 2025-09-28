@@ -1,6 +1,13 @@
 import { createContext } from "react";
 import type { ComponentType } from "react";
 
+export type ManualAdvanceHandler = () => unknown | Promise<unknown>;
+
+export interface ManualAdvanceState {
+  handler: ManualAdvanceHandler | null;
+  disabled: boolean;
+}
+
 export interface CompositeStepModuleDefinition {
   id: string;
   component: string;
@@ -92,8 +99,10 @@ export interface StepSequenceContextValue {
   onUpdateConfig: (config: unknown) => void;
   goToStep: (target: number | string) => void;
   activityContext?: StepSequenceActivityContextBridge | null;
-  activityContext?: Record<string, unknown> | null;
   compositeModules?: Record<string, CompositeStepModuleDefinition[]>;
+  setManualAdvanceHandler?: (handler: ManualAdvanceHandler | null) => void;
+  setManualAdvanceDisabled?: (disabled: boolean) => void;
+  getManualAdvanceState?: () => ManualAdvanceState;
 }
 
 export const StepSequenceContext = createContext<StepSequenceContextValue | undefined>(
