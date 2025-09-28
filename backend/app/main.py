@@ -54,6 +54,7 @@ from .step_sequence_components import (
     STEP_SEQUENCE_TOOLKIT,
     STEP_SEQUENCE_TOOL_DEFINITIONS,
     StepDefinition,
+    normalize_explorateur_world_step_config,
     normalize_tool_arguments,
 )
 
@@ -904,83 +905,10 @@ def _get_mission_by_id(mission_id: str) -> dict[str, Any]:
 
 def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
     config = step.get("config")
-    normalized_config: dict[str, Any] = {
-        "terrain": None,
-        "steps": [],
-        "quarterDesignerSteps": None,
-        "quarters": [],
-    }
-
-    if isinstance(config, Mapping):
-        terrain = config.get("terrain")
-        normalized_config["terrain"] = deepcopy(terrain)
-
-        def _normalize_nested_step(payload: Mapping[str, Any]) -> dict[str, Any]:
-            normalized_step = deepcopy(payload)
-            config_payload = normalized_step.get("config")
-            module_type: str | None = None
-            if isinstance(config_payload, Mapping):
-                normalized_config_payload = deepcopy(config_payload)
-                raw_type = normalized_config_payload.get("type")
-                if isinstance(raw_type, str):
-                    trimmed_type = raw_type.strip()
-                    if trimmed_type:
-                        normalized_config_payload["type"] = trimmed_type
-                        module_type = trimmed_type
-                normalized_step["config"] = normalized_config_payload
-            elif config_payload is None:
-                normalized_step["config"] = None
-            else:
-                normalized_step["config"] = deepcopy(config_payload)
-
-            raw_component = normalized_step.get("component")
-            component_value = (
-                raw_component.strip() if isinstance(raw_component, str) else ""
-            )
-            if module_type and (component_value == "" or component_value == "custom"):
-                normalized_step["component"] = module_type
-            elif component_value:
-                normalized_step["component"] = component_value
-
-            return normalized_step
-
-        raw_steps = config.get("steps")
-        if isinstance(raw_steps, (list, tuple)):
-            normalized_config["steps"] = [
-                _normalize_nested_step(item)
-                for item in raw_steps
-                if isinstance(item, Mapping)
-            ]
-
-        normalized_config["quarterDesignerSteps"] = deepcopy(
-            config.get("quarterDesignerSteps")
-        )
-
-        raw_designer_steps = config.get("quarterDesignerSteps")
-        if isinstance(raw_designer_steps, Mapping):
-            normalized_map: dict[str, list[dict[str, Any]]] = {}
-            for quarter_id, steps_payload in raw_designer_steps.items():
-                if not isinstance(steps_payload, (list, tuple)):
-                    continue
-                if isinstance(quarter_id, str):
-                    normalized_map[quarter_id] = [
-                        _normalize_nested_step(item)
-                        for item in steps_payload
-                        if isinstance(item, Mapping)
-                    ]
-            normalized_config["quarterDesignerSteps"] = normalized_map
-
-        raw_quarters = config.get("quarters")
-        if isinstance(raw_quarters, list):
-            normalized_config["quarters"] = deepcopy(raw_quarters)
-        elif isinstance(raw_quarters, tuple):
-            normalized_config["quarters"] = [deepcopy(item) for item in raw_quarters]
-
-        for key, value in config.items():
-            if key in normalized_config:
-                continue
-            normalized_config[key] = deepcopy(value)
-
+    normalized_config = normalize_explorateur_world_step_config(
+        config if isinstance(config, Mapping) else None,
+        preserve_unknown_keys=True,
+    )
     step["config"] = normalized_config
     if not _string_or_none(step.get("component")):
         step["component"] = "explorateur-world"

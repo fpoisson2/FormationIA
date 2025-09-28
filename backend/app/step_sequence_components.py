@@ -935,6 +935,97 @@ def add_clarity_prompt_step(
     return _append_step(step_sequence, create_clarity_prompt_step(**kwargs))
 
 
+def _normalize_explorateur_world_nested_step(
+    step: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Return a sanitized nested step for Explorateur IA worlds."""
+
+    normalized_step = deepcopy(step)
+    config_payload = normalized_step.get("config")
+    module_type: str | None = None
+    if isinstance(config_payload, Mapping):
+        normalized_config_payload = deepcopy(config_payload)
+        raw_type = normalized_config_payload.get("type")
+        if isinstance(raw_type, str):
+            trimmed_type = raw_type.strip()
+            if trimmed_type:
+                normalized_config_payload["type"] = trimmed_type
+                module_type = trimmed_type
+        normalized_step["config"] = normalized_config_payload
+    elif config_payload is None:
+        normalized_step["config"] = None
+    else:
+        normalized_step["config"] = deepcopy(config_payload)
+
+    raw_component = normalized_step.get("component")
+    component_value = raw_component.strip() if isinstance(raw_component, str) else ""
+    if module_type and (component_value == "" or component_value == "custom"):
+        normalized_step["component"] = module_type
+    elif component_value:
+        normalized_step["component"] = component_value
+
+    return normalized_step
+
+
+def normalize_explorateur_world_step_config(
+    config: Mapping[str, Any] | None,
+    *,
+    preserve_unknown_keys: bool = False,
+) -> dict[str, Any]:
+    """Return a normalized Explorateur world configuration payload."""
+
+    base_config = {
+        "terrain": None,
+        "steps": [],
+        "quarterDesignerSteps": None,
+        "quarters": [],
+    }
+
+    if not isinstance(config, Mapping):
+        return {key: deepcopy(value) for key, value in base_config.items()}
+
+    normalized_config: dict[str, Any] = {
+        "terrain": deepcopy(config.get("terrain")),
+        "steps": [],
+        "quarterDesignerSteps": None,
+        "quarters": deepcopy(config.get("quarters")) if config.get("quarters") is not None else [],
+    }
+
+    raw_steps = config.get("steps")
+    if isinstance(raw_steps, (list, tuple)):
+        normalized_config["steps"] = [
+            _normalize_explorateur_world_nested_step(step)
+            for step in raw_steps
+            if isinstance(step, Mapping)
+        ]
+
+    raw_designer_steps = config.get("quarterDesignerSteps")
+    if isinstance(raw_designer_steps, Mapping):
+        normalized_map: dict[str, list[dict[str, Any]]] = {}
+        for quarter_id, steps in raw_designer_steps.items():
+            if not isinstance(steps, (list, tuple)):
+                continue
+            if isinstance(quarter_id, str):
+                normalized_map[quarter_id] = [
+                    _normalize_explorateur_world_nested_step(step)
+                    for step in steps
+                    if isinstance(step, Mapping)
+                ]
+        normalized_config["quarterDesignerSteps"] = normalized_map
+    else:
+        normalized_config["quarterDesignerSteps"] = deepcopy(
+            config.get("quarterDesignerSteps")
+        )
+
+    if preserve_unknown_keys:
+        for key, value in config.items():
+            if key in normalized_config:
+                continue
+            normalized_config[key] = deepcopy(value)
+
+    return normalized_config
+
+
 def create_explorateur_world_step(
     *,
     step_id: str,
@@ -947,73 +1038,7 @@ def create_explorateur_world_step(
     enrichir progressivement les terrains, quartiers et étapes.
     """
 
-    default_config: dict[str, Any] = {
-        "terrain": None,
-        "steps": [],
-        "quarterDesignerSteps": None,
-        "quarters": [],
-    }
-    def _normalize_nested_step(step: Mapping[str, Any]) -> dict[str, Any]:
-        normalized_step = deepcopy(step)
-        config_payload = normalized_step.get("config")
-        module_type: str | None = None
-        if isinstance(config_payload, Mapping):
-            normalized_config_payload = deepcopy(config_payload)
-            raw_type = normalized_config_payload.get("type")
-            if isinstance(raw_type, str):
-                trimmed_type = raw_type.strip()
-                if trimmed_type:
-                    normalized_config_payload["type"] = trimmed_type
-                    module_type = trimmed_type
-            normalized_step["config"] = normalized_config_payload
-        elif config_payload is None:
-            normalized_step["config"] = None
-        else:
-            normalized_step["config"] = deepcopy(config_payload)
-
-        raw_component = normalized_step.get("component")
-        component_value = raw_component.strip() if isinstance(raw_component, str) else ""
-        if module_type and (component_value == "" or component_value == "custom"):
-            normalized_step["component"] = module_type
-        elif component_value:
-            normalized_step["component"] = component_value
-
-        return normalized_step
-
-    normalized_config = default_config
-    if isinstance(config, Mapping):
-        normalized_config = {
-            "terrain": deepcopy(config.get("terrain")),
-            "steps": [],
-            "quarterDesignerSteps": None,
-            "quarters": deepcopy(config.get("quarters")) if config.get("quarters") is not None else [],
-        }
-
-        raw_steps = config.get("steps")
-        if isinstance(raw_steps, (list, tuple)):
-            normalized_config["steps"] = [
-                _normalize_nested_step(step)
-                for step in raw_steps
-                if isinstance(step, Mapping)
-            ]
-
-        raw_designer_steps = config.get("quarterDesignerSteps")
-        if isinstance(raw_designer_steps, Mapping):
-            normalized_map: dict[str, list[dict[str, Any]]] = {}
-            for quarter_id, steps in raw_designer_steps.items():
-                if not isinstance(steps, (list, tuple)):
-                    continue
-                if isinstance(quarter_id, str):
-                    normalized_map[quarter_id] = [
-                        _normalize_nested_step(step)
-                        for step in steps
-                        if isinstance(step, Mapping)
-                    ]
-            normalized_config["quarterDesignerSteps"] = normalized_map
-        else:
-            normalized_config["quarterDesignerSteps"] = deepcopy(
-                config.get("quarterDesignerSteps")
-            )
+    normalized_config = normalize_explorateur_world_step_config(config)
 
     return {
         "id": str(step_id),
