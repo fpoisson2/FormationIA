@@ -88,7 +88,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   }, []);
 
   return (
-    <div className="relative mx-auto w-full max-w-[560px]">
+    <div className="relative w-full">
       <div className="grid grid-cols-[auto,1fr] grid-rows-[1fr,auto] items-start gap-x-2 gap-y-2 sm:gap-x-3 sm:gap-y-3 md:gap-x-4 md:gap-y-4">
         <div
           className="relative w-6 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 sm:w-7 md:w-8 md:text-xs"
@@ -97,16 +97,16 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           }}
         >
           {hasTileMeasurements ? (
-            <div className="pointer-events-none absolute inset-0">
+            <div
+              className="pointer-events-none absolute inset-0 grid justify-items-end"
+              style={{
+                gridTemplateRows: `repeat(${GRID_SIZE}, ${tileHeight}px)`,
+              }}
+            >
               {axis.map((value) => (
                 <span
                   key={`row-${value}`}
-                  className="absolute flex w-full justify-end text-right"
-                  style={{
-                    top: tileHeight * value + tileHeight / 2,
-                    transform: "translateY(-50%)",
-                    lineHeight: 1,
-                  }}
+                  className="flex h-full w-full items-center justify-end leading-none"
                 >
                   {value}
                 </span>
@@ -131,21 +131,16 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           )}
         </div>
         <div className="relative flex justify-center">
-          <div
-            className="relative w-full max-w-[460px] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner"
-            style={{
-              width: "clamp(200px, calc(100vw - 96px), 460px)",
-              height: "clamp(200px, calc(100vw - 96px), 460px)",
-            }}
-          >
-            <div
-              ref={gridRef}
-              className="relative grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl bg-slate-50/40"
-            >
-              {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
-                const x = index % GRID_SIZE;
-                const y = Math.floor(index / GRID_SIZE);
-                const key = `${x}-${y}`;
+          <div className="relative w-full max-w-[520px]">
+            <div className="relative aspect-square w-full">
+              <div
+                ref={gridRef}
+                className="relative grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl border border-white/60 bg-slate-50/40 shadow-inner"
+              >
+                {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
+                  const x = index % GRID_SIZE;
+                  const y = Math.floor(index / GRID_SIZE);
+                  const key = `${x}-${y}`;
                 const isStart = x === START_POSITION.x && y === START_POSITION.y;
                 const isVisited = visited.has(key) && !isStart;
                 const isTarget = x === target.x && y === target.y;
@@ -186,10 +181,11 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                   </div>
                 );
               })}
-              <div
-                className="clarity-grid-overlay"
-                style={tileSize > 0 ? { backgroundSize: `${tileSize}px ${tileSize}px` } : undefined}
-              />
+                <div
+                  className="clarity-grid-overlay"
+                  style={tileSize > 0 ? { backgroundSize: `${tileSize}px ${tileSize}px` } : undefined}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -202,17 +198,16 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           }}
         >
           {hasTileMeasurements ? (
-            <div className="pointer-events-none relative h-full w-full">
+            <div
+              className="pointer-events-none absolute inset-0 grid justify-items-center"
+              style={{
+                gridTemplateColumns: `repeat(${GRID_SIZE}, ${tileWidth}px)`,
+              }}
+            >
               {axis.map((value) => (
                 <span
                   key={`col-${value}`}
-                  className="absolute flex h-full items-center justify-center"
-                  style={{
-                    left: tileWidth * value + tileWidth / 2,
-                    transform: "translateX(-50%)",
-                    width: tileWidth,
-                    lineHeight: 1,
-                  }}
+                  className="flex h-full w-full items-center justify-center leading-none"
                 >
                   {value}
                 </span>
