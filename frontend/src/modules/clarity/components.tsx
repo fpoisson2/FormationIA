@@ -6,14 +6,14 @@ import grassTile from "../../assets/kenney_map-pack/PNG/mapTile_022.png";
 import startMarkerTile from "../../assets/kenney_map-pack/PNG/mapTile_179.png";
 import treeTile from "../../assets/kenney_map-pack/PNG/mapTile_115.png";
 import waterTile from "../../assets/kenney_map-pack/PNG/mapTile_188.png";
-import coastBottomEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_176.png";
-import coastBottomLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_172.png";
-import coastBottomRightTile from "../../assets/kenney_map-pack/PNG/mapTile_173.png";
-import coastLeftEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_177.png";
-import coastRightEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_178.png";
-import coastTopEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_159.png";
-import coastTopLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_155.png";
-import coastTopRightTile from "../../assets/kenney_map-pack/PNG/mapTile_156.png";
+import cliffBottomEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_037.png";
+import cliffBottomLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_036.png";
+import cliffBottomRightTile from "../../assets/kenney_map-pack/PNG/mapTile_038.png";
+import cliffLeftEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_021.png";
+import cliffRightEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_023.png";
+import cliffTopEdgeTile from "../../assets/kenney_map-pack/PNG/mapTile_007.png";
+import cliffTopLeftTile from "../../assets/kenney_map-pack/PNG/mapTile_006.png";
+import cliffTopRightTile from "../../assets/kenney_map-pack/PNG/mapTile_008.png";
 import { CLARITY_TIPS, DIRECTION_LABELS, GRID_SIZE, START_POSITION } from "./constants";
 import { formatDuration } from "./utils";
 import type { ClientStats, GridCoord, PlanAction } from "./types";
@@ -31,28 +31,28 @@ function resolveBorderTile(
   extendedSize: number,
 ): string | null {
   if (gridX === 0 && gridY === 0) {
-    return coastTopLeftTile;
+    return cliffTopLeftTile;
   }
   if (gridX === extendedSize - 1 && gridY === 0) {
-    return coastTopRightTile;
+    return cliffTopRightTile;
   }
   if (gridX === 0 && gridY === extendedSize - 1) {
-    return coastBottomLeftTile;
+    return cliffBottomLeftTile;
   }
   if (gridX === extendedSize - 1 && gridY === extendedSize - 1) {
-    return coastBottomRightTile;
+    return cliffBottomRightTile;
   }
   if (gridY === 0) {
-    return coastTopEdgeTile;
+    return cliffTopEdgeTile;
   }
   if (gridY === extendedSize - 1) {
-    return coastBottomEdgeTile;
+    return cliffBottomEdgeTile;
   }
   if (gridX === 0) {
-    return coastLeftEdgeTile;
+    return cliffLeftEdgeTile;
   }
   if (gridX === extendedSize - 1) {
-    return coastRightEdgeTile;
+    return cliffRightEdgeTile;
   }
   return null;
 }
@@ -67,6 +67,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
   const playerTop = (player.y + borderOffset + 0.5) * cellPercent;
   const targetLeft = (target.x + borderOffset + 0.5) * cellPercent;
   const targetTop = (target.y + borderOffset + 0.5) * cellPercent;
+  const overlaySize = `${cellPercent}%`;
 
   return (
     <div className="relative mx-auto w-full max-w-[480px]">
@@ -103,7 +104,13 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                   if (borderTile) {
                     return (
                       <div key={`border-${gridX}-${gridY}`} className="relative">
-                        <img src={borderTile} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+                        <img
+                          src={borderTile}
+                          alt=""
+                          aria-hidden="true"
+                          className="h-full w-full object-cover"
+                          style={{ imageRendering: "pixelated" }}
+                        />
                       </div>
                     );
                   }
@@ -116,14 +123,14 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                   const isBlocked = blockedSet.has(key);
 
                   return (
-                    <div
-                      key={key}
-                      className="relative border border-white/30"
-                      style={{
-                        backgroundImage: `url(${grassTile})`,
-                        backgroundSize: "cover",
-                      }}
-                    >
+                    <div key={key} className="relative overflow-hidden border border-white/30">
+                      <img
+                        src={grassTile}
+                        alt=""
+                        aria-hidden="true"
+                        className="h-full w-full object-cover"
+                        style={{ imageRendering: "pixelated" }}
+                      />
                       {isVisited && (
                         <span className="absolute inset-0 bg-[color:var(--brand-yellow)]/25 mix-blend-soft-light" aria-hidden="true" />
                       )}
@@ -132,14 +139,21 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
                           src={treeTile}
                           alt="Arbre bloquant"
                           className="absolute inset-0 h-full w-full object-contain drop-shadow"
+                          style={{ imageRendering: "pixelated" }}
                         />
                       )}
                       {isStart && (
-                        <span className="absolute left-1 top-1 z-[1] flex h-7 w-7 items-center justify-center">
+                        <span
+                          className="absolute left-1/2 top-1/2 z-[1] flex -translate-x-1/2 -translate-y-1/2"
+                          style={{ width: "72%", height: "72%" }}
+                        >
                           <img
                             src={startMarkerTile}
                             alt="Point de départ"
                             className="h-full w-full object-contain drop-shadow"
+                            style={{
+                              imageRendering: "pixelated",
+                            }}
                           />
                         </span>
                       )}
@@ -154,14 +168,26 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
             <img
               src={explorerToken}
               alt="Explorateur"
-              className="absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg transition-transform duration-300 ease-out"
-              style={{ left: `${playerLeft}%`, top: `${playerTop}%` }}
+              className="absolute -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg transition-transform duration-300 ease-out"
+              style={{
+                left: `${playerLeft}%`,
+                top: `${playerTop}%`,
+                width: overlaySize,
+                height: overlaySize,
+                imageRendering: "pixelated",
+              }}
             />
             <img
               src={castleTile}
               alt="Château objectif"
-              className="absolute h-11 w-11 -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg"
-              style={{ left: `${targetLeft}%`, top: `${targetTop}%` }}
+              className="absolute -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-lg"
+              style={{
+                left: `${targetLeft}%`,
+                top: `${targetTop}%`,
+                width: overlaySize,
+                height: overlaySize,
+                imageRendering: "pixelated",
+              }}
             />
           </div>
         </div>
