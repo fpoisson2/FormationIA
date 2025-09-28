@@ -34,3 +34,6 @@ Ce projet met à disposition deux "agents" côté serveur, exposés par l’API 
 - Vérifie la présence de `OPENAI_API_KEY` et répond `{ "status": "ok", "openai_key_loaded": true|false }`.
 
 Les agents partagent la même clé (variable d’environnement `OPENAI_API_KEY`) et s’appuient sur `text={"verbosity": ...}` ainsi que `reasoning={"effort": ..., "summary": "auto"}` tels que configurés dans `backend/app/main.py`.
+
+## Directives de contribution
+- Toute modification doit être vérifiée en mode test et accompagnée d’une capture d’écran attestant du résultat.
