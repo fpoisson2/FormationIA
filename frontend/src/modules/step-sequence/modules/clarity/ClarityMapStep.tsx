@@ -396,9 +396,28 @@ export function ClarityMapStep({
 }: StepComponentProps): JSX.Element {
   const sequenceContext = useContext(StepSequenceContext);
   const activeStepId = sequenceContext?.steps?.[sequenceContext.stepIndex]?.id;
-  const shouldAutoPublish = Boolean(sequenceContext) && activeStepId !== definition.id;
   const sequencePayloads = sequenceContext?.payloads ?? null;
   const compositeModules = sequenceContext?.compositeModules ?? null;
+
+  const isInsideComposite = useMemo(() => {
+    if (!compositeModules) {
+      return false;
+    }
+
+    for (const modules of Object.values(compositeModules)) {
+      if (!Array.isArray(modules)) {
+        continue;
+      }
+      if (modules.some((module) => module.id === definition.id)) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [compositeModules, definition.id]);
+
+  const shouldAutoPublish =
+    Boolean(sequenceContext) && (activeStepId !== definition.id || isInsideComposite);
 
   const detectedPromptStepId = useMemo(() => {
     if (!compositeModules) {

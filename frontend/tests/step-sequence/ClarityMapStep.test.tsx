@@ -166,6 +166,48 @@ describe("ClarityMapStep", () => {
     });
   });
 
+  it("publishes automatically inside a composite even when sharing the active step id", async () => {
+    const onAdvance = vi.fn();
+    const sharedId = "shared-step";
+    const props: StepComponentProps = {
+      definition: { id: sharedId, component: "clarity-map" },
+      config: { obstacleCount: 0, allowInstructionInput: true },
+      payload: undefined,
+      isActive: true,
+      isEditMode: false,
+      onAdvance,
+      onUpdateConfig: vi.fn(),
+    };
+
+    const compositeContext = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [
+        { id: sharedId, component: "composite", composite: { modules: [] } },
+      ],
+      payloads: {},
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+      compositeModules: {
+        [sharedId]: [
+          { id: sharedId, component: "clarity-map", slot: "main", config: null },
+        ],
+      },
+    };
+
+    render(
+      <StepSequenceContext.Provider value={compositeContext}>
+        <ClarityMapStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    await waitFor(() => {
+      expect(onAdvance).toHaveBeenCalled();
+    });
+  });
+
   it("affiche la commande reçue depuis le module prompt configuré", () => {
     const mapPayload: ClarityMapStepPayload = {
       runId: "run-shared",

@@ -86,11 +86,13 @@ export function CompositeStep({
   onUpdateConfig,
 }: StepComponentProps): JSX.Element | null {
   const parentContext = useContext(StepSequenceContext);
-  const supportsGlobalContinue = Boolean(
+  const hasManualAdvanceBridge = Boolean(
     parentContext?.setManualAdvanceHandler &&
       parentContext?.setManualAdvanceDisabled &&
       parentContext?.getManualAdvanceState
   );
+  const supportsGlobalContinue =
+    hasManualAdvanceBridge && Boolean(parentContext?.activityContext);
 
   const compositeConfig = useMemo(() => {
     if (isCompositeConfig(config)) {
