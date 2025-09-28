@@ -9,6 +9,8 @@ import type {
   StepComponentWithMetadata,
   StepSequenceActivityContextBridge,
   StepSequenceLayoutOverrides,
+  ManualAdvanceHandler,
+  ManualAdvanceState,
 } from "./types";
 import { isCompositeStepDefinition, resolveStepComponentKey } from "./types";
 
@@ -202,6 +204,32 @@ export function StepSequenceRenderer({
     [steps]
   );
 
+  const manualAdvanceStateRef = useRef<ManualAdvanceState>({
+    handler: null,
+    disabled: false,
+  });
+
+  const setManualAdvanceHandler = useCallback((handler: ManualAdvanceHandler | null) => {
+    manualAdvanceStateRef.current = {
+      ...manualAdvanceStateRef.current,
+      handler,
+    };
+  }, []);
+
+  const setManualAdvanceDisabled = useCallback((disabled: boolean) => {
+    manualAdvanceStateRef.current = {
+      ...manualAdvanceStateRef.current,
+      disabled,
+    };
+  }, []);
+
+  const getManualAdvanceState = useCallback((): ManualAdvanceState => {
+    return {
+      handler: manualAdvanceStateRef.current.handler,
+      disabled: manualAdvanceStateRef.current.disabled,
+    };
+  }, []);
+
   const contextValue = useMemo(
     () => ({
       stepIndex: currentIndex,
@@ -213,20 +241,31 @@ export function StepSequenceRenderer({
       onUpdateConfig: handleConfigUpdate,
       goToStep,
       activityContext,
+      setManualAdvanceHandler,
+      setManualAdvanceDisabled,
+      getManualAdvanceState,
     }),
     [
+      getManualAdvanceState,
       activityContext,
       currentIndex,
       goToStep,
       handleAdvance,
       handleConfigUpdate,
       isEditMode,
+      setManualAdvanceDisabled,
+      setManualAdvanceHandler,
       stepPayloads,
       steps,
     ]
   );
 
   const activeStep = steps[currentIndex];
+  const activeStepId = activeStep?.id ?? null;
+
+  useEffect(() => {
+    manualAdvanceStateRef.current = { handler: null, disabled: false };
+  }, [activeStepId]);
   if (!activeStep) {
     return null;
   }

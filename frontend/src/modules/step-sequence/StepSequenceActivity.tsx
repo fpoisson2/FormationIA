@@ -197,11 +197,65 @@ export function StepSequenceActivity({
       const canGoBack = stepIndex > 0;
       const isLastStep = stepIndex === stepCount - 1;
       const resolvedComponentKey = resolveStepComponentKey(step);
-      const showContinueButton =
-        context.isEditMode ||
-        (resolvedComponentKey
-          ? MANUAL_ADVANCE_COMPONENTS.has(resolvedComponentKey)
-          : false);
+      const isCompositeStep = isCompositeStepDefinition(step);
+      const compositeConfig = isCompositeStep ? step.composite ?? null : null;
+      const manualAdvanceState = context.getManualAdvanceState?.();
+      const continueDisabled = context.isEditMode
+        ? false
+        : manualAdvanceState?.disabled ?? false;
+
+      let showContinueButton = context.isEditMode;
+      if (!showContinueButton) {
+        if (resolvedComponentKey === "composite") {
+          const requiresManualAdvance =
+            isCompositeStep && !(compositeConfig?.autoAdvance ?? false);
+          showContinueButton = requiresManualAdvance || Boolean(manualAdvanceState?.handler);
+        } else if (resolvedComponentKey) {
+          showContinueButton =
+            MANUAL_ADVANCE_COMPONENTS.has(resolvedComponentKey) ||
+            Boolean(manualAdvanceState?.handler);
+        }
+      }
+      if (!showContinueButton && manualAdvanceState?.handler) {
+        showContinueButton = true;
+      }
+
+      const handleContinue = () => {
+        const manualState = context.getManualAdvanceState?.();
+        const handler = manualState?.handler ?? null;
+        if (!handler) {
+          advance();
+          return;
+        }
+
+        try {
+          const result = handler();
+          if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+            void (result as PromiseLike<unknown>).then(
+              (payload) => {
+                advance(payload);
+              },
+              () => {
+                advance();
+              }
+            );
+          } else {
+            advance(result);
+          }
+        } catch {
+          advance();
+        }
+      };
+
+      const continueLabel = (() => {
+        if (isLastStep) {
+          return "Terminer";
+        }
+        if (resolvedComponentKey === "composite" && compositeConfig?.continueLabel) {
+          return compositeConfig.continueLabel;
+        }
+        return "Continuer";
+      })();
       const indicatorLabel = `Étape ${stepIndex + 1} sur ${stepCount}`;
       const progressPercent =
         stepCount > 0 ? Math.round(((stepIndex + 1) / stepCount) * 100) : 0;
@@ -273,10 +327,11 @@ export function StepSequenceActivity({
               {showContinueButton ? (
                 <button
                   type="button"
-                  onClick={advance}
-                  className="inline-flex items-center justify-center rounded-full border border-orange-500 bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:border-orange-600 hover:bg-orange-600"
+                  onClick={handleContinue}
+                  disabled={continueDisabled}
+                  className="inline-flex items-center justify-center rounded-full border border-orange-500 bg-orange-500 px-5 py-2 text-sm font-semibold text-white transition hover:border-orange-600 hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isLastStep ? "Terminer" : "Continuer"}
+                  {continueLabel}
                 </button>
               ) : null}
             </div>

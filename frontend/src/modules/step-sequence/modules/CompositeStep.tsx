@@ -74,6 +74,11 @@ export function CompositeStep({
   onUpdateConfig,
 }: StepComponentProps): JSX.Element | null {
   const parentContext = useContext(StepSequenceContext);
+  const supportsGlobalContinue = Boolean(
+    parentContext?.setManualAdvanceHandler &&
+      parentContext?.setManualAdvanceDisabled &&
+      parentContext?.getManualAdvanceState
+  );
 
   const compositeConfig = useMemo(() => {
     if (isCompositeConfig(config)) {
@@ -295,6 +300,34 @@ export function CompositeStep({
       onAdvance(modulePayloads);
     }
   }, [autoAdvance, allModulesCompleted, isActive, modulePayloads, modules, onAdvance]);
+
+  useEffect(() => {
+    if (!supportsGlobalContinue) {
+      return;
+    }
+
+    if (!isActive || autoAdvance || modules.length === 0) {
+      parentContext?.setManualAdvanceHandler?.(null);
+      parentContext?.setManualAdvanceDisabled?.(false);
+      return;
+    }
+
+    parentContext.setManualAdvanceHandler(() => modulePayloads);
+    parentContext.setManualAdvanceDisabled?.(!allModulesCompleted);
+
+    return () => {
+      parentContext?.setManualAdvanceHandler?.(null);
+      parentContext?.setManualAdvanceDisabled?.(false);
+    };
+  }, [
+    allModulesCompleted,
+    autoAdvance,
+    isActive,
+    modulePayloads,
+    modules.length,
+    parentContext,
+    supportsGlobalContinue,
+  ]);
 
   const renderedModules = useMemo(() => {
     return modules.map((module) => {
@@ -525,7 +558,7 @@ export function CompositeStep({
       {partitioned.footer.length > 0 ? (
         <div className="space-y-6">{partitioned.footer}</div>
       ) : null}
-      {!autoAdvance && modules.length > 0 ? (
+      {!autoAdvance && modules.length > 0 && !supportsGlobalContinue ? (
         <div className="flex justify-end">
           <button
             type="button"
