@@ -5855,10 +5855,18 @@ function ExplorateurIAConfigDesigner({
     [config.quarters]
   );
 
-  const [activeQuarterId, setActiveQuarterId] = useState<QuarterId | null>(
-    null
-  );
-  const [pendingStepId, setPendingStepId] = useState<string | null>(null);
+  const [expandedQuarterIds, setExpandedQuarterIds] = useState<QuarterId[]>([]);
+  const [pendingStepIdByQuarter, setPendingStepIdByQuarter] = useState<
+    Partial<Record<QuarterId, string | null>>
+  >({});
+
+  const toggleQuarter = useCallback((quarterId: QuarterId) => {
+    setExpandedQuarterIds((current) =>
+      current.includes(quarterId)
+        ? current.filter((id) => id !== quarterId)
+        : [...current, quarterId]
+    );
+  }, []);
 
   const handleAddQuarter = useCallback(() => {
     const nextQuarter = createNewQuarterTemplate(config.quarters);
@@ -5885,12 +5893,21 @@ function ExplorateurIAConfigDesigner({
       fallbackSteps
     );
     onUpdateQuarterDesignerSteps(designerSteps);
-    setActiveQuarterId(nextQuarter.id);
+    setExpandedQuarterIds((current) =>
+      current.includes(nextQuarter.id)
+        ? current
+        : [...current, nextQuarter.id]
+    );
     const firstStep = designerSteps[nextQuarter.id]?.[0]?.id ?? null;
-    setPendingStepId(firstStep);
+    setPendingStepIdByQuarter((current) => ({
+      ...current,
+      [nextQuarter.id]: firstStep,
+    }));
   }, [
     config.quarterDesignerSteps,
     config.quarters,
+    setExpandedQuarterIds,
+    setPendingStepIdByQuarter,
     onUpdateQuarterDesignerSteps,
     onUpdateQuarters,
   ]);
@@ -5940,27 +5957,6 @@ function ExplorateurIAConfigDesigner({
     },
     [onUpdateTerrain]
   );
-
-  const handleCloseDesigner = useCallback(() => {
-    setActiveQuarterId(null);
-    setPendingStepId(null);
-  }, []);
-
-  const openQuarter = useMemo(
-    () =>
-      activeQuarterId
-        ? config.quarters.find((quarter) => quarter.id === activeQuarterId) ??
-          null
-        : null,
-    [activeQuarterId, config.quarters]
-  );
-
-  const activeDesignerSteps = useMemo(() => {
-    if (!activeQuarterId) {
-      return [] as StepDefinition[];
-    }
-    return config.quarterDesignerSteps[activeQuarterId] ?? [];
-  }, [activeQuarterId, config.quarterDesignerSteps]);
 
   const handleDesignerStepConfigChange = useCallback(
     (quarterId: QuarterId, stepId: string, nextConfig: unknown) => {
@@ -6188,40 +6184,50 @@ function ExplorateurIAConfigDesigner({
         fallbackSteps
       );
       onUpdateQuarterDesignerSteps(designerSteps);
-      setPendingStepId(normalizedStep.id);
+      setPendingStepIdByQuarter((current) => ({
+        ...current,
+        [quarter.id]: normalizedStep.id,
+      }));
     },
-    [config.quarterDesignerSteps, config.quarters, onUpdateQuarterDesignerSteps]
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      setPendingStepIdByQuarter,
+    ]
   );
 
-  const designerStepOptions = useMemo(() => {
-    if (!openQuarter) {
-      return [] as Array<
-        (typeof QUARTER_DESIGNER_STEP_LIBRARY)[number] & { disabled: boolean }
-      >;
-    }
-    const typeCounts = new Map<string, number>();
-    for (const step of config.quarterDesignerSteps[openQuarter.id] ?? []) {
-      const type = resolveDesignerStepType(step);
-      typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
-    }
-    return QUARTER_DESIGNER_STEP_LIBRARY.map((option) => ({
-      ...option,
-      disabled:
-        (option.allowGoal === false && openQuarter.isGoal) ||
-        (option.isMeta && (typeCounts.get(option.type) ?? 0) > 0),
-    }));
-  }, [config.quarterDesignerSteps, openQuarter]);
+  const getDesignerStepOptions = useCallback(
+    (quarter: ExplorateurIAQuarterConfig) => {
+      const steps = config.quarterDesignerSteps[quarter.id] ?? [];
+      const typeCounts = new Map<string, number>();
+      for (const step of steps) {
+        const type = resolveDesignerStepType(step);
+        typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+      }
+      return QUARTER_DESIGNER_STEP_LIBRARY.map((option) => ({
+        ...option,
+        disabled:
+          (option.allowGoal === false && quarter.isGoal) ||
+          (option.isMeta && (typeCounts.get(option.type) ?? 0) > 0),
+      }));
+    },
+    [config.quarterDesignerSteps]
+  );
 
   const renderDesignerStep = useCallback(
-    ({
-      step,
-      stepIndex,
-      stepCount,
-      StepComponent,
-      componentProps,
-      context,
-      advance,
-    }: StepSequenceRenderWrapperProps) => {
+    (
+      quarterId: QuarterId,
+      {
+        step,
+        stepIndex,
+        stepCount,
+        StepComponent,
+        componentProps,
+        context,
+        advance,
+      }: StepSequenceRenderWrapperProps
+    ) => {
       const stepType = resolveDesignerStepType(step);
       const meta = getDesignerStepMeta(stepType);
       const isFirst = stepIndex === 0;
@@ -6229,13 +6235,23 @@ function ExplorateurIAConfigDesigner({
       const indicatorLabel = `Étape ${stepIndex + 1} sur ${stepCount}`;
       const progressPercent =
         stepCount > 0 ? Math.round(((stepIndex + 1) / stepCount) * 100) : 0;
+      const pendingStepId = pendingStepIdByQuarter[quarterId] ?? null;
 
       return (
         <div className="space-y-6">
           <DesignerStepStateTracker
             context={context}
             pendingStepId={pendingStepId}
-            onConsumed={() => setPendingStepId(null)}
+            onConsumed={() =>
+              setPendingStepIdByQuarter((current) => {
+                if (current[quarterId] == null) {
+                  return current;
+                }
+                const next = { ...current };
+                next[quarterId] = null;
+                return next;
+              })
+            }
           />
           <div className="flex flex-col gap-6 lg:flex-row">
             <aside className="w-full max-w-full lg:w-72 lg:flex-shrink-0">
@@ -6276,12 +6292,7 @@ function ExplorateurIAConfigDesigner({
                             <button
                               type="button"
                               onClick={() =>
-                                activeQuarterId &&
-                                handleMoveDesignerStep(
-                                  activeQuarterId,
-                                  index,
-                                  -1
-                                )
+                                handleMoveDesignerStep(quarterId, index, -1)
                               }
                               disabled={index === 0}
                               className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
@@ -6292,12 +6303,7 @@ function ExplorateurIAConfigDesigner({
                             <button
                               type="button"
                               onClick={() =>
-                                activeQuarterId &&
-                                handleMoveDesignerStep(
-                                  activeQuarterId,
-                                  index,
-                                  1
-                                )
+                                handleMoveDesignerStep(quarterId, index, 1)
                               }
                               disabled={index === context.steps.length - 1}
                               className="rounded-full border border-orange-200 px-2 py-1 text-xs font-semibold text-orange-700 hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
@@ -6308,9 +6314,8 @@ function ExplorateurIAConfigDesigner({
                             <button
                               type="button"
                               onClick={() =>
-                                activeQuarterId &&
                                 handleRemoveDesignerStep(
-                                  activeQuarterId,
+                                  quarterId,
                                   definition.id
                                 )
                               }
@@ -6371,10 +6376,10 @@ function ExplorateurIAConfigDesigner({
       );
     },
     [
-      activeQuarterId,
       handleMoveDesignerStep,
       handleRemoveDesignerStep,
-      pendingStepId,
+      pendingStepIdByQuarter,
+      setPendingStepIdByQuarter,
     ]
   );
 
@@ -6462,6 +6467,11 @@ function ExplorateurIAConfigDesigner({
           {config.quarters.map((quarter, index) => {
             const isGoal = Boolean(quarter.isGoal);
             const quarterInventory = quarter.inventory;
+            const isExpanded = expandedQuarterIds.includes(quarter.id);
+            const accordionId = `${quarter.id}-designer`;
+            const designerStepOptions = getDesignerStepOptions(quarter);
+            const quarterDesignerSteps =
+              config.quarterDesignerSteps[quarter.id] ?? [];
             return (
               <article
                 key={quarter.id}
@@ -6523,10 +6533,12 @@ function ExplorateurIAConfigDesigner({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setActiveQuarterId(quarter.id)}
+                    onClick={() => toggleQuarter(quarter.id)}
+                    aria-expanded={isExpanded}
+                    aria-controls={accordionId}
                     className="flex-1 rounded-full border border-orange-200 px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100"
                   >
-                    Configurer
+                    {isExpanded ? "Replier" : "Configurer"}
                   </button>
                   {isGoal ? (
                     <span className="rounded-full border border-orange-200 px-3 py-1 text-xs font-semibold text-orange-600">
@@ -6534,66 +6546,61 @@ function ExplorateurIAConfigDesigner({
                     </span>
                   ) : null}
                 </div>
+                <div
+                  id={accordionId}
+                  className={`space-y-6 rounded-2xl border border-dashed border-orange-200 bg-orange-50/70 p-5 ${
+                    isExpanded ? "" : "hidden"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-orange-600">
+                    <span>ID : {quarter.id}</span>
+                    {isGoal ? (
+                      <span className="rounded-full border border-orange-200 px-3 py-1 text-orange-700">
+                        Objectif final
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-orange-800">
+                      Ajouter une étape
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {designerStepOptions.map((option) => (
+                        <button
+                          key={option.type}
+                          type="button"
+                          onClick={() => handleAddDesignerStep(quarter, option.type)}
+                          disabled={option.disabled}
+                          className={classNames(
+                            "inline-flex items-center gap-2 rounded-full border border-orange-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition",
+                            option.disabled
+                              ? "cursor-not-allowed bg-orange-100 text-orange-400"
+                              : "bg-white text-orange-700 hover:border-orange-300 hover:bg-orange-50"
+                          )}
+                        >
+                          <span aria-hidden="true">{option.icon}</span>
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <StepSequenceRenderer
+                    key={quarter.id}
+                    steps={quarterDesignerSteps}
+                    isEditMode
+                    onStepConfigChange={(stepId, nextConfig) =>
+                      handleDesignerStepConfigChange(quarter.id, stepId, nextConfig)
+                    }
+                    renderStepWrapper={(props) =>
+                      renderDesignerStep(quarter.id, props)
+                    }
+                  />
+                </div>
               </article>
             );
           })}
         </div>
       </section>
-      <Modal
-        open={Boolean(openQuarter)}
-        onClose={handleCloseDesigner}
-        title={
-          openQuarter
-            ? `Configurer ${openQuarter.label || openQuarter.id}`
-            : "Configurer le quartier"
-        }
-      >
-        {openQuarter ? (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-orange-600">
-              <span>ID : {openQuarter.id}</span>
-              {openQuarter.isGoal ? (
-                <span className="rounded-full border border-orange-200 px-3 py-1 text-orange-700">
-                  Objectif final
-                </span>
-              ) : null}
-            </div>
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-orange-800">
-                Ajouter une étape
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {designerStepOptions.map((option) => (
-                  <button
-                    key={option.type}
-                    type="button"
-                    onClick={() => handleAddDesignerStep(openQuarter, option.type)}
-                    disabled={option.disabled}
-                    className={classNames(
-                      "inline-flex items-center gap-2 rounded-full border border-orange-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide transition",
-                      option.disabled
-                        ? "cursor-not-allowed bg-orange-100 text-orange-400"
-                        : "bg-white text-orange-700 hover:border-orange-300 hover:bg-orange-50"
-                    )}
-                  >
-                    <span aria-hidden="true">{option.icon}</span>
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <StepSequenceRenderer
-              key={openQuarter.id}
-              steps={activeDesignerSteps}
-              isEditMode
-              onStepConfigChange={(stepId, nextConfig) =>
-                handleDesignerStepConfigChange(openQuarter.id, stepId, nextConfig)
-              }
-              renderStepWrapper={renderDesignerStep}
-            />
-          </div>
-        ) : null}
-      </Modal>
     </div>
   );
 }
