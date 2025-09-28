@@ -87,7 +87,6 @@ describe("STEP_SEQUENCE_TOOLS", () => {
       idHint: "video-de-demo",
       sources: [
         { type: "mp4", url: "https://example.com/demo.mp4" },
-        { type: "hls", url: "https://example.com/demo.m3u8" },
       ],
       captions: [
         { src: "https://example.com/demo.vtt", srclang: "fr" },

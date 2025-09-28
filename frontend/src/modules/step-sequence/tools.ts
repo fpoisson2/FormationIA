@@ -683,7 +683,7 @@ const videoSourceSchema: JsonSchema = {
   additionalProperties: false,
   required: ["type", "url"],
   properties: {
-    type: { type: "string", enum: ["mp4", "hls", "youtube"] },
+    type: { type: "string", enum: ["mp4", "youtube"] },
     url: { type: "string" },
   },
 };

@@ -9,12 +9,10 @@ import {
   useState,
 } from "react";
 
-import type Hls from "hls.js";
-
 import type { StepComponentProps } from "../types";
 import { StepSequenceContext } from "../types";
 
-export type VideoSourceType = "mp4" | "hls" | "youtube";
+export type VideoSourceType = "mp4" | "youtube";
 
 export interface VideoSource {
   type: VideoSourceType;
@@ -47,55 +45,6 @@ const EMPTY_CONTENT: VideoStepContent = {
   expectedDuration: undefined,
 };
 
-type HlsModule = {
-  default?: typeof Hls;
-  Hls?: typeof Hls;
-};
-
-type HlsModuleLoader = () => Promise<HlsModule>;
-
-const HLS_MODULE_LOADERS: HlsModuleLoader[] = [
-  () => import("hls.js/dist/hls.mjs") as Promise<HlsModule>,
-  () => import("hls.js/dist/hls.light.mjs") as Promise<HlsModule>,
-  () => import(/* @vite-ignore */ "hls.js") as Promise<HlsModule>,
-];
-
-let cachedHlsConstructor: typeof Hls | null | undefined;
-
-async function loadHlsConstructor(): Promise<typeof Hls | null> {
-  if (cachedHlsConstructor !== undefined) {
-    return cachedHlsConstructor;
-  }
-
-  if (typeof window === "undefined") {
-    cachedHlsConstructor = null;
-    return cachedHlsConstructor;
-  }
-
-  const attemptImport = async (
-    loader: () => Promise<HlsModule>
-  ): Promise<typeof Hls | null> => {
-    try {
-      const module = await loader();
-      const constructor = module.default ?? module.Hls;
-      return typeof constructor === "function" ? constructor : null;
-    } catch (error) {
-      return null;
-    }
-  };
-
-  for (const loader of HLS_MODULE_LOADERS) {
-    const constructor = await attemptImport(loader);
-    if (constructor) {
-      cachedHlsConstructor = constructor;
-      return cachedHlsConstructor;
-    }
-  }
-
-  cachedHlsConstructor = null;
-  return cachedHlsConstructor;
-}
-
 function sanitizeSources(sources: unknown): VideoSource[] {
   if (!Array.isArray(sources)) {
     return [];
@@ -108,11 +57,7 @@ function sanitizeSources(sources: unknown): VideoSource[] {
       const source = item as Partial<VideoSource>;
       const url = typeof source.url === "string" ? source.url.trim() : "";
       const type: VideoSourceType =
-        source.type === "hls"
-          ? "hls"
-          : source.type === "youtube"
-          ? "youtube"
-          : "mp4";
+        source.type === "youtube" ? "youtube" : "mp4";
       if (!url) {
         return undefined;
       }
@@ -433,10 +378,6 @@ export function VideoStep({
     [effectiveOnUpdateConfig, onChange]
   );
 
-  const hlsSource = useMemo(
-    () => content.sources.find((source) => source.type === "hls"),
-    [content.sources]
-  );
   const mp4Sources = useMemo(
     () => content.sources.filter((source) => source.type === "mp4"),
     [content.sources]
@@ -473,56 +414,16 @@ export function VideoStep({
       return undefined;
     }
 
-    if (!hlsSource) {
-      if (typeof video.load === "function") {
-        video.load();
-      }
-      return undefined;
+    if (typeof video.load === "function") {
+      video.load();
     }
-
-    let isUnmounted = false;
-    let hlsInstance: Hls | undefined;
-
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = hlsSource.url;
-      if (typeof video.load === "function") {
-        video.load();
-      }
-      return () => {
-        video.removeAttribute("src");
-        if (typeof video.load === "function") {
-          video.load();
-        }
-      };
-    }
-
-    void (async () => {
-      const HlsConstructor = await loadHlsConstructor();
-      if (isUnmounted) {
-        return;
-      }
-      if (HlsConstructor && HlsConstructor.isSupported()) {
-        hlsInstance = new HlsConstructor();
-        hlsInstance.loadSource(hlsSource.url);
-        hlsInstance.attachMedia(video);
-      } else {
-        video.src = hlsSource.url;
-        if (typeof video.load === "function") {
-          video.load();
-        }
-      }
-    })();
 
     return () => {
-      isUnmounted = true;
-      hlsInstance?.destroy();
-      hlsInstance = undefined;
-      video.removeAttribute("src");
       if (typeof video.load === "function") {
         video.load();
       }
     };
-  }, [hlsSource, mp4Signature, youtubeEmbedUrl]);
+  }, [mp4Signature, youtubeEmbedUrl]);
 
   useEffect(() => {
     if (youtubeEmbedUrl) {
@@ -535,7 +436,7 @@ export function VideoStep({
       return;
     }
 
-    if (!isActive || (!hlsSource && mp4Sources.length === 0)) {
+    if (!isActive || mp4Sources.length === 0) {
       return;
     }
 
@@ -586,7 +487,6 @@ export function VideoStep({
       cancelled = true;
     };
   }, [
-    hlsSource,
     isActive,
     isEditModeFromContext,
     mp4Sources.length,
@@ -679,10 +579,8 @@ export function VideoStep({
   );
 
   const mp4SourceValue = useMemo(() => mp4Sources[0]?.url ?? "", [mp4Sources]);
-  const hlsSourceValue = hlsSource?.url ?? "";
   const youtubeSourceValue = youtubeSource?.url ?? "";
-  const hasVideoElementSource =
-    !youtubeEmbedUrl && (mp4Sources.length > 0 || Boolean(hlsSource));
+  const hasVideoElementSource = !youtubeEmbedUrl && mp4Sources.length > 0;
   const isAutoAdvanceSupported = !youtubeEmbedUrl;
   const showYouTubeError = Boolean(youtubeSource) && !youtubeEmbedUrl;
 
@@ -809,15 +707,6 @@ export function VideoStep({
             <span className="block text-xs text-slate-500">
               Les liens « watch », youtu.be, shorts ou embed sont pris en charge.
             </span>
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span className="font-medium text-slate-700">URL HLS</span>
-            <input
-              className="w-full rounded-md border border-slate-300 p-2"
-              placeholder="https://cdn.example.com/playlist.m3u8"
-              value={hlsSourceValue}
-              onChange={handleSourceChange("hls")}
-            />
           </label>
           <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-700">Poster</span>
