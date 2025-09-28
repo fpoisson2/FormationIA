@@ -561,10 +561,14 @@ const buildInitialState = (
 export function DualModelComparisonStep({
   config,
   payload,
-  onAdvance,
   isEditMode,
 }: StepComponentProps): JSX.Element {
-  const { payloads, goToStep } = useStepSequence();
+  const {
+    payloads,
+    goToStep,
+    setManualAdvanceHandler,
+    setManualAdvanceDisabled,
+  } = useStepSequence();
 
   const normalizedConfig = useMemo(() => normalizeConfig(config), [config]);
 
@@ -637,16 +641,6 @@ export function DualModelComparisonStep({
     []
   );
 
-  const disabled = useMemo(
-    () => !promptText.trim() || isEditMode,
-    [promptText, isEditMode]
-  );
-
-  const canProceed = useMemo(
-    () => Boolean(summaryA.trim() && summaryB.trim()),
-    [summaryA, summaryB]
-  );
-
   const handleLaunch = useCallback(async () => {
     const trimmedPrompt = promptText.trim();
     if (!trimmedPrompt || isEditMode) {
@@ -696,27 +690,39 @@ export function DualModelComparisonStep({
     isEditMode,
   ]);
 
-  const handleAdvance = useCallback(() => {
-    if (!canProceed || isEditMode) {
-      return;
-    }
-    onAdvance({
-      configA,
-      configB,
+  const manualAdvanceHandler = useCallback(() => {
+    return {
+      configA: { ...configA },
+      configB: { ...configB },
       summaryA,
       summaryB,
       prompt: promptText.trim(),
-    });
-  }, [
-    canProceed,
-    configA,
-    configB,
-    isEditMode,
-    onAdvance,
-    summaryA,
-    summaryB,
-    promptText,
-  ]);
+    } satisfies DualModelComparisonPayload;
+  }, [configA, configB, summaryA, summaryB, promptText]);
+
+  useEffect(() => {
+    if (!setManualAdvanceHandler) {
+      return;
+    }
+
+    setManualAdvanceHandler(manualAdvanceHandler);
+
+    return () => {
+      setManualAdvanceHandler(null);
+    };
+  }, [manualAdvanceHandler, setManualAdvanceHandler]);
+
+  useEffect(() => {
+    if (!setManualAdvanceDisabled) {
+      return;
+    }
+
+    setManualAdvanceDisabled(loadingA || loadingB);
+
+    return () => {
+      setManualAdvanceDisabled(false);
+    };
+  }, [loadingA, loadingB, setManualAdvanceDisabled]);
 
   return (
     <div className="space-y-12">
@@ -737,7 +743,6 @@ export function DualModelComparisonStep({
             }}
             placeholder={normalizedConfig.copy.promptPlaceholder}
             className="min-h-[160px] w-full rounded-3xl border border-white/60 bg-white/80 p-4 text-sm text-[color:var(--brand-black)] shadow-inner focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
-            disabled={isEditMode}
           />
           {normalizedConfig.copy.promptHelper && (
             <p className="text-xs text-[color:var(--brand-charcoal)]/80">
@@ -787,7 +792,12 @@ export function DualModelComparisonStep({
             type="button"
             onClick={handleLaunch}
             className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:bg-slate-300"
-            disabled={loadingA || loadingB || disabled}
+            disabled={
+              loadingA ||
+              loadingB ||
+              !promptText.trim() ||
+              isEditMode
+            }
           >
             {loadingA || loadingB
               ? normalizedConfig.copy.launchCta.loading
@@ -943,17 +953,6 @@ export function DualModelComparisonStep({
         </>
       )}
 
-      <div className="section-divider" />
-      <div className="flex justify-end animate-section">
-        <button
-          type="button"
-          onClick={handleAdvance}
-          className="cta-button cta-button--light disabled:cursor-not-allowed disabled:bg-slate-300"
-          disabled={!canProceed || isEditMode}
-        >
-          {normalizedConfig.copy.proceedCtaLabel}
-        </button>
-      </div>
     </div>
   );
 }
