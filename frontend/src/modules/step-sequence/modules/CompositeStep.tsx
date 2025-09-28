@@ -36,6 +36,20 @@ function isCompositeConfig(value: unknown): value is CompositeStepConfig {
   });
 }
 
+const COMPLETION_REQUIRED_COMPONENTS = new Set<string>([
+  "form",
+  "simulation-chat",
+  "video",
+  "prompt-evaluation",
+  "ai-comparison",
+  "clarity-map",
+  "clarity-prompt",
+  "explorateur-world",
+  "workshop-context",
+  "workshop-comparison",
+  "workshop-synthesis",
+]);
+
 function pickInitialPayloads(
   modules: CompositeStepModuleDefinition[],
   payload: unknown
@@ -108,6 +122,14 @@ export function CompositeStep({
     () => pickInitialPayloads(modules, payload)
   );
 
+  const modulesRequiringCompletion = useMemo(
+    () =>
+      modules.filter((module) =>
+        COMPLETION_REQUIRED_COMPONENTS.has(module.component)
+      ),
+    [modules]
+  );
+
   const aggregatedPayloads = useMemo(() => {
     const basePayloads = parentContext ? parentContext.payloads : {};
     return {
@@ -157,10 +179,10 @@ export function CompositeStep({
 
   const allModulesCompleted = useMemo(
     () =>
-      modules.every((module) =>
+      modulesRequiringCompletion.every((module) =>
         Object.prototype.hasOwnProperty.call(modulePayloads, module.id)
       ),
-    [modulePayloads, modules]
+    [modulePayloads, modulesRequiringCompletion]
   );
 
   const autoAdvance = compositeConfig.autoAdvance ?? false;
@@ -291,10 +313,17 @@ export function CompositeStep({
     if (!autoAdvance || !isActive) {
       return;
     }
-    if (modules.length === 0 || allModulesCompleted) {
+    if (modulesRequiringCompletion.length === 0 || allModulesCompleted) {
       onAdvance(modulePayloads);
     }
-  }, [autoAdvance, allModulesCompleted, isActive, modulePayloads, modules, onAdvance]);
+  }, [
+    autoAdvance,
+    allModulesCompleted,
+    isActive,
+    modulePayloads,
+    modulesRequiringCompletion,
+    onAdvance,
+  ]);
 
   const renderedModules = useMemo(() => {
     return modules.map((module) => {
