@@ -96,7 +96,10 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
           }}
         >
           {axis.map((value) => (
-            <span key={`row-${value}`} className="flex h-full w-full items-center justify-end">
+            <span
+              key={`row-${value}`}
+              className="grid h-full w-full items-center justify-items-end text-right leading-none"
+            >
               {value}
             </span>
           ))}
