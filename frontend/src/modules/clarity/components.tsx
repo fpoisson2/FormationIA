@@ -1,8 +1,41 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { CLARITY_TIPS, DIRECTION_LABELS, GRID_SIZE, START_POSITION } from "./constants";
 import { formatDuration } from "./utils";
 import type { ClientStats, GridCoord, PlanAction } from "./types";
+import { SpriteFromAtlas, atlas } from "./atlas";
+
+const GROUND_TILE = atlas("mapTile_022.png");
+const VISITED_TILE = atlas("mapTile_128.png");
+const BLOCK_TILE = atlas("mapTile_039.png");
+const GOAL_TILE = atlas("mapTile_100.png");
+const PLAYER_TILE = atlas("mapTile_136.png");
+
+function TileLayer({
+  tile,
+  tileSize,
+  className,
+  style,
+}: {
+  tile: ReturnType<typeof atlas>;
+  tileSize: number;
+  className?: string;
+  style?: CSSProperties;
+}): JSX.Element | null {
+  if (tileSize <= 0) {
+    return null;
+  }
+
+  const classes = className
+    ? `pointer-events-none absolute inset-0 flex items-center justify-center ${className}`
+    : "pointer-events-none absolute inset-0 flex items-center justify-center";
+
+  return (
+    <div className={classes} style={style}>
+      <SpriteFromAtlas coord={tile} scale={tileSize} />
+    </div>
+  );
+}
 
 export interface ClarityGridProps {
   player: GridCoord;
@@ -14,85 +47,131 @@ export interface ClarityGridProps {
 export function ClarityGrid({ player, target, blocked, visited }: ClarityGridProps): JSX.Element {
   const blockedSet = useMemo(() => new Set(blocked.map((cell) => `${cell.x}-${cell.y}`)), [blocked]);
   const axis = useMemo(() => Array.from({ length: GRID_SIZE }, (_, index) => index), []);
-  const cellPercent = 100 / GRID_SIZE;
-  const playerLeft = (player.x + 0.5) * cellPercent;
-  const playerTop = (player.y + 0.5) * cellPercent;
-  const targetLeft = (target.x + 0.5) * cellPercent;
-  const targetTop = (target.y + 0.5) * cellPercent;
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [tileSize, setTileSize] = useState(32);
+  const axisExtent = tileSize > 0 ? tileSize * GRID_SIZE : 0;
+
+  useEffect(() => {
+    const element = gridRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateTileSize = () => {
+      const width = element.clientWidth;
+      if (width <= 0) {
+        return;
+      }
+      const nextSize = width / GRID_SIZE;
+      setTileSize(nextSize > 0 ? nextSize : 0);
+    };
+
+    updateTileSize();
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateTileSize();
+      window.addEventListener("resize", handleResize);
+      return () => {
+        window.removeEventListener("resize", handleResize);
+      };
+    }
+
+    const observer = new ResizeObserver(() => updateTileSize());
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   return (
-    <div className="relative mx-auto w-full max-w-[480px]">
-      <div className="flex items-end gap-2 sm:gap-3 md:gap-4">
-        <div className="flex h-[clamp(160px,calc(100vw-120px),360px)] flex-col justify-between pb-3 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:pb-4 md:text-xs">
-          {axis.map((value) => (
-            <span key={`row-${value}`} className="text-right">
-              {value}
-            </span>
-          ))}
+    <div className="relative mx-auto w-full max-w-[520px]">
+      <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
+        <div
+          className="relative text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+          style={{ height: axisExtent }}
+        >
+          <div className="grid h-full grid-rows-10 content-start justify-items-end gap-0">
+            {axis.map((value) => (
+              <span
+                key={`row-${value}`}
+                className="flex w-full items-center justify-end"
+                style={{ height: tileSize, lineHeight: `${tileSize}px` }}
+              >
+                {value}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="relative">
-          <div className="relative aspect-square h-[clamp(160px,calc(100vw-120px),360px)] rounded-3xl border border-white/60 bg-white/70 p-2 shadow-inner">
-            <div className="grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl border border-white/40">
+          <div className="relative aspect-square h-[clamp(180px,calc(100vw-120px),400px)] rounded-3xl border border-white/60 bg-gradient-to-br from-sky-100/70 via-white/80 to-slate-100/70 p-2 shadow-inner">
+            <div
+              ref={gridRef}
+              className="relative grid h-full w-full grid-cols-10 grid-rows-10 overflow-hidden rounded-2xl bg-slate-50/40"
+            >
               {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, index) => {
                 const x = index % GRID_SIZE;
                 const y = Math.floor(index / GRID_SIZE);
                 const key = `${x}-${y}`;
-                const isVisited = visited.has(key);
                 const isStart = x === START_POSITION.x && y === START_POSITION.y;
+                const isVisited = visited.has(key) && !isStart;
                 const isTarget = x === target.x && y === target.y;
                 const isBlocked = blockedSet.has(key);
+                const hasPlayer = x === player.x && y === player.y;
+
                 return (
-                  <div
-                    key={key}
-                    className={`relative overflow-hidden border border-white/40 ${
-                      isVisited ? "bg-[color:var(--brand-yellow)]/30" : "bg-white/60"
-                    }`}
-                  >
-                    {isBlocked && (
-                      <span className="absolute inset-0 flex items-center justify-center bg-[color:var(--brand-red)]/70 text-sm font-semibold text-white">
-                        🧱
-                      </span>
+                  <div key={key} className="relative">
+                    <TileLayer tile={GROUND_TILE} tileSize={tileSize} />
+                    {isVisited && (
+                      <TileLayer tile={VISITED_TILE} tileSize={tileSize} className="opacity-80" />
                     )}
-                    {isStart && (
-                      <span className="absolute left-1 top-1 z-[1] text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]">
-                        Start
-                      </span>
+                    {isBlocked && (
+                      <TileLayer
+                        tile={BLOCK_TILE}
+                        tileSize={tileSize}
+                        className="z-[3] drop-shadow-[0_4px_6px_rgba(15,23,42,0.25)]"
+                        style={{ transform: "scale(0.85)" }}
+                      />
                     )}
                     {isTarget && (
-                      <span className="absolute right-1 top-1 z-[1] text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-red)]">
-                        Goal
-                      </span>
+                      <TileLayer
+                        tile={GOAL_TILE}
+                        tileSize={tileSize}
+                        className="z-[4] drop-shadow-[0_4px_8px_rgba(220,38,38,0.25)]"
+                        style={{ transform: "scale(0.82)" }}
+                      />
                     )}
+                    {hasPlayer && (
+                      <TileLayer
+                        tile={PLAYER_TILE}
+                        tileSize={tileSize}
+                        className="z-[6] animate-[float_1.4s_ease-in-out_infinite]"
+                        style={{ transform: "scale(0.88)" }}
+                      />
+                    )}
+                    <div className="pointer-events-none absolute inset-0 rounded-xl border border-white/40" />
                   </div>
                 );
               })}
             </div>
             <div className="clarity-grid-overlay" />
           </div>
-          <div className="pointer-events-none absolute inset-0">
-            <span
-              className="absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-2xl transition-transform duration-300 ease-out"
-              style={{ left: `${playerLeft}%`, top: `${playerTop}%` }}
-              role="img"
-              aria-label="Bonhomme"
-            >
-              👤
-            </span>
-            <span
-              className="absolute flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-2xl"
-              style={{ left: `${targetLeft}%`, top: `${targetTop}%` }}
-              role="img"
-              aria-label="Objectif"
-            >
-              🎯
-            </span>
-          </div>
         </div>
       </div>
-      <div className="mt-2 flex justify-center gap-3 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 sm:gap-[24px] md:gap-[34px] md:text-xs">
-        {axis.map((value) => (
-          <span key={`col-${value}`}>{value}</span>
-        ))}
+      <div
+        className="mt-2 text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+        style={{ width: axisExtent }}
+      >
+        <div className="grid grid-cols-10">
+          {axis.map((value) => (
+            <span
+              key={`col-${value}`}
+              className="flex items-center justify-center"
+              style={{ height: tileSize, lineHeight: `${tileSize}px` }}
+            >
+              {value}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
