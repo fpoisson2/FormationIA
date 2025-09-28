@@ -619,9 +619,9 @@ export function VideoStep({
             </p>
           ) : null}
         </header>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <div className="rounded-none border-0 bg-transparent p-0 sm:rounded-lg sm:border sm:bg-slate-50 sm:p-4">
           {youtubeEmbedUrl ? (
-            <div className="relative aspect-video w-full overflow-hidden rounded-md bg-black">
+            <div className="relative aspect-video w-full overflow-hidden rounded-none bg-black sm:rounded-md">
               <iframe
                 key={youtubeEmbedUrl}
                 className="absolute left-0 top-0 h-full w-full"
@@ -636,7 +636,7 @@ export function VideoStep({
           ) : hasVideoElementSource ? (
             <video
               ref={videoRef}
-              className="h-auto w-full rounded-md bg-black"
+              className="h-auto w-full rounded-none bg-black sm:rounded-md"
               controls
               playsInline
               poster={content.poster}
