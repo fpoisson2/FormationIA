@@ -29,6 +29,8 @@ import type {
 import type {
   CompositeStepModuleDefinition,
   StepComponentProps,
+  StepComponentWithMetadata,
+  StepSequenceLayoutOverrides,
 } from "../../types";
 import { StepSequenceContext } from "../../types";
 
@@ -978,11 +980,9 @@ export function ClarityMapStep({
         </fieldset>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[3fr,2fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,22rem)] xl:grid-cols-[minmax(0,1.45fr)_minmax(0,24rem)] 2xl:grid-cols-[minmax(0,1.6fr)_minmax(0,24rem)]">
         <div className="space-y-4">
-          <div className="rounded-3xl border border-white/40 bg-white/30 p-4 shadow-inner backdrop-blur">
-            <ClarityGrid player={playerPosition} target={target} blocked={blocked} visited={visited} />
-          </div>
+          <ClarityGrid player={playerPosition} target={target} blocked={blocked} visited={visited} />
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
@@ -1052,3 +1052,13 @@ export function ClarityMapStep({
     </form>
   );
 }
+
+const CLARITY_MAP_LAYOUT_OVERRIDES: StepSequenceLayoutOverrides = Object.freeze({
+  innerClassName: "max-w-7xl",
+});
+
+const clarityMapStepWithMetadata = ClarityMapStep as StepComponentWithMetadata;
+clarityMapStepWithMetadata.stepSequenceLayoutOverrides =
+  CLARITY_MAP_LAYOUT_OVERRIDES;
+clarityMapStepWithMetadata.stepSequenceContainerClassName =
+  "mx-auto flex w-full max-w-6xl flex-col gap-6";
