@@ -920,6 +920,9 @@ export function SimulationChatStep({
                 return next;
               });
               setConversationFinished(shouldEnd);
+              if (supportsManualAdvance) {
+                setManualAdvanceDisabled?.(!shouldEnd);
+              }
               if (shouldEnd) {
                 setLiveError(null);
                 if (!supportsManualAdvance) {
@@ -969,6 +972,7 @@ export function SimulationChatStep({
       liveInput,
       runId,
       supportsManualAdvance,
+      setManualAdvanceDisabled,
     ]
   );
 
