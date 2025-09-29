@@ -106,6 +106,10 @@ type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
 
+export type ExplorateurExperienceMode = "guided" | "open-world";
+
+const DEFAULT_EXPERIENCE_MODE: ExplorateurExperienceMode = "guided";
+
 const KNOWN_QUARTER_IDS = new Set<QuarterId>(
   Array.from(DEFAULT_QUARTER_IDS) as QuarterId[]
 );
@@ -2464,10 +2468,6 @@ const WORLD_SEED = 1247;
 let currentWorldSeed = WORLD_SEED;
 
 const DEFAULT_TERRAIN_THEME_ID: TerrainThemeId = "sand";
-
-export type ExplorateurExperienceMode = "guided" | "open-world";
-
-const DEFAULT_EXPERIENCE_MODE: ExplorateurExperienceMode = "guided";
 
 type ExperienceModeDefinition = {
   label: string;
