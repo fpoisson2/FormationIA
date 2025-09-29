@@ -3259,7 +3259,16 @@ function isWalkable(x: number, y: number, fromX?: number, fromY?: number) {
   }
   const terrain = world[y][x];
   if (currentWorldMode === "open-world") {
-    return terrain.base !== TILE_KIND.WATER;
+    if (terrain.base === TILE_KIND.WATER || terrain.overlay === TILE_KIND.WATER) {
+      return false;
+    }
+    if (terrain.object) {
+      return false;
+    }
+    if (BUILDING_BY_COORD.has(coordKey(x, y))) {
+      return false;
+    }
+    return true;
   }
   // Un chemin peut être soit en base soit en overlay
   const isPath = terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
@@ -4525,6 +4534,18 @@ export default function ExplorateurIA({
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+  const hasReachedAutoTarget = useCallback(() => {
+    const target = autoWalkTarget.current;
+    if (!target) {
+      return false;
+    }
+    if (isOpenWorldExperience) {
+      const distance =
+        Math.abs(player.x - target[0]) + Math.abs(player.y - target[1]);
+      return distance <= 1;
+    }
+    return player.x === target[0] && player.y === target[1];
+  }, [isOpenWorldExperience, player.x, player.y]);
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
@@ -4891,9 +4912,34 @@ export default function ExplorateurIA({
     [attemptPlayMusic, isIntroPlaying, isMusicEnabled, isQuarterCompleted]
   );
 
-  const buildingAt = useCallback((x: number, y: number) => {
-    return buildings.find((building) => building.x === x && building.y === y) || null;
-  }, []);
+  const buildingAt = useCallback(
+    (x: number, y: number) => {
+      const directHit =
+        buildings.find((building) => building.x === x && building.y === y) || null;
+      if (directHit) {
+        return directHit;
+      }
+      if (!isOpenWorldExperience) {
+        return null;
+      }
+      const deltas: Coord[] = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      for (const [dx, dy] of deltas) {
+        const neighbor = buildings.find(
+          (building) => building.x === x + dx && building.y === y + dy
+        );
+        if (neighbor) {
+          return neighbor;
+        }
+      }
+      return null;
+    },
+    [isOpenWorldExperience]
+  );
 
   const openIfOnBuilding = useCallback(() => {
     const hit = buildingAt(player.x, player.y);
@@ -5208,7 +5254,10 @@ export default function ExplorateurIA({
         const dy = targetY - player.y;
         if (Math.abs(dx) + Math.abs(dy) === 1) {
           cancelAutoWalk();
-          move(dx, dy);
+          const didMove = move(dx, dy);
+          if (!didMove && isOpenWorldExperience) {
+            openIfOnBuilding();
+          }
         }
         return;
       }
@@ -5248,11 +5297,7 @@ export default function ExplorateurIA({
     }
 
     if (!isAutoWalking) {
-      if (
-        autoWalkTarget.current &&
-        player.x === autoWalkTarget.current[0] &&
-        player.y === autoWalkTarget.current[1]
-      ) {
+      if (hasReachedAutoTarget()) {
         openIfOnBuilding();
         autoWalkTarget.current = null;
       }
@@ -5261,11 +5306,7 @@ export default function ExplorateurIA({
 
     if (autoWalkQueue.current.length === 0) {
       setIsAutoWalking(false);
-      if (
-        autoWalkTarget.current &&
-        player.x === autoWalkTarget.current[0] &&
-        player.y === autoWalkTarget.current[1]
-      ) {
+      if (hasReachedAutoTarget()) {
         openIfOnBuilding();
       }
       autoWalkTarget.current = null;
@@ -5297,6 +5338,7 @@ export default function ExplorateurIA({
     isIntroPlaying,
     isAutoWalking,
     isMobile,
+    hasReachedAutoTarget,
     move,
     openIfOnBuilding,
     player.x,
