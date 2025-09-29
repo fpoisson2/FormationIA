@@ -2764,6 +2764,107 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     }
   } while (adjusted);
 
+  const MIN_TILE_DISTANCE = 3;
+  const computeDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+  const stageIndexCache = new Map<QuarterId, number>(
+    stageOrder.map((stage, index) => [stage, index] as const)
+  );
+
+  const isTooCloseToOthers = (
+    stage: QuarterId,
+    candidate: { x: number; y: number }
+  ): boolean => {
+    for (const otherStage of stageOrder) {
+      if (otherStage === stage) {
+        continue;
+      }
+      const placement = assignments[otherStage];
+      if (!placement) {
+        continue;
+      }
+      if (computeDistance(candidate, placement) < MIN_TILE_DISTANCE) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const tryRelocateStage = (stage: QuarterId): boolean => {
+    if (stage === "mairie") {
+      return false;
+    }
+    const stageOrderIndex = stageIndexCache.get(stage);
+    const stageIndex = indexByStage.get(stage);
+    if (stageOrderIndex === undefined || stageIndex === undefined) {
+      return false;
+    }
+
+    const currentPlacement = assignments[stage];
+    if (!currentPlacement) {
+      return false;
+    }
+
+    if (!isTooCloseToOthers(stage, currentPlacement)) {
+      return false;
+    }
+
+    const previousStage = stageOrderIndex > 0 ? stageOrder[stageOrderIndex - 1] : undefined;
+    const nextStage =
+      stageOrderIndex < stageOrder.length - 1 ? stageOrder[stageOrderIndex + 1] : undefined;
+    const previousIndex = previousStage ? indexByStage.get(previousStage) : undefined;
+    const nextIndex = nextStage ? indexByStage.get(nextStage) : undefined;
+    const minIndex = previousIndex !== undefined ? previousIndex + 1 : 0;
+    const maxIndex =
+      nextIndex !== undefined ? nextIndex - 1 : Math.max(generatedWorld.path.length - 1, 0);
+
+    if (minIndex > maxIndex) {
+      return false;
+    }
+
+    const candidateIndices: number[] = [];
+    const maxRange = Math.max(stageIndex - minIndex, maxIndex - stageIndex);
+    for (let offset = 1; offset <= maxRange; offset++) {
+      const backward = stageIndex - offset;
+      const forward = stageIndex + offset;
+      if (backward >= minIndex) {
+        candidateIndices.push(backward);
+      }
+      if (forward <= maxIndex) {
+        candidateIndices.push(forward);
+      }
+    }
+
+    for (const candidateIndex of candidateIndices) {
+      if (takenIndices.has(candidateIndex)) {
+        continue;
+      }
+      const candidateCoord = generatedWorld.path[candidateIndex];
+      if (!candidateCoord) {
+        continue;
+      }
+      const [x, y] = candidateCoord;
+      if (isTooCloseToOthers(stage, { x, y })) {
+        continue;
+      }
+      moveStage(stage, candidateIndex);
+      return true;
+    }
+
+    return false;
+  };
+
+  let spacingAdjusted = false;
+  do {
+    spacingAdjusted = false;
+    for (const stage of stageOrder) {
+      if (tryRelocateStage(stage)) {
+        spacingAdjusted = true;
+      }
+    }
+  } while (spacingAdjusted);
+
   return assignments;
 }
 
