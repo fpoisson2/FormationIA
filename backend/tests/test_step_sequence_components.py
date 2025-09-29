@@ -291,8 +291,15 @@ def test_create_explorateur_world_step_defaults_structure() -> None:
     step = create_explorateur_world_step(step_id="explorateur")
 
     config = step["config"]
-    assert set(config) == {"terrain", "steps", "quarterDesignerSteps", "quarters"}
+    assert set(config) == {
+        "terrain",
+        "steps",
+        "quarterDesignerSteps",
+        "quarters",
+        "experienceMode",
+    }
     assert config["steps"] == []
+    assert config["experienceMode"] == "guided"
 
 
 def test_create_composite_step_wraps_modules() -> None:

@@ -909,6 +909,7 @@ def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
         "steps": [],
         "quarterDesignerSteps": None,
         "quarters": [],
+        "experienceMode": "guided",
     }
 
     if isinstance(config, Mapping):
@@ -930,6 +931,12 @@ def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
             normalized_config["quarters"] = deepcopy(raw_quarters)
         elif isinstance(raw_quarters, tuple):
             normalized_config["quarters"] = [deepcopy(item) for item in raw_quarters]
+
+        experience_mode = config.get("experienceMode")
+        if experience_mode is None:
+            normalized_config["experienceMode"] = "guided"
+        else:
+            normalized_config["experienceMode"] = deepcopy(experience_mode)
 
         for key, value in config.items():
             if key in normalized_config:

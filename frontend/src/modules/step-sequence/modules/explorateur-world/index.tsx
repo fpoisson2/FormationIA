@@ -41,6 +41,7 @@ registerStepComponent("explorateur-world", ExplorateurWorldStep);
 export type {
   ExplorateurIAConfig as ExplorateurWorldConfig,
   ExplorateurIATerrainConfig as ExplorateurWorldTerrainConfig,
+  ExplorateurExperienceMode as ExplorateurWorldExperienceMode,
 } from "../../../../pages/ExplorateurIA";
 
 export const createDefaultExplorateurWorldConfig =

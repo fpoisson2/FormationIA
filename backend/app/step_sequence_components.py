@@ -952,14 +952,18 @@ def create_explorateur_world_step(
         "steps": [],
         "quarterDesignerSteps": None,
         "quarters": [],
+        "experienceMode": "guided",
     }
-    normalized_config = default_config
+    normalized_config = {key: deepcopy(value) for key, value in default_config.items()}
     if isinstance(config, Mapping):
         normalized_config = {
             "terrain": deepcopy(config.get("terrain")),
             "steps": deepcopy(config.get("steps")) if config.get("steps") is not None else [],
             "quarterDesignerSteps": deepcopy(config.get("quarterDesignerSteps")),
             "quarters": deepcopy(config.get("quarters")) if config.get("quarters") is not None else [],
+            "experienceMode": deepcopy(config.get("experienceMode"))
+            if config.get("experienceMode") is not None
+            else "guided",
         }
 
     return {
