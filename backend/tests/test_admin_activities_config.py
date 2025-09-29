@@ -8,9 +8,25 @@ from backend.app.admin_store import LocalUser
 from backend.app.main import (
     STEP_SEQUENCE_TOOL_DEFINITIONS,
     _require_admin_user,
-    _run_activity_generation_job,
     app,
 )
+
+
+def _auto_drive_generation(job_id: str) -> None:
+    while True:
+        main._run_activity_generation_job(job_id)
+        state = main._get_activity_generation_job(job_id)
+        if state is None or state.status in ("complete", "error"):
+            return
+        if not state.awaiting_user_action:
+            continue
+
+        pending_call = state.pending_tool_call
+        if pending_call is None:
+            raise AssertionError("Job is waiting for feedback but no pending tool call is registered.")
+
+        feedback = main.ActivityGenerationFeedbackRequest(action="approve")
+        main._process_activity_generation_feedback(job_id, feedback)
 
 
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
@@ -462,6 +478,26 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
                     [
                         {
                             "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
                             "name": "create_step_sequence_activity",
                             "call_id": "call_1",
                             "arguments": {"activityId": "atelier-intro"},
@@ -534,10 +570,11 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
 
-    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
     monkeypatch.setattr(
         "backend.app.main._launch_activity_generation_job",
-        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -561,6 +598,8 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             status_payload = status_response.json()
 
             assert status_payload["status"] == "complete"
+            assert status_payload["awaitingUserAction"] is False
+            assert status_payload["pendingToolCall"] is None
             assert status_payload["activityId"] == "atelier-intro"
             assert status_payload["activityTitle"] == "atelier-intro"
             assert status_payload["reasoningSummary"] == "Synthèse"
@@ -575,7 +614,7 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             assert step["config"]["media"] == []
             assert step["config"]["sidebar"] is None
 
-            assert len(captured_requests) == 3
+            assert len(captured_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
@@ -627,6 +666,26 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
     class FakeResponsesClient:
         def __init__(self) -> None:
             self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
                 DummyResponse(
                     [
                         {
@@ -700,10 +759,11 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
 
-    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
     monkeypatch.setattr(
         "backend.app.main._launch_activity_generation_job",
-        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -726,6 +786,8 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             assert status_response.status_code == 200
             status_payload = status_response.json()
             assert status_payload["status"] == "complete"
+            assert status_payload["awaitingUserAction"] is False
+            assert status_payload["pendingToolCall"] is None
 
             activity = status_payload["activity"]
             media_item = activity["stepSequence"][0]["config"]["media"][0]
@@ -734,7 +796,7 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             assert media_item.get("caption") is None
             assert isinstance(media_item.get("id"), str) and media_item["id"].startswith("intro-media")
 
-            assert len(captured_requests) == 3
+            assert len(captured_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
@@ -785,6 +847,26 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
     class FakeResponsesClient:
         def __init__(self) -> None:
             self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
                 DummyResponse(
                     [
                         {
@@ -842,10 +924,11 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
 
-    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
     monkeypatch.setattr(
         "backend.app.main._launch_activity_generation_job",
-        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -868,6 +951,8 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             assert status_response.status_code == 200
             status_payload = status_response.json()
             assert status_payload["status"] == "complete"
+            assert status_payload["awaitingUserAction"] is False
+            assert status_payload["pendingToolCall"] is None
 
             activity = status_payload["activity"]
             step = activity["stepSequence"][0]
@@ -882,7 +967,7 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             }
             assert step.get("composite") is None
 
-            assert len(captured_requests) == 3
+            assert len(captured_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
@@ -951,6 +1036,26 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1005,10 +1110,11 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1084,6 +1190,26 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1116,10 +1242,11 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1196,6 +1323,26 @@ def test_admin_generate_activity_allows_request_developer_message_override(
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1228,10 +1375,11 @@ def test_admin_generate_activity_allows_request_developer_message_override(
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1313,6 +1461,26 @@ def test_admin_generate_activity_allows_request_system_message_override(
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1345,10 +1513,11 @@ def test_admin_generate_activity_allows_request_system_message_override(
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
