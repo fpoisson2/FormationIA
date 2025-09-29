@@ -70,6 +70,9 @@ MAX_STEPS_PER_ACTION = 20
 DEFAULT_PLAN_MODEL = "gpt-5-mini"
 DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
+DEFAULT_SIMULATION_CHAT_MODEL = "gpt-5-mini"
+DEFAULT_SIMULATION_CHAT_VERBOSITY = "medium"
+DEFAULT_SIMULATION_CHAT_THINKING = "medium"
 
 DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE = " ".join(
     [
@@ -1366,6 +1369,63 @@ def _extract_plan_from_response(response: Any) -> PlanModel | None:
     return None
 
 
+def _extract_simulation_chat_response(response: Any) -> SimulationChatResponsePayload | None:
+    if response is None:
+        return None
+
+    direct_parsed = getattr(response, "parsed", None)
+    if direct_parsed:
+        try:
+            if isinstance(direct_parsed, SimulationChatResponsePayload):
+                return direct_parsed
+            if isinstance(direct_parsed, dict):
+                return SimulationChatResponsePayload.model_validate(direct_parsed)
+        except ValidationError:
+            return None
+
+    output_items = getattr(response, "output", None)
+    if output_items is None and isinstance(response, dict):
+        output_items = response.get("output")
+    if not output_items:
+        return None
+
+    for item in output_items:
+        content = getattr(item, "content", None)
+        if content is None and isinstance(item, dict):
+            content = item.get("content")
+        if not content:
+            continue
+        for part in content:
+            parsed = getattr(part, "parsed", None)
+            if parsed:
+                try:
+                    if isinstance(parsed, SimulationChatResponsePayload):
+                        return parsed
+                    if isinstance(parsed, dict):
+                        return SimulationChatResponsePayload.model_validate(parsed)
+                except ValidationError:
+                    continue
+            if isinstance(part, dict) and "parsed" in part:
+                try:
+                    return SimulationChatResponsePayload.model_validate(part["parsed"])
+                except ValidationError:
+                    continue
+            text = getattr(part, "text", None)
+            if text is None and isinstance(part, dict):
+                text = part.get("text")
+            if not text:
+                continue
+            try:
+                parsed_text = json.loads(text)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            try:
+                return SimulationChatResponsePayload.model_validate(parsed_text)
+            except ValidationError:
+                continue
+    return None
+
+
 def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> PlanModel:
     last_error: PlanGenerationError | None = None
     for attempt in range(2):
@@ -1504,6 +1564,17 @@ def _sse_headers() -> dict[str, str]:
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
+
+
+def _yield_text_chunks(text: str, chunk_size: int = 160) -> Generator[str, None, None]:
+    if not text:
+        return
+    length = len(text)
+    start = 0
+    while start < length:
+        end = min(length, start + chunk_size)
+        yield text[start:end]
+        start = end
 
 
 def _extract_text_from_response(response) -> str:
@@ -1970,6 +2041,28 @@ class SubmissionRequest(BaseModel):
     stage_index: int = Field(..., alias="stageIndex", ge=0, le=29)
     payload: Any
     run_id: str | None = Field(default=None, alias="runId")
+
+
+class SimulationChatMessage(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: Literal["user", "ai", "assistant"]
+    content: str = Field(..., min_length=1, max_length=6000)
+
+
+class SimulationChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    system_message: str = Field(..., alias="systemMessage", min_length=1, max_length=6000)
+    messages: list[SimulationChatMessage] = Field(default_factory=list)
+    model: str | None = None
+    verbosity: Literal["low", "medium", "high"] | None = None
+    thinking: Literal["minimal", "medium", "high"] | None = None
+
+
+class SimulationChatResponsePayload(BaseModel):
+    reply: str = Field(..., min_length=1, max_length=8000)
+    should_end: bool = Field(..., alias="shouldEnd")
 
 
 class ActivityProgressRequest(BaseModel):
@@ -4177,6 +4270,77 @@ def _handle_prompt_evaluation(payload: PromptEvaluationRequest) -> PromptEvaluat
     return PromptEvaluationResponseModel(evaluation=evaluation, raw=raw)
 
 
+def _handle_simulation_chat(payload: SimulationChatRequest) -> StreamingResponse:
+    client = _ensure_client()
+    model_name = payload.model or DEFAULT_SIMULATION_CHAT_MODEL
+    model = _validate_model(model_name)
+    selected_verbosity = payload.verbosity or DEFAULT_SIMULATION_CHAT_VERBOSITY
+    selected_thinking = payload.thinking or DEFAULT_SIMULATION_CHAT_THINKING
+
+    system_message = payload.system_message.strip()
+    if not system_message:
+        raise HTTPException(status_code=400, detail="systemMessage ne peut pas être vide.")
+
+    prepared_messages: list[dict[str, str]] = []
+    for message in payload.messages:
+        normalized_role = (message.role or "").lower()
+        role = "assistant" if normalized_role in {"ai", "assistant"} else "user"
+        content = message.content.strip()
+        if not content:
+            continue
+        prepared_messages.append({"role": role, "content": content})
+
+    if not prepared_messages:
+        raise HTTPException(status_code=400, detail="Le message utilisateur est requis.")
+    if prepared_messages[-1]["role"] != "user":
+        raise HTTPException(
+            status_code=400,
+            detail="Le dernier message doit provenir de l'utilisateur.",
+        )
+
+    def stream_response() -> Generator[str, None, None]:
+        yield _sse_comment("simulation-chat")
+        try:
+            with client.responses.stream(
+                model=model,
+                input=[{"role": "system", "content": system_message}, *prepared_messages],
+                text_format=SimulationChatResponsePayload,
+                text={"verbosity": selected_verbosity},
+                reasoning={"effort": selected_thinking, "summary": "auto"},
+            ) as stream:
+                for event in stream:
+                    if event.type == "response.error":
+                        error_message = "Erreur du service de génération"
+                        details = getattr(event, "error", None)
+                        if isinstance(details, dict):
+                            error_message = details.get("message", error_message)
+                        raise HTTPException(status_code=500, detail=error_message)
+                final_response = stream.get_final_response()
+        except HTTPException as exc:
+            yield _sse_event("error", {"message": exc.detail})
+            return
+        except Exception as exc:  # pragma: no cover - defensive catch
+            yield _sse_event("error", {"message": str(exc)})
+            return
+
+        parsed = _extract_simulation_chat_response(final_response)
+        if parsed is None:
+            yield _sse_event("error", {"message": "Réponse du modèle invalide."})
+            return
+
+        reply_text = parsed.reply.strip()
+        if reply_text:
+            for chunk in _yield_text_chunks(reply_text):
+                yield _sse_event("delta", {"text": chunk})
+        yield _sse_event("done", {"shouldEnd": parsed.should_end})
+
+    return StreamingResponse(
+        stream_response(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
+
+
 @app.post("/api/summary")
 def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
@@ -4185,6 +4349,13 @@ def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) 
 @app.post("/summary")
 def fetch_summary_legacy(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
+
+
+@app.post("/api/simulation-chat")
+def stream_simulation_chat(
+    payload: SimulationChatRequest, _: None = Depends(_require_api_key)
+) -> StreamingResponse:
+    return _handle_simulation_chat(payload)
 
 
 @app.post("/api/prompt-evaluation", response_model=PromptEvaluationResponseModel)

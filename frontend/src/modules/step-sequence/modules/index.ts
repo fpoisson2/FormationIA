@@ -29,9 +29,12 @@ import {
 } from "./FormStep";
 import type {
   SimulationChatConfig,
+  SimulationChatConversationMessage,
+  SimulationChatMode,
   SimulationChatPayload,
   SimulationChatStageConfig,
 } from "./SimulationChatStep";
+import { DEFAULT_SIMULATION_SYSTEM_MESSAGE } from "./SimulationChatStep";
 import "./workshop";
 import "./explorateur-world";
 import type {
@@ -82,7 +85,14 @@ export {
   sanitizeFormValues,
   validateFieldSpec,
 };
-export type { SimulationChatConfig, SimulationChatPayload, SimulationChatStageConfig };
+export type {
+  SimulationChatConfig,
+  SimulationChatConversationMessage,
+  SimulationChatMode,
+  SimulationChatPayload,
+  SimulationChatStageConfig,
+};
+export { DEFAULT_SIMULATION_SYSTEM_MESSAGE };
 export type { RichContentStepConfig, RichContentStepContent };
 export type { RichContentMediaItem };
 export type {

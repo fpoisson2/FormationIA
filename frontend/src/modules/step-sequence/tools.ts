@@ -36,9 +36,11 @@ import type {
   RichContentSidebar,
   RichContentStepConfig,
   SimulationChatConfig,
+  SimulationChatMode,
   SimulationChatStageConfig,
 } from "./modules";
 import {
+  DEFAULT_SIMULATION_SYSTEM_MESSAGE,
   createDefaultExplorateurWorldConfig,
   sanitizeExplorateurWorldConfig,
   validateFieldSpec,
@@ -752,7 +754,12 @@ interface CreateSimulationChatStepInput extends ToolBaseInput {
   help?: string;
   missionId?: string;
   roles?: { ai?: string; user?: string };
-  stages: SimulationChatStageInput[];
+  mode?: SimulationChatMode;
+  systemMessage?: string;
+  stages?: SimulationChatStageInput[];
+  model?: string;
+  verbosity?: string;
+  thinking?: string;
 }
 
 const DEFAULT_SIMULATION_TITLE = "Simulation conversation";
@@ -790,7 +797,7 @@ const createSimulationChatStep: StepSequenceFunctionTool<
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["title", "stages"],
+      required: ["title"],
       properties: {
         id: { type: "string" },
         idHint: { type: "string" },
@@ -811,9 +818,17 @@ const createSimulationChatStep: StepSequenceFunctionTool<
         },
         stages: {
           type: "array",
-          minItems: 1,
+          minItems: 0,
           items: simulationChatStageSchema,
         },
+        mode: {
+          type: "string",
+          enum: ["scripted", "live"],
+        },
+        systemMessage: { type: "string" },
+        model: { type: "string", enum: Array.from(MODEL_CHOICES) },
+        verbosity: { type: "string", enum: Array.from(VERBOSITY_CHOICES) },
+        thinking: { type: "string", enum: Array.from(THINKING_CHOICES) },
       },
     },
   },
@@ -826,6 +841,24 @@ const createSimulationChatStep: StepSequenceFunctionTool<
       allowEmpty: false,
     });
     const missionId = sanitizeString(input.missionId, "", { allowEmpty: false });
+    const mode: SimulationChatMode = input.mode === "live" ? "live" : "scripted";
+    const systemMessage = sanitizeString(
+      input.systemMessage,
+      DEFAULT_SIMULATION_SYSTEM_MESSAGE,
+      { allowEmpty: false }
+    );
+    const model: SimulationChatConfig["model"] =
+      typeof input.model === "string" && MODEL_CHOICES.has(input.model)
+        ? (input.model as SimulationChatConfig["model"])
+        : (DEFAULT_MODEL as SimulationChatConfig["model"]);
+    const verbosity: SimulationChatConfig["verbosity"] =
+      typeof input.verbosity === "string" && VERBOSITY_CHOICES.has(input.verbosity as VerbosityChoice)
+        ? (input.verbosity as SimulationChatConfig["verbosity"])
+        : (DEFAULT_VERBOSITY as SimulationChatConfig["verbosity"]);
+    const thinking: SimulationChatConfig["thinking"] =
+      typeof input.thinking === "string" && THINKING_CHOICES.has(input.thinking as ThinkingChoice)
+        ? (input.thinking as SimulationChatConfig["thinking"])
+        : (DEFAULT_THINKING as SimulationChatConfig["thinking"]);
     const roles = {
       ai: sanitizeString(input.roles?.ai, DEFAULT_SIMULATION_ROLE_AI, {
         allowEmpty: false,
@@ -873,6 +906,11 @@ const createSimulationChatStep: StepSequenceFunctionTool<
       help,
       roles,
       stages,
+      mode,
+      systemMessage,
+      model,
+      verbosity,
+      thinking,
       ...(missionId ? { missionId } : {}),
     };
 

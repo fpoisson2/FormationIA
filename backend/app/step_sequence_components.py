@@ -611,6 +611,11 @@ def create_simulation_chat_step(
     mission_id: str | None = None,
     roles: Mapping[str, Any] | None = None,
     stages: Sequence[Mapping[str, Any]] | None = None,
+    mode: str | None = None,
+    system_message: str | None = None,
+    model: str | None = None,
+    verbosity: str | None = None,
+    thinking: str | None = None,
 ) -> StepDefinition:
     """Crée une étape « simulation-chat » dédiée aux jeux de rôle guidés.
 
@@ -629,6 +634,10 @@ def create_simulation_chat_step(
     stages:
         Liste ordonnée d'étapes internes, chacune contenant un prompt et une
         configuration de champs pour la réponse de l'utilisateur.
+    mode:
+        Mode de fonctionnement de la simulation ("scripted" ou "live").
+    system_message:
+        Message système optionnel utilisé pour initialiser le modèle en mode « live ».
 
     Returns
     -------
@@ -656,12 +665,42 @@ def create_simulation_chat_step(
                 }
             )
 
+    normalized_mode = "live" if isinstance(mode, str) and mode.strip().lower() == "live" else "scripted"
+    normalized_system_message = None
+    if isinstance(system_message, str):
+        stripped_message = system_message.strip()
+        if stripped_message:
+            normalized_system_message = stripped_message
+
+    normalized_model = None
+    if isinstance(model, str):
+        stripped_model = model.strip()
+        if stripped_model:
+            normalized_model = stripped_model
+
+    normalized_verbosity = None
+    if isinstance(verbosity, str):
+        normalized = verbosity.strip().lower()
+        if normalized in {"low", "medium", "high"}:
+            normalized_verbosity = normalized
+
+    normalized_thinking = None
+    if isinstance(thinking, str):
+        normalized = thinking.strip().lower()
+        if normalized in {"minimal", "medium", "high"}:
+            normalized_thinking = normalized
+
     config = {
         "title": str(title),
         "help": str(help_text),
         "missionId": mission_id,
         "roles": normalized_roles,
         "stages": normalized_stages,
+        "mode": normalized_mode,
+        "systemMessage": normalized_system_message,
+        "model": normalized_model,
+        "verbosity": normalized_verbosity,
+        "thinking": normalized_thinking,
     }
     return {
         "id": str(step_id),
