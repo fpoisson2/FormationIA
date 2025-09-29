@@ -978,32 +978,26 @@ export function SimulationChatStep({
       runId: runId ?? null,
       conversation: {
         messages: conversationRef.current.map(({ isStreaming: _omit, ...rest }) => rest),
-        finished: true,
+        finished: conversationFinished,
       },
     };
-  }, [history, runId]);
+  }, [conversationFinished, history, runId]);
 
   useEffect(() => {
     if (!supportsManualAdvance || !setManualAdvanceHandler) {
       return;
     }
 
-    if (!conversationFinished) {
-      setManualAdvanceHandler(null);
-      setManualAdvanceDisabled?.(false);
-      return;
-    }
-
     setManualAdvanceHandler(manualAdvanceHandler);
-    setManualAdvanceDisabled?.(false);
+    setManualAdvanceDisabled?.(!conversationFinished);
 
     return () => {
       setManualAdvanceHandler(null);
       setManualAdvanceDisabled?.(false);
     };
   }, [
-    conversationFinished,
     manualAdvanceHandler,
+    conversationFinished,
     setManualAdvanceDisabled,
     setManualAdvanceHandler,
     supportsManualAdvance,

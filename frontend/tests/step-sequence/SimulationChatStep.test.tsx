@@ -195,7 +195,10 @@ describe("SimulationChatStep", () => {
     expect(onAdvance).not.toHaveBeenCalled();
 
     const lastCallIndex = setManualAdvanceHandler.mock.calls.length - 1;
-    const handler = lastCallIndex >= 0 ? (setManualAdvanceHandler.mock.calls[lastCallIndex]?.[0] as (() => unknown)) : undefined;
+    const handler =
+      lastCallIndex >= 0
+        ? (setManualAdvanceHandler.mock.calls[lastCallIndex]?.[0] as (() => unknown))
+        : undefined;
     expect(typeof handler).toBe("function");
     expect(handler?.()).toEqual({
       history: [],
@@ -210,5 +213,80 @@ describe("SimulationChatStep", () => {
     });
 
     expect(setManualAdvanceDisabled).toHaveBeenCalledWith(false);
+  });
+
+  it("exposes a disabled manual advance handler while the live conversation is running", async () => {
+    const setManualAdvanceHandler = vi.fn();
+    const setManualAdvanceDisabled = vi.fn();
+
+    const config: SimulationChatConfig = {
+      ...baseConfig,
+      mode: "live",
+      stages: [],
+    };
+
+    const props: StepComponentProps = {
+      definition: { id: "simulation", component: "simulation-chat", config },
+      config,
+      payload: {
+        history: [],
+        runId: "run-42",
+        conversation: {
+          messages: [
+            { id: "msg-user", role: "user", content: "Bonjour" },
+            { id: "msg-ai", role: "ai", content: "Salut" },
+          ],
+          finished: false,
+        },
+      },
+      isActive: true,
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+    };
+
+    const contextValue: StepSequenceContextValue = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [],
+      payloads: {},
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+      setManualAdvanceHandler,
+      setManualAdvanceDisabled,
+      getManualAdvanceState: () => ({ handler: null, disabled: false }),
+    };
+
+    render(
+      <StepSequenceContext.Provider value={contextValue}>
+        <SimulationChatStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    await waitFor(() => {
+      expect(setManualAdvanceHandler).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    const lastCallIndex = setManualAdvanceHandler.mock.calls.length - 1;
+    const handler =
+      lastCallIndex >= 0
+        ? (setManualAdvanceHandler.mock.calls[lastCallIndex]?.[0] as (() => unknown))
+        : undefined;
+    expect(typeof handler).toBe("function");
+    expect(handler?.()).toEqual({
+      history: [],
+      runId: "run-42",
+      conversation: {
+        messages: [
+          { id: "msg-user", role: "user", content: "Bonjour" },
+          { id: "msg-ai", role: "ai", content: "Salut" },
+        ],
+        finished: false,
+      },
+    });
+
+    expect(setManualAdvanceDisabled).toHaveBeenCalledWith(true);
   });
 });
