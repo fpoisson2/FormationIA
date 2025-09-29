@@ -3689,6 +3689,36 @@ def admin_save_landing_page_config_endpoint(
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
+_TOOL_CALL_ID_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _normalize_tool_call_identifier(value: Any, fallback_seed: str | None = None) -> str:
+    if isinstance(value, str):
+        candidate = value.strip()
+    elif value is None:
+        candidate = ""
+    else:
+        candidate = str(value).strip()
+
+    if not candidate and fallback_seed:
+        candidate = fallback_seed
+
+    if not candidate:
+        candidate = secrets.token_hex(8)
+
+    sanitized = _TOOL_CALL_ID_SANITIZE_RE.sub("_", candidate)
+    sanitized = sanitized.strip("_")
+
+    if not sanitized:
+        sanitized = secrets.token_hex(8)
+
+    if not sanitized.startswith("msg_"):
+        sanitized = f"msg_{sanitized}"
+
+    # Trim overly long identifiers to stay within service expectations
+    return sanitized[:120]
+
+
 def _normalize_response_item(item: Any) -> dict[str, Any]:
     if isinstance(item, Mapping):
         return deepcopy(item)
@@ -3755,7 +3785,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         if message.get("role") == "tool":
             tool_call_id = message.get("tool_call_id") or message.get("call_id")
             if tool_call_id is not None:
-                role_message["tool_call_id"] = str(tool_call_id)
+                role_message["tool_call_id"] = _normalize_tool_call_identifier(tool_call_id)
             if message.get("name"):
                 role_message["name"] = message["name"]
         for extra_key in ("metadata",):
@@ -3766,10 +3796,11 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
     message_type = message.get("type")
 
     if message_type == "function_call":
-        call_id = (
-            message.get("call_id")
-            or message.get("id")
-            or f"call_{hashlib.sha1(json.dumps(message, sort_keys=True).encode()).hexdigest()[:8]}"
+        fallback_seed = (
+            f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
+        )
+        call_id = _normalize_tool_call_identifier(
+            message.get("call_id") or message.get("id"), fallback_seed=fallback_seed
         )
         arguments = message.get("arguments")
         if isinstance(arguments, str):
@@ -3784,7 +3815,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             "content": [
                 {
                     "type": "tool_call",
-                    "id": str(call_id),
+                    "id": call_id,
                     "name": message.get("name"),
                     "arguments": arguments_text,
                 }
@@ -3810,15 +3841,19 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
                 }
             ],
         }
-        call_id = message.get("call_id") or message.get("id")
-        if call_id is not None:
-            payload["tool_call_id"] = str(call_id)
+        fallback_seed = (
+            f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
+        )
+        call_id = _normalize_tool_call_identifier(
+            message.get("call_id") or message.get("id"), fallback_seed=fallback_seed
+        )
+        payload["tool_call_id"] = call_id
         return _maybe_attach_summary(payload)
 
     fallback = {
         key: deepcopy(value)
         for key, value in message.items()
-        if key not in {"type", "summary"}
+        if key not in {"type", "summary", "id"}
     }
     if "role" not in fallback:
         fallback["role"] = "assistant"
@@ -4025,7 +4060,10 @@ def _run_activity_generation_job(job_id: str) -> None:
             )
             return
 
-        call_id = item.get("call_id")
+        raw_call_id = item.get("call_id") or item.get("id")
+        fallback_seed = f"{name}_{iteration}_{len(conversation)}"
+        call_id = _normalize_tool_call_identifier(raw_call_id, fallback_seed=fallback_seed)
+        item["call_id"] = call_id
         raw_arguments = item.get("arguments")
         arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
         python_arguments = normalize_tool_arguments(arguments_obj)
