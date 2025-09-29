@@ -155,7 +155,15 @@ def test_create_simulation_chat_step_sets_roles_and_stages() -> None:
     )
 
     config = step["config"]
-    assert set(config) == {"title", "help", "missionId", "roles", "stages"}
+    assert set(config) == {
+        "title",
+        "help",
+        "missionId",
+        "roles",
+        "stages",
+        "mode",
+        "systemMessage",
+    }
     assert config["roles"] == {"ai": "Coach", "user": "Participant"}
     assert len(config["stages"]) == 1
     assert config["stages"][0]["prompt"] == "Question"
@@ -166,6 +174,23 @@ def test_create_simulation_chat_step_sets_roles_and_stages() -> None:
         "allowEmpty",
         "submitLabel",
     }
+    assert config["mode"] == "scripted"
+    assert config["systemMessage"] is None
+
+
+def test_create_simulation_chat_step_accepts_live_mode() -> None:
+    step = create_simulation_chat_step(
+        step_id="simulation",
+        title="Simulation",
+        help_text="Aide",
+        mode="live",
+        system_message="  Conduis la discussion.  ",
+        stages=[],
+    )
+
+    config = step["config"]
+    assert config["mode"] == "live"
+    assert config["systemMessage"] == "Conduis la discussion."
 
 
 def test_create_info_cards_step_includes_columns_and_cards() -> None:

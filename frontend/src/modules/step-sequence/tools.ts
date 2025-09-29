@@ -36,9 +36,11 @@ import type {
   RichContentSidebar,
   RichContentStepConfig,
   SimulationChatConfig,
+  SimulationChatMode,
   SimulationChatStageConfig,
 } from "./modules";
 import {
+  DEFAULT_SIMULATION_SYSTEM_MESSAGE,
   createDefaultExplorateurWorldConfig,
   sanitizeExplorateurWorldConfig,
   validateFieldSpec,
@@ -752,7 +754,9 @@ interface CreateSimulationChatStepInput extends ToolBaseInput {
   help?: string;
   missionId?: string;
   roles?: { ai?: string; user?: string };
-  stages: SimulationChatStageInput[];
+  mode?: SimulationChatMode;
+  systemMessage?: string;
+  stages?: SimulationChatStageInput[];
 }
 
 const DEFAULT_SIMULATION_TITLE = "Simulation conversation";
@@ -790,7 +794,7 @@ const createSimulationChatStep: StepSequenceFunctionTool<
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["title", "stages"],
+      required: ["title"],
       properties: {
         id: { type: "string" },
         idHint: { type: "string" },
@@ -811,9 +815,14 @@ const createSimulationChatStep: StepSequenceFunctionTool<
         },
         stages: {
           type: "array",
-          minItems: 1,
+          minItems: 0,
           items: simulationChatStageSchema,
         },
+        mode: {
+          type: "string",
+          enum: ["scripted", "live"],
+        },
+        systemMessage: { type: "string" },
       },
     },
   },
@@ -826,6 +835,12 @@ const createSimulationChatStep: StepSequenceFunctionTool<
       allowEmpty: false,
     });
     const missionId = sanitizeString(input.missionId, "", { allowEmpty: false });
+    const mode: SimulationChatMode = input.mode === "live" ? "live" : "scripted";
+    const systemMessage = sanitizeString(
+      input.systemMessage,
+      DEFAULT_SIMULATION_SYSTEM_MESSAGE,
+      { allowEmpty: false }
+    );
     const roles = {
       ai: sanitizeString(input.roles?.ai, DEFAULT_SIMULATION_ROLE_AI, {
         allowEmpty: false,
@@ -873,6 +888,8 @@ const createSimulationChatStep: StepSequenceFunctionTool<
       help,
       roles,
       stages,
+      mode,
+      systemMessage,
       ...(missionId ? { missionId } : {}),
     };
 

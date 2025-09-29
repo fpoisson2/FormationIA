@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SimulationChatConfig } from "../../src/modules/step-sequence/modules";
+import { DEFAULT_SIMULATION_SYSTEM_MESSAGE } from "../../src/modules/step-sequence/modules";
 import SimulationChatStep from "../../src/modules/step-sequence/modules/SimulationChatStep";
 import type { StepComponentProps } from "../../src/modules/step-sequence/types";
 
@@ -24,6 +25,8 @@ describe("SimulationChatStep", () => {
     title: "Simulation",
     help: "Aide",
     roles: { ai: "IA", user: "Participant" },
+    mode: "scripted",
+    systemMessage: DEFAULT_SIMULATION_SYSTEM_MESSAGE,
   };
 
   it("keeps fields whose labels are temporarily empty during normalization", async () => {

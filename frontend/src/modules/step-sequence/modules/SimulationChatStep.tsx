@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -26,6 +27,7 @@ import ChatBubble from "../../../components/ChatBubble";
 import GuidedFields from "../../../components/GuidedFields";
 import { StepSequenceContext } from "../types";
 import type { StepComponentProps } from "../types";
+import { API_AUTH_KEY, API_BASE_URL } from "../../../config";
 import {
   createDefaultFieldSpec,
   createInitialFormValues,
@@ -39,6 +41,25 @@ const DEFAULT_HELP = "Réponds aux consignes et observe comment la demande évol
 const DEFAULT_SUBMIT_LABEL = "Continuer";
 const DEFAULT_ROLE_AI = "IA";
 const DEFAULT_ROLE_USER = "Participant";
+
+export type SimulationChatMode = "scripted" | "live";
+
+export const DEFAULT_SIMULATION_SYSTEM_MESSAGE =
+  "Tu es un tuteur virtuel bienveillant qui accompagne un participant francophone." +
+  " Donne des conseils concrets et aide la personne à progresser." +
+  " Quand la conversation est terminée ou que l'objectif est atteint, signale la fin.";
+
+export interface SimulationChatConversationMessage {
+  id: string;
+  role: "ai" | "user";
+  content: string;
+  isStreaming?: boolean;
+}
+
+export interface SimulationChatConversationState {
+  messages: SimulationChatConversationMessage[];
+  finished: boolean;
+}
 
 interface SimulationChatRolesConfig {
   ai: string;
@@ -59,11 +80,14 @@ export interface SimulationChatConfig {
   roles: SimulationChatRolesConfig;
   missionId?: string;
   stages: SimulationChatStageConfig[];
+  mode: SimulationChatMode;
+  systemMessage: string;
 }
 
 export interface SimulationChatPayload {
   history: StageRecord[];
   runId?: string | null;
+  conversation?: SimulationChatConversationState | null;
 }
 
 function generateStageId(): string {
@@ -195,12 +219,16 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
       help: DEFAULT_HELP,
       roles: { ai: DEFAULT_ROLE_AI, user: DEFAULT_ROLE_USER },
       stages: [],
+      mode: "scripted",
+      systemMessage: DEFAULT_SIMULATION_SYSTEM_MESSAGE,
     };
   }
 
   const base = config as Partial<SimulationChatConfig> & {
     roles?: Partial<SimulationChatRolesConfig>;
     stages?: unknown;
+    mode?: unknown;
+    systemMessage?: unknown;
   };
 
   const title =
@@ -239,21 +267,80 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
     stages.push({ ...normalized, id: stageId });
   });
 
+  const normalizedMode: SimulationChatMode =
+    typeof base.mode === "string" && base.mode.trim().toLowerCase() === "live"
+      ? "live"
+      : "scripted";
+
+  const systemMessage =
+    typeof base.systemMessage === "string" && base.systemMessage.trim().length > 0
+      ? base.systemMessage.trim()
+      : DEFAULT_SIMULATION_SYSTEM_MESSAGE;
+
   return {
     title,
     help,
     roles: { ai: aiRole, user: userRole },
     missionId,
     stages,
+    mode: normalizedMode,
+    systemMessage,
   };
 }
 
 function parsePayload(
   payload: unknown,
   stageCount: number
-): { history: StageRecord[]; runId: string | null; nextStageIndex: number } {
+): {
+  history: StageRecord[];
+  runId: string | null;
+  nextStageIndex: number;
+  conversation: SimulationChatConversationState;
+} {
+  const parseConversationPayload = (value: unknown): SimulationChatConversationState => {
+    if (!value || typeof value !== "object") {
+      return { messages: [], finished: false };
+    }
+
+    const base = value as Partial<SimulationChatConversationState> & {
+      messages?: unknown;
+      finished?: unknown;
+    };
+
+    const rawMessages = Array.isArray(base.messages) ? base.messages : [];
+    const messages = rawMessages
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const candidate = entry as Partial<SimulationChatConversationMessage> & {
+          role?: unknown;
+          content?: unknown;
+          id?: unknown;
+        };
+        const rawRole = typeof candidate.role === "string" ? candidate.role.trim().toLowerCase() : "user";
+        const role: "ai" | "user" = rawRole === "ai" || rawRole === "assistant" ? "ai" : "user";
+        const content = typeof candidate.content === "string" ? candidate.content : "";
+        const id =
+          typeof candidate.id === "string" && candidate.id.trim().length > 0
+            ? candidate.id
+            : generateStageId();
+        return { id, role, content } satisfies SimulationChatConversationMessage;
+      })
+      .filter((message): message is SimulationChatConversationMessage => Boolean(message));
+
+    const finished = Boolean(base.finished);
+
+    return { messages, finished };
+  };
+
   if (!payload || typeof payload !== "object") {
-    return { history: [], runId: null, nextStageIndex: 0 };
+    return {
+      history: [],
+      runId: null,
+      nextStageIndex: 0,
+      conversation: { messages: [], finished: false },
+    };
   }
 
   const base = payload as Partial<SimulationChatPayload>;
@@ -289,7 +376,94 @@ function parsePayload(
     history: filteredHistory,
     runId,
     nextStageIndex: Math.min(nextStageIndex, Math.max(stageCount, 0)),
+    conversation: parseConversationPayload(base.conversation),
   };
+}
+
+interface SimulationChatStreamHandlers {
+  signal: AbortSignal;
+  onDelta: (text: string) => void;
+  onDone: (shouldEnd: boolean) => void;
+  onError: (message: string) => void;
+}
+
+async function streamSimulationChatResponse(
+  body: { systemMessage: string; messages: { role: string; content: string }[] },
+  handlers: SimulationChatStreamHandlers
+): Promise<void> {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  if (API_AUTH_KEY) {
+    headers["X-API-Key"] = API_AUTH_KEY;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/simulation-chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal: handlers.signal,
+  });
+
+  if (!response.ok || !response.body) {
+    const message = await response.text();
+    throw new Error(message || "Impossible de contacter le service de simulation.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+      if (!chunk.trim()) {
+        continue;
+      }
+      let eventName = "message";
+      let dataPayload = "";
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataPayload += `${line.slice(5)}\n`;
+        }
+      }
+      const trimmed = dataPayload.trim();
+      let data: unknown = null;
+      if (trimmed) {
+        try {
+          data = JSON.parse(trimmed);
+        } catch (error) {
+          console.warn("Impossible d'analyser un événement SSE de simulation", error);
+        }
+      }
+      if (eventName === "delta" && data && typeof (data as { text?: unknown }).text === "string") {
+        handlers.onDelta((data as { text: string }).text);
+      } else if (eventName === "done") {
+        const shouldEnd =
+          typeof (data as { shouldEnd?: unknown })?.shouldEnd === "boolean"
+            ? Boolean((data as { shouldEnd?: unknown }).shouldEnd)
+            : false;
+        handlers.onDone(shouldEnd);
+      } else if (eventName === "error") {
+        const message =
+          typeof (data as { message?: unknown })?.message === "string"
+            ? ((data as { message: string }).message || "Erreur du serveur de simulation.")
+            : "Erreur du serveur de simulation.";
+        handlers.onError(message);
+      }
+    }
+  }
 }
 
 function renderHistoryValue(field: FieldSpec, value: unknown): JSX.Element | null {
@@ -458,6 +632,7 @@ export function SimulationChatStep({
         runId: parsedPayload.runId ?? null,
         nextStageIndex: parsedPayload.nextStageIndex,
         history: parsedPayload.history,
+        conversation: parsedPayload.conversation,
       }),
     [parsedPayload]
   );
@@ -476,6 +651,21 @@ export function SimulationChatStep({
   const [displayedPrompt, setDisplayedPrompt] = useState("");
   const [isStreamingPrompt, setIsStreamingPrompt] = useState(false);
   const [fieldTypeDraft, setFieldTypeDraft] = useState<FieldType>("textarea_with_counter");
+  const [conversationMessages, setConversationMessages] = useState<SimulationChatConversationMessage[]>(
+    parsedPayload.conversation.messages
+  );
+  const [conversationFinished, setConversationFinished] = useState<boolean>(
+    parsedPayload.conversation.finished
+  );
+  const [liveInput, setLiveInput] = useState("");
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [isStreamingLiveReply, setIsStreamingLiveReply] = useState(false);
+  const liveRequestController = useRef<AbortController | null>(null);
+  const conversationRef = useRef<SimulationChatConversationMessage[]>(
+    parsedPayload.conversation.messages
+  );
+
+  const isLiveMode = activeConfig.mode === "live";
 
   useEffect(() => {
     setActiveConfig(typedConfig);
@@ -485,7 +675,20 @@ export function SimulationChatStep({
     setHistory(parsedPayload.history);
     setRunId(parsedPayload.runId);
     setStageIndex(parsedPayload.nextStageIndex);
-  }, [payloadSignature, parsedPayload.history, parsedPayload.nextStageIndex, parsedPayload.runId]);
+    setConversationMessages(parsedPayload.conversation.messages);
+    setConversationFinished(parsedPayload.conversation.finished);
+    conversationRef.current = parsedPayload.conversation.messages;
+  }, [payloadSignature]);
+
+  useEffect(() => {
+    conversationRef.current = conversationMessages;
+  }, [conversationMessages]);
+
+  useEffect(() => {
+    return () => {
+      liveRequestController.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     setHistory((prev) =>
@@ -529,6 +732,13 @@ export function SimulationChatStep({
   const currentStage = stageIndex < activeConfig.stages.length ? activeConfig.stages[stageIndex] : null;
 
   useEffect(() => {
+    if (isLiveMode) {
+      setValues({});
+      setErrors({});
+      setDisplayedPrompt("");
+      setIsStreamingPrompt(false);
+      return;
+    }
     if (!currentStage) {
       setValues({});
       setErrors({});
@@ -559,11 +769,136 @@ export function SimulationChatStep({
       setDisplayedPrompt(fullPrompt);
       setIsStreamingPrompt(false);
     };
-  }, [currentStage, history, stageIndex]);
+  }, [currentStage, history, isLiveMode, stageIndex]);
 
   const handleValueChange = useCallback((fieldId: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [fieldId]: value }));
   }, []);
+
+  const handleLiveInputChange = useCallback((event: ChangeEvent<HTMLTextAreaElement>) => {
+    setLiveInput(event.target.value);
+  }, []);
+
+  const handleLiveSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (isDesignerMode || conversationFinished || isStreamingLiveReply) {
+        return;
+      }
+
+      const trimmed = liveInput.trim();
+      if (!trimmed) {
+        setLiveError("Écris un message pour poursuivre la discussion.");
+        return;
+      }
+
+      const userMessage: SimulationChatConversationMessage = {
+        id: generateStageId(),
+        role: "user",
+        content: trimmed,
+      };
+      const baseMessages = [...conversationRef.current, userMessage];
+      setLiveError(null);
+      setLiveInput("");
+
+      const aiMessageId = generateStageId();
+      setConversationMessages((prev) => {
+        const next = [
+          ...prev,
+          userMessage,
+          { id: aiMessageId, role: "ai", content: "", isStreaming: true },
+        ];
+        conversationRef.current = next;
+        return next;
+      });
+
+      const controller = new AbortController();
+      liveRequestController.current?.abort();
+      liveRequestController.current = controller;
+      setIsStreamingLiveReply(true);
+
+      try {
+        await streamSimulationChatResponse(
+          {
+            systemMessage: activeConfig.systemMessage,
+            messages: baseMessages.map((message) => ({
+              role: message.role === "ai" ? "assistant" : "user",
+              content: message.content,
+            })),
+          },
+          {
+            signal: controller.signal,
+            onDelta: (chunk) => {
+              if (!chunk) {
+                return;
+              }
+              setConversationMessages((prev) => {
+                const next = prev.map((message) =>
+                  message.id === aiMessageId
+                    ? { ...message, content: `${message.content}${chunk}` }
+                    : message
+                );
+                conversationRef.current = next;
+                return next;
+              });
+            },
+            onDone: (shouldEnd) => {
+              setConversationMessages((prev) => {
+                const next = prev.map((message) =>
+                  message.id === aiMessageId ? { ...message, isStreaming: false } : message
+                );
+                conversationRef.current = next;
+                if (shouldEnd) {
+                  const storedMessages = next.map(({ isStreaming: _omit, ...rest }) => rest);
+                  effectiveOnAdvance({
+                    history,
+                    runId: runId ?? null,
+                    conversation: { messages: storedMessages, finished: true },
+                  });
+                }
+                return next;
+              });
+              setConversationFinished(shouldEnd);
+              if (shouldEnd) {
+                setLiveError(null);
+              }
+            },
+            onError: (message) => {
+              setConversationMessages((prev) => {
+                const next = prev.filter((entry) => entry.id !== aiMessageId);
+                conversationRef.current = next;
+                return next;
+              });
+              setLiveError(message);
+            },
+          }
+        );
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setConversationMessages((prev) => {
+            const next = prev.filter((entry) => entry.id !== aiMessageId);
+            conversationRef.current = next;
+            return next;
+          });
+          const message = error instanceof Error ? error.message : "Erreur inattendue.";
+          setLiveError(message);
+        }
+      } finally {
+        setIsStreamingLiveReply(false);
+        liveRequestController.current = null;
+      }
+    },
+    [
+      activeConfig.systemMessage,
+      conversationFinished,
+      effectiveOnAdvance,
+      history,
+      isDesignerMode,
+      isStreamingLiveReply,
+      liveInput,
+      runId,
+    ]
+  );
 
   const pushConfigChange = useCallback(
     (updater: (prev: SimulationChatConfig) => SimulationChatConfig) => {
@@ -589,6 +924,23 @@ export function SimulationChatStep({
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       const value = event.target.value;
       pushConfigChange((prev) => ({ ...prev, help: value }));
+    },
+    [pushConfigChange]
+  );
+
+  const handleModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const rawValue = event.target.value;
+      const value: SimulationChatMode = rawValue === "live" ? "live" : "scripted";
+      pushConfigChange((prev) => ({ ...prev, mode: value }));
+    },
+    [pushConfigChange]
+  );
+
+  const handleSystemMessageChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      pushConfigChange((prev) => ({ ...prev, systemMessage: value }));
     },
     [pushConfigChange]
   );
@@ -814,7 +1166,7 @@ export function SimulationChatStep({
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (isDesignerMode || !currentStage) {
+      if (isDesignerMode || !currentStage || isLiveMode) {
         return;
       }
 
@@ -886,27 +1238,29 @@ export function SimulationChatStep({
       history,
       isDesignerMode,
       runId,
+      isLiveMode,
       stageIndex,
       values,
     ]
   );
 
   const historyEntries = useMemo(
-    () => history.filter((entry) => entry.stageIndex < stageIndex),
-    [history, stageIndex]
+    () => (isLiveMode ? [] : history.filter((entry) => entry.stageIndex < stageIndex)),
+    [history, isLiveMode, stageIndex]
   );
 
-  const allowEmpty = Boolean(currentStage?.allowEmpty);
-  const hasBlockingErrors = !allowEmpty && Object.keys(errors).length > 0;
-  const submitLabel = currentStage
+  const allowEmpty = isLiveMode ? true : Boolean(currentStage?.allowEmpty);
+  const hasBlockingErrors = isLiveMode ? false : !allowEmpty && Object.keys(errors).length > 0;
+  const submitLabel = !isLiveMode && currentStage
     ? currentStage.submitLabel && currentStage.submitLabel.length > 0
       ? currentStage.submitLabel
       : stageIndex === activeConfig.stages.length - 1
         ? "Terminer"
         : DEFAULT_SUBMIT_LABEL
     : DEFAULT_SUBMIT_LABEL;
-  const promptForDisplay =
-    displayedPrompt.length > 0
+  const promptForDisplay = isLiveMode
+    ? ""
+    : displayedPrompt.length > 0
       ? displayedPrompt
       : isStreamingPrompt
         ? ""
@@ -915,6 +1269,8 @@ export function SimulationChatStep({
   const roleLabels = activeConfig.roles;
   const selectedStage =
     selectedStageIndex >= 0 ? activeConfig.stages[selectedStageIndex] : null;
+  const canSendLiveMessage =
+    !isDesignerMode && !conversationFinished && !isStreamingLiveReply && liveInput.trim().length > 0;
 
   return (
     <div className="flex flex-col gap-8 lg:flex-row">
@@ -923,31 +1279,42 @@ export function SimulationChatStep({
         <section className="space-y-6">
           <div className="rounded-3xl border border-white/70 bg-white/90 p-6 shadow-sm">
             <div className="flex max-h-none flex-col gap-5 overflow-visible pr-2 lg:max-h-[60vh] lg:overflow-y-auto">
-              {historyEntries.map((entry) => {
-                const stageTemplate = activeConfig.stages[entry.stageIndex];
-                return (
-                  <div key={`history-${entry.stageIndex}`} className="space-y-3">
+              {isLiveMode
+                ? conversationMessages.map((message) => (
                     <ChatBubble
-                      role="ai"
-                      title={`Manche ${entry.stageIndex + 1}`}
-                      roleLabel={roleLabels.ai}
+                      key={message.id}
+                      role={message.role}
+                      roleLabel={message.role === "ai" ? roleLabels.ai : roleLabels.user}
+                      isStreaming={Boolean(message.isStreaming)}
                     >
-                      <p>{stageTemplate?.prompt ?? entry.prompt}</p>
+                      <p className="whitespace-pre-wrap break-words">{message.content}</p>
                     </ChatBubble>
-                    <ChatBubble role="user" roleLabel={roleLabels.user}>
-                      {stageTemplate?.fields.map((field) => (
-                        <div key={field.id}>
-                          <p className="text-xs font-semibold uppercase tracking-wide opacity-80">
-                            {field.label}
-                          </p>
-                          {renderHistoryValue(field, entry.values[field.id])}
-                        </div>
-                      ))}
-                    </ChatBubble>
-                  </div>
-                );
-              })}
-              {currentStage ? (
+                  ))
+                : historyEntries.map((entry) => {
+                    const stageTemplate = activeConfig.stages[entry.stageIndex];
+                    return (
+                      <div key={`history-${entry.stageIndex}`} className="space-y-3">
+                        <ChatBubble
+                          role="ai"
+                          title={`Manche ${entry.stageIndex + 1}`}
+                          roleLabel={roleLabels.ai}
+                        >
+                          <p>{stageTemplate?.prompt ?? entry.prompt}</p>
+                        </ChatBubble>
+                        <ChatBubble role="user" roleLabel={roleLabels.user}>
+                          {stageTemplate?.fields.map((field) => (
+                            <div key={field.id}>
+                              <p className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                                {field.label}
+                              </p>
+                              {renderHistoryValue(field, entry.values[field.id])}
+                            </div>
+                          ))}
+                        </ChatBubble>
+                      </div>
+                    );
+                  })}
+              {!isLiveMode && currentStage ? (
                 <ChatBubble
                   role="ai"
                   title={`Manche ${Math.min(stageIndex + 1, stageCount)}`}
@@ -960,7 +1327,53 @@ export function SimulationChatStep({
             </div>
           </div>
 
-          {currentStage ? (
+          {isLiveMode ? (
+            conversationFinished ? (
+              <div className="rounded-3xl border border-white/60 bg-white/90 p-6 text-sm text-[color:var(--brand-charcoal)]/80">
+                La discussion est terminée.
+              </div>
+            ) : (
+              <form onSubmit={handleLiveSubmit} className="space-y-4">
+                <ChatBubble
+                  role="user"
+                  title="À toi de jouer"
+                  roleLabel={roleLabels.user}
+                  bubbleClassName="bg-white text-[color:var(--brand-black)] border border-[color:var(--brand-red)]/20 shadow-xl md:max-w-none"
+                  containerClassName="w-full"
+                  chipClassName="bg-[color:var(--brand-red)]/15 text-[color:var(--brand-red)]"
+                >
+                  <p className="text-xs italic text-[color:var(--brand-charcoal)]/80">
+                    {activeConfig.help}
+                  </p>
+                  <textarea
+                    value={liveInput}
+                    onChange={handleLiveInputChange}
+                    className="mt-4 w-full rounded-xl border border-[color:var(--brand-charcoal)]/20 bg-white/90 p-3 text-sm text-[color:var(--brand-black)] shadow-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/40"
+                    placeholder="Écris ta réponse ici…"
+                    rows={4}
+                    disabled={isDesignerMode || isStreamingLiveReply}
+                  />
+                  {liveError ? (
+                    <p className="text-sm font-semibold text-red-600">{liveError}</p>
+                  ) : null}
+                </ChatBubble>
+                <div className="flex items-center justify-end gap-4">
+                  {isStreamingLiveReply ? (
+                    <span className="text-sm text-[color:var(--brand-charcoal)]/80">
+                      Réponse en cours…
+                    </span>
+                  ) : null}
+                  <button
+                    type="submit"
+                    className="cta-button cta-button--primary disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!canSendLiveMessage}
+                  >
+                    Envoyer
+                  </button>
+                </div>
+              </form>
+            )
+          ) : currentStage ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <ChatBubble
                 role="user"
@@ -1031,6 +1444,27 @@ export function SimulationChatStep({
                 className="h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
             </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+              Mode
+              <select
+                value={activeConfig.mode}
+                onChange={handleModeChange}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="scripted">Simulation guidée</option>
+                <option value="live">Discussion en direct (API)</option>
+              </select>
+            </label>
+            {isLiveMode ? (
+              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                Message système
+                <textarea
+                  value={activeConfig.systemMessage}
+                  onChange={handleSystemMessageChange}
+                  className="h-32 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </label>
+            ) : null}
             <div className="grid grid-cols-1 gap-2">
               <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
                 Libellé du rôle IA
@@ -1051,164 +1485,174 @@ export function SimulationChatStep({
                 />
               </label>
             </div>
-            <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
-              Mission associée (optionnel)
-              <input
-                type="text"
-                value={activeConfig.missionId ?? ""}
-                onChange={handleMissionIdChange}
-                placeholder="Identifiant de mission"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              />
-            </label>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-[color:var(--brand-black)]">
-                Manches
-              </h3>
-              <button
-                type="button"
-                className="cta-button cta-button--light"
-                onClick={handleAddStage}
-              >
-                Ajouter une manche
-              </button>
-            </div>
-            <ul className="space-y-2">
-              {activeConfig.stages.map((stage, index) => (
-                <li
-                  key={stage.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2"
-                >
-                  <button
-                    type="button"
-                    onClick={() => handleSelectStage(stage.id)}
-                    className={`text-left text-xs font-semibold ${
-                      stage.id === selectedStageId
-                        ? "text-[color:var(--brand-red)]"
-                        : "text-[color:var(--brand-charcoal)]/80"
-                    }`}
-                  >
-                    Manche {index + 1}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs font-semibold text-red-600 hover:underline"
-                    onClick={() => handleRemoveStage(stage.id)}
-                  >
-                    Retirer
-                  </button>
-                </li>
-              ))}
-              {activeConfig.stages.length === 0 ? (
-                <li className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-[color:var(--brand-charcoal)]/70">
-                  Aucune manche configurée.
-                </li>
-              ) : null}
-            </ul>
-          </div>
-
-          {selectedStage ? (
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-[color:var(--brand-black)]">
-                Paramètres de la manche
-              </h3>
+            {!isLiveMode ? (
               <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
-                Prompt
-                <textarea
-                  value={selectedStage.prompt}
-                  onChange={handleStagePromptChange}
-                  className="h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-[color:var(--brand-charcoal)]">
-                <input
-                  type="checkbox"
-                  checked={Boolean(selectedStage.allowEmpty)}
-                  onChange={handleAllowEmptyChange}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                Autoriser la réponse vide
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
-                Libellé du bouton
+                Mission associée (optionnel)
                 <input
                   type="text"
-                  value={selectedStage.submitLabel ?? ""}
-                  onChange={handleStageSubmitLabelChange}
+                  value={activeConfig.missionId ?? ""}
+                  onChange={handleMissionIdChange}
+                  placeholder="Identifiant de mission"
                   className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </label>
-              <div className="space-y-2">
-                <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
-                  Type de champ
-                  <select
-                    value={fieldTypeDraft}
-                    onChange={(event) => setFieldTypeDraft(event.target.value as FieldType)}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            ) : null}
+          </div>
+
+          {isLiveMode ? (
+            <p className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-[color:var(--brand-charcoal)]/70">
+              Le mode discussion directe n’utilise pas les manches configurées.
+            </p>
+          ) : (
+            <>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-[color:var(--brand-black)]">
+                    Manches
+                  </h3>
+                  <button
+                    type="button"
+                    className="cta-button cta-button--light"
+                    onClick={handleAddStage}
                   >
-                    <option value="textarea_with_counter">Zone de texte</option>
-                    <option value="bulleted_list">Liste à puces</option>
-                    <option value="two_bullets">Deux puces</option>
-                    <option value="single_choice">Choix unique</option>
-                    <option value="multiple_choice">Choix multiples</option>
-                    <option value="table_menu_day">Table · journée</option>
-                    <option value="table_menu_full">Table · complète</option>
-                    <option value="reference_line">Référence</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="cta-button cta-button--light w-full"
-                  onClick={handleAddField}
-                >
-                  Ajouter un champ
-                </button>
+                    Ajouter une manche
+                  </button>
+                </div>
                 <ul className="space-y-2">
-                  {selectedStage.fields.map((field, index) => (
+                  {activeConfig.stages.map((stage, index) => (
                     <li
-                      key={field.id}
-                      className="space-y-2 rounded-lg border border-slate-200 p-3"
+                      key={stage.id}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold uppercase text-[color:var(--brand-charcoal)]/70">
-                          {field.type}
-                        </span>
-                        <button
-                          type="button"
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                          onClick={() => handleRemoveField(index)}
-                        >
-                          Retirer
-                        </button>
-                      </div>
-                      <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
-                        Libellé
-                        <input
-                          type="text"
-                          value={field.label}
-                          onChange={(event) =>
-                            handleFieldLabelChange(index, event.target.value)
-                          }
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                        />
-                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectStage(stage.id)}
+                        className={`text-left text-xs font-semibold ${
+                          stage.id === selectedStageId
+                            ? "text-[color:var(--brand-red)]"
+                            : "text-[color:var(--brand-charcoal)]/80"
+                        }`}
+                      >
+                        Manche {index + 1}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-red-600 hover:underline"
+                        onClick={() => handleRemoveStage(stage.id)}
+                      >
+                        Retirer
+                      </button>
                     </li>
                   ))}
-                  {selectedStage.fields.length === 0 ? (
+                  {activeConfig.stages.length === 0 ? (
                     <li className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-[color:var(--brand-charcoal)]/70">
-                      Aucun champ configuré.
+                      Aucune manche configurée.
                     </li>
                   ) : null}
                 </ul>
               </div>
-            </div>
-          ) : (
-            <p className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-[color:var(--brand-charcoal)]/70">
-              Sélectionne une manche pour la modifier.
-            </p>
+
+              {selectedStage ? (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-[color:var(--brand-black)]">
+                    Paramètres de la manche
+                  </h3>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    Prompt
+                    <textarea
+                      value={selectedStage.prompt}
+                      onChange={handleStagePromptChange}
+                      className="h-24 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedStage.allowEmpty)}
+                      onChange={handleAllowEmptyChange}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Autoriser la réponse vide
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    Libellé du bouton
+                    <input
+                      type="text"
+                      value={selectedStage.submitLabel ?? ""}
+                      onChange={handleStageSubmitLabelChange}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <div className="space-y-2">
+                    <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                      Type de champ
+                      <select
+                        value={fieldTypeDraft}
+                        onChange={(event) => setFieldTypeDraft(event.target.value as FieldType)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      >
+                        <option value="textarea_with_counter">Zone de texte</option>
+                        <option value="bulleted_list">Liste à puces</option>
+                        <option value="two_bullets">Deux puces</option>
+                        <option value="single_choice">Choix unique</option>
+                        <option value="multiple_choice">Choix multiples</option>
+                        <option value="table_menu_day">Table · journée</option>
+                        <option value="table_menu_full">Table · complète</option>
+                        <option value="reference_line">Référence</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="cta-button cta-button--light w-full"
+                      onClick={handleAddField}
+                    >
+                      Ajouter un champ
+                    </button>
+                    <ul className="space-y-2">
+                      {selectedStage.fields.map((field, index) => (
+                        <li
+                          key={field.id}
+                          className="space-y-2 rounded-lg border border-slate-200 p-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold uppercase text-[color:var(--brand-charcoal)]/70">
+                              {field.type}
+                            </span>
+                            <button
+                              type="button"
+                              className="text-xs font-semibold text-red-600 hover:underline"
+                              onClick={() => handleRemoveField(index)}
+                            >
+                              Retirer
+                            </button>
+                          </div>
+                          <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                            Libellé
+                            <input
+                              type="text"
+                              value={field.label}
+                              onChange={(event) =>
+                                handleFieldLabelChange(index, event.target.value)
+                              }
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                            />
+                          </label>
+                        </li>
+                      ))}
+                      {selectedStage.fields.length === 0 ? (
+                        <li className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-[color:var(--brand-charcoal)]/70">
+                          Aucun champ configuré.
+                        </li>
+                      ) : null}
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <p className="rounded-lg border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-[color:var(--brand-charcoal)]/70">
+                  Sélectionne une manche pour la modifier.
+                </p>
+              )}
+            </>
           )}
         </aside>
       ) : null}
