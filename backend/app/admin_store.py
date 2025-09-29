@@ -134,6 +134,7 @@ class LocalUser(BaseModel):
     created_at: str = Field(default_factory=_now_iso, alias="createdAt")
     updated_at: str = Field(default_factory=_now_iso, alias="updatedAt")
     from_env: bool = Field(default=False, alias="fromEnv")
+    invitation_code: str | None = Field(default=None, alias="invitationCode")
 
     model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
 
@@ -157,6 +158,40 @@ class LocalUser(BaseModel):
 
     def has_role(self, role: str) -> bool:
         return role in self.roles
+
+
+class InvitationCode(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True, extra="forbid")
+
+    code: str = Field(..., min_length=1, alias="code")
+    role: str = Field(..., min_length=1)
+    created_at: str = Field(default_factory=_now_iso, alias="createdAt")
+    consumed_at: str | None = Field(default=None, alias="consumedAt")
+    consumed_by: str | None = Field(default=None, alias="consumedBy")
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "InvitationCode":
+        normalized_role = self.role.strip().lower()
+        if normalized_role not in {"student", "creator"}:
+            raise ValueError("Le rôle de l'invitation doit être 'student' ou 'creator'.")
+        object.__setattr__(self, "role", normalized_role)
+        if self.consumed_by is not None:
+            object.__setattr__(self, "consumed_by", self.consumed_by.strip() or None)
+        return self
+
+
+def _generate_invitation_value(length: int = 12) -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    if length < 4:
+        length = 4
+    chunks: list[str] = []
+    remaining = length
+    while remaining > 0:
+        chunk_size = 4 if remaining >= 4 else remaining
+        chunk = "".join(secrets.choice(alphabet) for _ in range(chunk_size))
+        chunks.append(chunk)
+        remaining -= chunk_size
+    return "-".join(chunks)
 
 
 def _hash_password(password: str) -> str:
@@ -278,6 +313,7 @@ class AdminStore:
                     "local_users": [],
                     "keyset": {},
                     "lti_users": [],
+                    "invitation_codes": [],
                 }
         return {
             "platforms": [],
@@ -285,6 +321,7 @@ class AdminStore:
             "local_users": [],
             "keyset": {},
             "lti_users": [],
+            "invitation_codes": [],
         }
 
     def _write(self) -> None:
@@ -311,6 +348,10 @@ class AdminStore:
 
         if "lti_users" not in self._data:
             self._data["lti_users"] = []
+            changed = True
+
+        if "invitation_codes" not in self._data:
+            self._data["invitation_codes"] = []
             changed = True
 
         local_users_changed = self._ensure_local_users_table()
@@ -398,6 +439,9 @@ class AdminStore:
             or _now_iso(),
             "from_env": raw_item.get("from_env", raw_item.get("fromEnv", False)),
         }
+        invitation = raw_item.get("invitation_code") or raw_item.get("invitationCode")
+        if isinstance(invitation, str) and invitation.strip():
+            payload["invitation_code"] = invitation.strip()
         try:
             return LocalUser.model_validate(payload)
         except ValidationError:
@@ -565,6 +609,7 @@ class AdminStore:
         roles: Iterable[str] | None = None,
         is_active: bool = True,
         from_env: bool = False,
+        invitation_code: str | None = None,
     ) -> LocalUser:
         username_value = username.strip()
         if not username_value:
@@ -582,6 +627,8 @@ class AdminStore:
             payload["roles"] = [
                 str(role).strip() for role in roles if isinstance(role, str) and role.strip()
             ]
+        if invitation_code:
+            payload["invitation_code"] = invitation_code.strip()
 
         record = LocalUser.model_validate(payload)
         with self._lock:
@@ -589,6 +636,85 @@ class AdminStore:
             users.append(record.model_dump())
             self._write()
         return record
+
+    def create_user_with_role(
+        self,
+        username: str,
+        password: str,
+        role: str,
+        *,
+        invitation_code: str | None = None,
+    ) -> LocalUser:
+        normalized_role = role.strip().lower()
+        if normalized_role not in {"creator", "student"}:
+            raise AdminStoreError("Rôle d'inscription invalide.")
+
+        username_value = username.strip()
+        if not username_value:
+            raise AdminStoreError("Le nom d'utilisateur ne peut pas être vide.")
+        if self.get_user(username_value):
+            raise AdminStoreError("Un compte avec ce nom existe déjà.")
+
+        invitation_value: str | None = None
+        if invitation_code and invitation_code.strip():
+            consumed = self.consume_invitation(
+                invitation_code.strip(),
+                username=username_value,
+                role=normalized_role,
+            )
+            invitation_value = consumed.code
+        elif normalized_role == "student":
+            raise AdminStoreError(
+                "Un code d'invitation valide est requis pour créer un compte étudiant."
+            )
+
+        return self.create_user(
+            username_value,
+            password,
+            roles=[normalized_role],
+            is_active=True,
+            from_env=False,
+            invitation_code=invitation_value,
+        )
+
+    def generate_invitation_code(
+        self, role: str, *, code: str | None = None
+    ) -> InvitationCode:
+        normalized_role = role.strip().lower()
+        if normalized_role not in {"creator", "student"}:
+            raise AdminStoreError("Rôle d'invitation invalide.")
+
+        requested_code = code.strip() if isinstance(code, str) else None
+        if requested_code == "":
+            requested_code = None
+
+        with self._lock:
+            records = self._data.setdefault("invitation_codes", [])
+            existing_codes = {
+                str(item.get("code"))
+                for item in records
+                if isinstance(item, dict) and item.get("code")
+            }
+
+            if requested_code:
+                if requested_code in existing_codes:
+                    raise AdminStoreError("Ce code d'invitation existe déjà.")
+                candidate = requested_code
+            else:
+                # Attempt to generate a unique code up to a reasonable number of tries
+                for _ in range(20):
+                    candidate = _generate_invitation_value()
+                    if candidate not in existing_codes:
+                        break
+                else:
+                    raise AdminStoreError(
+                        "Impossible de générer un code d'invitation unique."
+                    )
+
+            invitation = InvitationCode(code=candidate, role=normalized_role)
+            records.append(invitation.model_dump(by_alias=True, mode="json"))
+            self._write()
+            return invitation
 
     def set_password(self, username: str, password: str) -> LocalUser:
         username_value = username.strip()
@@ -648,6 +774,49 @@ class AdminStore:
         if not user.verify_password(password):
             return None
         return user
+
+    def list_invitation_codes(self) -> list[InvitationCode]:
+        with self._lock:
+            codes = self._data.get("invitation_codes", [])
+            return [InvitationCode.model_validate(item) for item in codes]
+
+    def consume_invitation(
+        self,
+        code: str,
+        *,
+        username: str | None = None,
+        role: str | None = None,
+    ) -> InvitationCode:
+        value = code.strip()
+        if not value:
+            raise AdminStoreError("Le code d'invitation ne peut pas être vide.")
+
+        normalized_role = role.strip().lower() if isinstance(role, str) else None
+
+        with self._lock:
+            records = self._data.setdefault("invitation_codes", [])
+            for index, item in enumerate(records):
+                try:
+                    current = InvitationCode.model_validate(item)
+                except ValidationError:
+                    continue
+                if current.code != value:
+                    continue
+                if normalized_role and current.role != normalized_role:
+                    raise AdminStoreError("Ce code d'invitation ne correspond pas au rôle demandé.")
+                if current.consumed_at:
+                    raise AdminStoreError("Ce code d'invitation a déjà été utilisé.")
+                updated = current.model_copy(
+                    update={
+                        "consumed_at": _now_iso(),
+                        "consumed_by": username.strip() if isinstance(username, str) and username.strip() else None,
+                    }
+                )
+                records[index] = updated.model_dump(by_alias=True, mode="json")
+                self._write()
+                return updated
+
+        raise AdminStoreError("Code d'invitation introuvable ou invalide.")
 
     # ------------------------------------------------------------------
     # LTI users statistics management
@@ -776,6 +945,7 @@ __all__ = [
     "AdminStore",
     "AdminStoreError",
     "LocalUser",
+    "InvitationCode",
     "AdminUser",
     "LtiUserStat",
     "LtiKeyset",

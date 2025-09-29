@@ -229,6 +229,35 @@ export interface AdminLoginPayload {
   remember?: boolean;
 }
 
+export interface CreatorSignupPayload {
+  username: string;
+  password: string;
+  invitationCode?: string;
+}
+
+export interface StudentSignupPayload extends CreatorSignupPayload {}
+
+export interface AdminInvitationCode {
+  code: string;
+  role: string;
+  createdAt: string;
+  consumedAt?: string | null;
+  consumedBy?: string | null;
+}
+
+export interface AdminInvitationListResponse {
+  invitations: AdminInvitationCode[];
+}
+
+export interface AdminInvitationCreatePayload {
+  role: string;
+  code?: string;
+}
+
+export interface AdminInvitationCreateResponse {
+  invitation: AdminInvitationCode;
+}
+
 export interface AdminAuthResponse {
   token: string;
   expiresAt?: string;
@@ -622,6 +651,34 @@ export const admin = {
           },
         )
       ),
+    signupCreator: async (
+      payload: CreatorSignupPayload
+    ): Promise<AdminAuthResponse> =>
+      fetchJson<AdminAuthResponse>(`${API_BASE_URL}/auth/signup`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        )
+      ),
+    signupStudent: async (
+      payload: StudentSignupPayload
+    ): Promise<AdminAuthResponse> =>
+      fetchJson<AdminAuthResponse>(`${API_BASE_URL}/auth/signup/student`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        )
+      ),
     logout: async (token?: string | null): Promise<void> => {
       await fetchJson<void>(
         `${API_BASE_URL}/admin/auth/logout`,
@@ -637,6 +694,30 @@ export const admin = {
       fetchJson<AdminMeResponse>(
         `${API_BASE_URL}/admin/auth/me`,
         withAdminCredentials({}, token)
+      ),
+  },
+  invitations: {
+    list: async (token?: string | null): Promise<AdminInvitationListResponse> =>
+      fetchJson<AdminInvitationListResponse>(
+        `${API_BASE_URL}/admin/invitations`,
+        withAdminCredentials({}, token)
+      ),
+    create: async (
+      payload: AdminInvitationCreatePayload,
+      token?: string | null
+    ): Promise<AdminInvitationCreateResponse> =>
+      fetchJson<AdminInvitationCreateResponse>(
+        `${API_BASE_URL}/admin/invitations`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+          token
+        )
       ),
   },
   platforms: {

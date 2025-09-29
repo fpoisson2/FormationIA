@@ -28,6 +28,7 @@ from .admin_store import (
     AdminAuthError,
     AdminStore,
     AdminStoreError,
+    InvitationCode,
     LocalUser,
     LtiUserStat,
     create_admin_token,
@@ -780,6 +781,53 @@ class AdminLoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=128)
     password: str = Field(..., min_length=1, max_length=256)
     remember: bool = False
+
+
+class CreatorSignupRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=8, max_length=256)
+    invitation_code: str | None = Field(
+        default=None,
+        alias="invitationCode",
+        min_length=1,
+        max_length=128,
+    )
+
+    @model_validator(mode="after")
+    def _normalize_invitation(self) -> "CreatorSignupRequest":
+        if self.invitation_code is None:
+            return self
+        trimmed = self.invitation_code.strip()
+        object.__setattr__(self, "invitation_code", trimmed or None)
+        return self
+
+
+class StudentSignupRequest(CreatorSignupRequest):
+    @model_validator(mode="after")
+    def _require_invitation(self) -> "StudentSignupRequest":
+        if not self.invitation_code:
+            raise ValueError("Un code d'invitation est requis pour l'inscription étudiante.")
+        return self
+
+
+class InvitationCodeCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: str = Field(..., min_length=1, max_length=32)
+    code: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "InvitationCodeCreateRequest":
+        normalized_role = self.role.strip().lower()
+        object.__setattr__(self, "role", normalized_role)
+        if normalized_role not in {"creator", "student"}:
+            raise ValueError("role doit valoir 'creator' ou 'student'.")
+        if self.code is not None:
+            trimmed = self.code.strip()
+            object.__setattr__(self, "code", trimmed or None)
+        return self
 
 
 class LocalUserCreateRequest(BaseModel):
@@ -2274,6 +2322,7 @@ class LTIContextResponse(BaseModel):
 
 
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 admin_auth_router = APIRouter(prefix="/api/admin/auth", tags=["admin-auth"])
 admin_users_router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
@@ -2961,6 +3010,17 @@ def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
         "createdAt": user.created_at,
         "updatedAt": user.updated_at,
         "fromEnv": user.from_env,
+        "invitationCode": user.invitation_code,
+    }
+
+
+def _serialize_invitation_code(invitation: InvitationCode) -> dict[str, Any]:
+    return {
+        "code": invitation.code,
+        "role": invitation.role,
+        "createdAt": invitation.created_at,
+        "consumedAt": invitation.consumed_at,
+        "consumedBy": invitation.consumed_by,
     }
 
 
@@ -3205,6 +3265,72 @@ def admin_login(
     }
 
 
+@auth_router.post("/signup", status_code=status.HTTP_201_CREATED)
+def creator_signup(
+    payload: CreatorSignupRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    try:
+        user = store.create_user_with_role(
+            payload.username,
+            payload.password,
+            "creator",
+            invitation_code=payload.invitation_code,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, expires_at = create_admin_token(
+        user.username,
+        _ADMIN_AUTH_SECRET,
+        expires_in=_ADMIN_SESSION_TTL,
+    )
+    _set_admin_cookie(response, token, _ADMIN_SESSION_TTL)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": _serialize_local_user(user),
+    }
+
+
+@auth_router.post("/signup/student", status_code=status.HTTP_201_CREATED)
+def student_signup(
+    payload: StudentSignupRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    try:
+        user = store.create_user_with_role(
+            payload.username,
+            payload.password,
+            "student",
+            invitation_code=payload.invitation_code,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, expires_at = create_admin_token(
+        user.username,
+        _ADMIN_AUTH_SECRET,
+        expires_in=_ADMIN_SESSION_TTL,
+    )
+    _set_admin_cookie(response, token, _ADMIN_SESSION_TTL)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": _serialize_local_user(user),
+    }
+
+
 @admin_auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def admin_logout(response: Response) -> Response:
     _clear_admin_cookie(response)
@@ -3295,6 +3421,29 @@ def admin_update_local_user(
     except AdminStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"user": _serialize_local_user(updated)}
+
+
+@admin_router.get("/invitations")
+def admin_list_invitations(
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    items = [_serialize_invitation_code(code) for code in store.list_invitation_codes()]
+    items.sort(key=lambda entry: entry.get("createdAt") or "", reverse=True)
+    return {"invitations": items}
+
+
+@admin_router.post("/invitations", status_code=status.HTTP_201_CREATED)
+def admin_create_invitation(
+    payload: InvitationCodeCreateRequest,
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    try:
+        invitation = store.generate_invitation_code(payload.role, code=payload.code)
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"invitation": _serialize_invitation_code(invitation)}
 
 
 @admin_router.get("/lti-platforms")
@@ -3929,6 +4078,7 @@ def admin_get_activity_generation_job(
     return _serialize_activity_generation_job(job)
 
 
+app.include_router(auth_router)
 app.include_router(admin_auth_router)
 app.include_router(admin_users_router)
 app.include_router(admin_router)
