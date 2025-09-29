@@ -122,6 +122,8 @@ let BUILDING_META: Record<
   { label: string; color: string; number?: number }
 > = {} as Record<QuarterId, { label: string; color: string; number?: number }>;
 let INVENTORY_ITEMS: InventoryDefinition[] = [];
+let currentWorldMode: ExplorateurExperienceMode = DEFAULT_EXPERIENCE_MODE;
+let currentUiExperienceMode: ExplorateurExperienceMode = DEFAULT_EXPERIENCE_MODE;
 
 function updateDerivedQuarterCaches(data: DerivedQuarterData) {
   currentDerivedData = cloneDerivedQuarterData(data);
@@ -1255,6 +1257,14 @@ const DEFAULT_ATLAS: Tileset = {
     player: DEFAULT_PLAYER_FRAMES.map((frame) => [...frame] as TileCoord),
   },
 };
+
+const OPEN_WORLD_CHARACTER_SPRITES: Partial<Record<QuarterId, TileCoord>> = Object.freeze({
+  clarte: atlas("mapTile_137.png"),
+  creation: atlas("mapTile_153.png"),
+  decision: atlas("mapTile_154.png"),
+  ethique: atlas("mapTile_170.png"),
+  mairie: atlas("mapTile_136.png"),
+});
 
 function cloneTileset(source: Tileset): Tileset {
   return {
@@ -2765,8 +2775,12 @@ const ARRIVAL_FLIGHT_DURATION_MS = 2400;
 const ARRIVAL_GLOW_DURATION_MS = 2500;
 const ARRIVAL_TOTAL_DURATION_MS = ARRIVAL_GLOW_DURATION_MS + 200;
 
-function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
+function generateWorld(
+  seed: number = WORLD_SEED,
+  mode: ExplorateurExperienceMode = currentWorldMode
+): GeneratedWorld {
   currentWorldSeed = seed >>> 0;
+  currentWorldMode = mode;
   const rng = createRng(seed);
   const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
     Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
@@ -2816,13 +2830,19 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   const pathKeys = carvePathOnIsland(island, desiredPathLength, rng);
   const path: Coord[] = pathKeys.map((key) => coordFromKey(key as CoordKey));
 
+  const isOpenWorld = mode === "open-world";
+
   for (const [x, y] of path) {
     const tile = tiles[y]?.[x];
     if (!tile) {
       continue;
     }
     tile.base = TILE_KIND.SAND;
-    tile.overlay = TILE_KIND.PATH;
+    if (isOpenWorld) {
+      delete tile.overlay;
+    } else {
+      tile.overlay = TILE_KIND.PATH;
+    }
     tile.object = undefined;
   }
 
@@ -2832,6 +2852,13 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   if (path.length > 0) {
     const [goalX, goalY] = path[path.length - 1];
     landmarks.mairie = { x: goalX, y: goalY };
+  }
+
+  for (const { x, y } of Object.values(landmarks)) {
+    const tile = tiles[y]?.[x];
+    if (tile) {
+      tile.object = undefined;
+    }
   }
 
   const markers: PathMarkerPlacement[] = [];
@@ -2929,7 +2956,7 @@ function rebuildBuildings() {
       y: landmark?.y ?? 0,
       label: meta?.label ?? id,
       color: meta?.color ?? "#ffffff",
-      number: meta?.number,
+      number: currentUiExperienceMode === "guided" ? meta?.number : undefined,
     };
   }));
 }
@@ -2953,6 +2980,9 @@ type PathGate = {
 const PATH_GATES: PathGate[] = [];
 function rebuildPathGates() {
   PATH_GATES.splice(0, PATH_GATES.length);
+  if (currentWorldMode === "open-world") {
+    return;
+  }
   const buildingById = new Map(buildings.map((entry) => [entry.id, entry] as const));
 
   for (let index = 0; index < PROGRESSION_SEQUENCE.length; index++) {
@@ -3068,11 +3098,14 @@ function randomWorldSeed(): number {
   return Math.floor(Math.random() * 1_000_000) + 1;
 }
 
-function regenerateWorldInPlace(seed: number = randomWorldSeed()): {
+function regenerateWorldInPlace(
+  seed: number = randomWorldSeed(),
+  mode: ExplorateurExperienceMode = currentWorldMode
+): {
   seed: number;
   start: { x: number; y: number };
 } {
-  const nextWorld = generateWorld(seed);
+  const nextWorld = generateWorld(seed, mode);
 
   world.length = 0;
   for (const row of nextWorld.tiles) {
@@ -3186,7 +3219,14 @@ function BuildingSprite({
   ts: Tileset;
   tileSize: number;
 }) {
-  const numberValue = BUILDING_META[quarter]?.number;
+  const isOpenWorld = currentUiExperienceMode === "open-world";
+  const numberValue = !isOpenWorld ? BUILDING_META[quarter]?.number : undefined;
+  const openWorldCoord = isOpenWorld
+    ? OPEN_WORLD_CHARACTER_SPRITES[quarter] ?? null
+    : null;
+  if (openWorldCoord) {
+    return <SpriteFromAtlas ts={DEFAULT_ATLAS} coord={openWorldCoord} scale={tileSize} />;
+  }
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
   const coord =
     (typeof numberValue === "number" ? getNumberTileCoord(numberValue) : null) ??
@@ -3218,6 +3258,9 @@ function isWalkable(x: number, y: number, fromX?: number, fromY?: number) {
     return false;
   }
   const terrain = world[y][x];
+  if (currentWorldMode === "open-world") {
+    return terrain.base !== TILE_KIND.WATER;
+  }
   // Un chemin peut être soit en base soit en overlay
   const isPath = terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
 
@@ -3361,10 +3404,12 @@ function MobileControlsOverlay({
   building,
   onEnter,
   onMove,
+  showQuarterNumbers,
 }: {
   building: MobilePromptBuilding | null;
   onEnter: () => void;
   onMove: (dx: number, dy: number) => void;
+  showQuarterNumbers: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const promptRef = useRef<HTMLButtonElement | null>(null);
@@ -3423,7 +3468,10 @@ function MobileControlsOverlay({
     updateLayout();
   }, [building, updateLayout]);
 
-  const title = building?.number != null ? `Quartier ${building.number}` : building?.label;
+  const title =
+    showQuarterNumbers && building?.number != null
+      ? `Quartier ${building.number}`
+      : building?.label;
 
   return (
     <div
@@ -4411,8 +4459,9 @@ export default function ExplorateurIA({
   );
 
   useEffect(() => {
+    currentUiExperienceMode = sanitizedConfig.experienceMode;
     applyDerivedQuarterData(derivedQuarterData);
-  }, [derivedQuarterData]);
+  }, [derivedQuarterData, sanitizedConfig.experienceMode]);
 
   const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
@@ -4591,13 +4640,23 @@ export default function ExplorateurIA({
   }
 
   useEffect(() => {
-    if (sanitizedConfig.terrain.seed === currentWorldSeed) {
+    if (
+      sanitizedConfig.terrain.seed === currentWorldSeed &&
+      sanitizedConfig.experienceMode === currentWorldMode
+    ) {
       return;
     }
-    const { start } = regenerateWorldInPlace(sanitizedConfig.terrain.seed);
+    const { start } = regenerateWorldInPlace(
+      sanitizedConfig.terrain.seed,
+      sanitizedConfig.experienceMode
+    );
     setPlayer({ x: start.x, y: start.y });
     forceWorldRefresh((value) => value + 1);
-  }, [forceWorldRefresh, sanitizedConfig.terrain.seed]);
+  }, [
+    forceWorldRefresh,
+    sanitizedConfig.experienceMode,
+    sanitizedConfig.terrain.seed,
+  ]);
 
   useEffect(() => {
     const theme = TERRAIN_THEMES[selectedTheme];
@@ -5782,6 +5841,7 @@ export default function ExplorateurIA({
                 building={mobilePromptLocked ? null : mobilePromptBuilding}
                 onEnter={handleMobileEnter}
                 onMove={handleOverlayMove}
+                showQuarterNumbers={!isOpenWorldExperience}
               />
             )}
           </div>
