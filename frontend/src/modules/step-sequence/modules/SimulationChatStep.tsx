@@ -27,7 +27,16 @@ import ChatBubble from "../../../components/ChatBubble";
 import GuidedFields from "../../../components/GuidedFields";
 import { StepSequenceContext } from "../types";
 import type { StepComponentProps } from "../types";
-import { API_AUTH_KEY, API_BASE_URL } from "../../../config";
+import {
+  API_AUTH_KEY,
+  API_BASE_URL,
+  MODEL_OPTIONS,
+  THINKING_OPTIONS,
+  VERBOSITY_OPTIONS,
+  type ModelChoice,
+  type ThinkingChoice,
+  type VerbosityChoice,
+} from "../../../config";
 import {
   createDefaultFieldSpec,
   createInitialFormValues,
@@ -48,6 +57,30 @@ export const DEFAULT_SIMULATION_SYSTEM_MESSAGE =
   "Tu es un tuteur virtuel bienveillant qui accompagne un participant francophone." +
   " Donne des conseils concrets et aide la personne à progresser." +
   " Quand la conversation est terminée ou que l'objectif est atteint, signale la fin.";
+
+const MODEL_CHOICES = new Set<ModelChoice>(MODEL_OPTIONS.map((option) => option.value));
+const VERBOSITY_CHOICES = new Set<VerbosityChoice>(
+  VERBOSITY_OPTIONS.map((option) => option.value)
+);
+const THINKING_CHOICES = new Set<ThinkingChoice>(THINKING_OPTIONS.map((option) => option.value));
+
+const DEFAULT_MODEL_CHOICE = (
+  MODEL_OPTIONS.find((option) => option.value === "gpt-5-mini")?.value ??
+  MODEL_OPTIONS[0]?.value ??
+  "gpt-5-mini"
+) as ModelChoice;
+
+const DEFAULT_VERBOSITY_CHOICE = (
+  VERBOSITY_OPTIONS.find((option) => option.value === "medium")?.value ??
+  VERBOSITY_OPTIONS[0]?.value ??
+  "medium"
+) as VerbosityChoice;
+
+const DEFAULT_THINKING_CHOICE = (
+  THINKING_OPTIONS.find((option) => option.value === "medium")?.value ??
+  THINKING_OPTIONS[0]?.value ??
+  "medium"
+) as ThinkingChoice;
 
 export interface SimulationChatConversationMessage {
   id: string;
@@ -82,6 +115,9 @@ export interface SimulationChatConfig {
   stages: SimulationChatStageConfig[];
   mode: SimulationChatMode;
   systemMessage: string;
+  model: ModelChoice;
+  verbosity: VerbosityChoice;
+  thinking: ThinkingChoice;
 }
 
 export interface SimulationChatPayload {
@@ -221,6 +257,9 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
       stages: [],
       mode: "scripted",
       systemMessage: DEFAULT_SIMULATION_SYSTEM_MESSAGE,
+      model: DEFAULT_MODEL_CHOICE,
+      verbosity: DEFAULT_VERBOSITY_CHOICE,
+      thinking: DEFAULT_THINKING_CHOICE,
     };
   }
 
@@ -229,6 +268,9 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
     stages?: unknown;
     mode?: unknown;
     systemMessage?: unknown;
+    model?: unknown;
+    verbosity?: unknown;
+    thinking?: unknown;
   };
 
   const title =
@@ -277,6 +319,21 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
       ? base.systemMessage.trim()
       : DEFAULT_SIMULATION_SYSTEM_MESSAGE;
 
+  const normalizedModel =
+    typeof base.model === "string" && MODEL_CHOICES.has(base.model.trim() as ModelChoice)
+      ? (base.model.trim() as ModelChoice)
+      : DEFAULT_MODEL_CHOICE;
+
+  const normalizedVerbosity =
+    typeof base.verbosity === "string" && VERBOSITY_CHOICES.has(base.verbosity.trim() as VerbosityChoice)
+      ? (base.verbosity.trim() as VerbosityChoice)
+      : DEFAULT_VERBOSITY_CHOICE;
+
+  const normalizedThinking =
+    typeof base.thinking === "string" && THINKING_CHOICES.has(base.thinking.trim() as ThinkingChoice)
+      ? (base.thinking.trim() as ThinkingChoice)
+      : DEFAULT_THINKING_CHOICE;
+
   return {
     title,
     help,
@@ -285,6 +342,9 @@ function normalizeSimulationChatConfig(config: unknown): SimulationChatConfig {
     stages,
     mode: normalizedMode,
     systemMessage,
+    model: normalizedModel,
+    verbosity: normalizedVerbosity,
+    thinking: normalizedThinking,
   };
 }
 
@@ -388,7 +448,10 @@ interface SimulationChatStreamHandlers {
 }
 
 async function streamSimulationChatResponse(
-  body: { systemMessage: string; messages: { role: string; content: string }[] },
+  body: {
+    systemMessage: string;
+    messages: { role: string; content: string }[];
+  } & Pick<SimulationChatConfig, "model" | "verbosity" | "thinking">,
   handlers: SimulationChatStreamHandlers
 ): Promise<void> {
   const headers: HeadersInit = {
@@ -821,6 +884,9 @@ export function SimulationChatStep({
         await streamSimulationChatResponse(
           {
             systemMessage: activeConfig.systemMessage,
+            model: activeConfig.model,
+            verbosity: activeConfig.verbosity,
+            thinking: activeConfig.thinking,
             messages: baseMessages.map((message) => ({
               role: message.role === "ai" ? "assistant" : "user",
               content: message.content,
@@ -933,6 +999,43 @@ export function SimulationChatStep({
       const rawValue = event.target.value;
       const value: SimulationChatMode = rawValue === "live" ? "live" : "scripted";
       pushConfigChange((prev) => ({ ...prev, mode: value }));
+    },
+    [pushConfigChange]
+  );
+
+  const handleModelChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      pushConfigChange((prev) => ({
+        ...prev,
+        model: MODEL_CHOICES.has(value as ModelChoice) ? (value as ModelChoice) : prev.model,
+      }));
+    },
+    [pushConfigChange]
+  );
+
+  const handleVerbosityChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      pushConfigChange((prev) => ({
+        ...prev,
+        verbosity: VERBOSITY_CHOICES.has(value as VerbosityChoice)
+          ? (value as VerbosityChoice)
+          : prev.verbosity,
+      }));
+    },
+    [pushConfigChange]
+  );
+
+  const handleThinkingChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      pushConfigChange((prev) => ({
+        ...prev,
+        thinking: THINKING_CHOICES.has(value as ThinkingChoice)
+          ? (value as ThinkingChoice)
+          : prev.thinking,
+      }));
     },
     [pushConfigChange]
   );
@@ -1456,14 +1559,60 @@ export function SimulationChatStep({
               </select>
             </label>
             {isLiveMode ? (
-              <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
-                Message système
-                <textarea
-                  value={activeConfig.systemMessage}
-                  onChange={handleSystemMessageChange}
-                  className="h-32 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </label>
+              <>
+                <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                  Message système
+                  <textarea
+                    value={activeConfig.systemMessage}
+                    onChange={handleSystemMessageChange}
+                    className="h-32 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </label>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    Modèle
+                    <select
+                      value={activeConfig.model}
+                      onChange={handleModelChange}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      {MODEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    Verbosité
+                    <select
+                      value={activeConfig.verbosity}
+                      onChange={handleVerbosityChange}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      {VERBOSITY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">
+                    Raisonnement
+                    <select
+                      value={activeConfig.thinking}
+                      onChange={handleThinkingChange}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      {THINKING_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </>
             ) : null}
             <div className="grid grid-cols-1 gap-2">
               <label className="flex flex-col gap-1 text-xs font-medium text-[color:var(--brand-charcoal)]">

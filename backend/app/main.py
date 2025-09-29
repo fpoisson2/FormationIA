@@ -70,25 +70,8 @@ DEFAULT_PLAN_MODEL = "gpt-5-mini"
 DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
 DEFAULT_SIMULATION_CHAT_MODEL = "gpt-5-mini"
-
-SIMULATION_CHAT_RESPONSE_SCHEMA = {
-    "name": "simulation_chat_response",
-    "schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "reply": {
-                "type": "string",
-                "description": "Texte renvoyé à l’apprenant.",
-            },
-            "shouldEnd": {
-                "type": "boolean",
-                "description": "Indique si la discussion doit se terminer.",
-            },
-        },
-        "required": ["reply", "shouldEnd"],
-    },
-}
+DEFAULT_SIMULATION_CHAT_VERBOSITY = "medium"
+DEFAULT_SIMULATION_CHAT_THINKING = "medium"
 
 DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE = " ".join(
     [
@@ -2018,6 +2001,8 @@ class SimulationChatRequest(BaseModel):
     system_message: str = Field(..., alias="systemMessage", min_length=1, max_length=6000)
     messages: list[SimulationChatMessage] = Field(default_factory=list)
     model: str | None = None
+    verbosity: Literal["low", "medium", "high"] | None = None
+    thinking: Literal["minimal", "medium", "high"] | None = None
 
 
 class SimulationChatResponsePayload(BaseModel):
@@ -4132,6 +4117,8 @@ def _handle_simulation_chat(payload: SimulationChatRequest) -> StreamingResponse
     client = _ensure_client()
     model_name = payload.model or DEFAULT_SIMULATION_CHAT_MODEL
     model = _validate_model(model_name)
+    selected_verbosity = payload.verbosity or DEFAULT_SIMULATION_CHAT_VERBOSITY
+    selected_thinking = payload.thinking or DEFAULT_SIMULATION_CHAT_THINKING
 
     system_message = payload.system_message.strip()
     if not system_message:
@@ -4160,10 +4147,9 @@ def _handle_simulation_chat(payload: SimulationChatRequest) -> StreamingResponse
             with client.responses.stream(
                 model=model,
                 input=[{"role": "system", "content": system_message}, *prepared_messages],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": SIMULATION_CHAT_RESPONSE_SCHEMA,
-                },
+                text_format=SimulationChatResponsePayload,
+                text={"verbosity": selected_verbosity},
+                reasoning={"effort": selected_thinking, "summary": "auto"},
             ) as stream:
                 for event in stream:
                     if event.type == "response.error":

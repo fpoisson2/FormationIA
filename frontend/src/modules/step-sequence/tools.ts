@@ -757,6 +757,9 @@ interface CreateSimulationChatStepInput extends ToolBaseInput {
   mode?: SimulationChatMode;
   systemMessage?: string;
   stages?: SimulationChatStageInput[];
+  model?: string;
+  verbosity?: string;
+  thinking?: string;
 }
 
 const DEFAULT_SIMULATION_TITLE = "Simulation conversation";
@@ -823,6 +826,9 @@ const createSimulationChatStep: StepSequenceFunctionTool<
           enum: ["scripted", "live"],
         },
         systemMessage: { type: "string" },
+        model: { type: "string", enum: Array.from(MODEL_CHOICES) },
+        verbosity: { type: "string", enum: Array.from(VERBOSITY_CHOICES) },
+        thinking: { type: "string", enum: Array.from(THINKING_CHOICES) },
       },
     },
   },
@@ -841,6 +847,18 @@ const createSimulationChatStep: StepSequenceFunctionTool<
       DEFAULT_SIMULATION_SYSTEM_MESSAGE,
       { allowEmpty: false }
     );
+    const model: SimulationChatConfig["model"] =
+      typeof input.model === "string" && MODEL_CHOICES.has(input.model)
+        ? (input.model as SimulationChatConfig["model"])
+        : (DEFAULT_MODEL as SimulationChatConfig["model"]);
+    const verbosity: SimulationChatConfig["verbosity"] =
+      typeof input.verbosity === "string" && VERBOSITY_CHOICES.has(input.verbosity as VerbosityChoice)
+        ? (input.verbosity as SimulationChatConfig["verbosity"])
+        : (DEFAULT_VERBOSITY as SimulationChatConfig["verbosity"]);
+    const thinking: SimulationChatConfig["thinking"] =
+      typeof input.thinking === "string" && THINKING_CHOICES.has(input.thinking as ThinkingChoice)
+        ? (input.thinking as SimulationChatConfig["thinking"])
+        : (DEFAULT_THINKING as SimulationChatConfig["thinking"]);
     const roles = {
       ai: sanitizeString(input.roles?.ai, DEFAULT_SIMULATION_ROLE_AI, {
         allowEmpty: false,
@@ -890,6 +908,9 @@ const createSimulationChatStep: StepSequenceFunctionTool<
       stages,
       mode,
       systemMessage,
+      model,
+      verbosity,
+      thinking,
       ...(missionId ? { missionId } : {}),
     };
 

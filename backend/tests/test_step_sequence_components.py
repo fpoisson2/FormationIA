@@ -163,6 +163,9 @@ def test_create_simulation_chat_step_sets_roles_and_stages() -> None:
         "stages",
         "mode",
         "systemMessage",
+        "model",
+        "verbosity",
+        "thinking",
     }
     assert config["roles"] == {"ai": "Coach", "user": "Participant"}
     assert len(config["stages"]) == 1
@@ -176,6 +179,9 @@ def test_create_simulation_chat_step_sets_roles_and_stages() -> None:
     }
     assert config["mode"] == "scripted"
     assert config["systemMessage"] is None
+    assert config["model"] is None
+    assert config["verbosity"] is None
+    assert config["thinking"] is None
 
 
 def test_create_simulation_chat_step_accepts_live_mode() -> None:
@@ -191,6 +197,9 @@ def test_create_simulation_chat_step_accepts_live_mode() -> None:
     config = step["config"]
     assert config["mode"] == "live"
     assert config["systemMessage"] == "Conduis la discussion."
+    assert config["model"] is None
+    assert config["verbosity"] is None
+    assert config["thinking"] is None
 
 
 def test_create_info_cards_step_includes_columns_and_cards() -> None:

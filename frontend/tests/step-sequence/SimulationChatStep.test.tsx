@@ -27,6 +27,9 @@ describe("SimulationChatStep", () => {
     roles: { ai: "IA", user: "Participant" },
     mode: "scripted",
     systemMessage: DEFAULT_SIMULATION_SYSTEM_MESSAGE,
+    model: "gpt-5-mini",
+    verbosity: "medium",
+    thinking: "medium",
   };
 
   it("keeps fields whose labels are temporarily empty during normalization", async () => {
