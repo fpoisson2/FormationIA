@@ -2764,6 +2764,107 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     }
   } while (adjusted);
 
+  const MIN_TILE_DISTANCE = 3;
+  const computeDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+  const stageIndexCache = new Map<QuarterId, number>(
+    stageOrder.map((stage, index) => [stage, index] as const)
+  );
+
+  const isTooCloseToOthers = (
+    stage: QuarterId,
+    candidate: { x: number; y: number }
+  ): boolean => {
+    for (const otherStage of stageOrder) {
+      if (otherStage === stage) {
+        continue;
+      }
+      const placement = assignments[otherStage];
+      if (!placement) {
+        continue;
+      }
+      if (computeDistance(candidate, placement) < MIN_TILE_DISTANCE) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const tryRelocateStage = (stage: QuarterId): boolean => {
+    if (stage === "mairie") {
+      return false;
+    }
+    const stageOrderIndex = stageIndexCache.get(stage);
+    const stageIndex = indexByStage.get(stage);
+    if (stageOrderIndex === undefined || stageIndex === undefined) {
+      return false;
+    }
+
+    const currentPlacement = assignments[stage];
+    if (!currentPlacement) {
+      return false;
+    }
+
+    if (!isTooCloseToOthers(stage, currentPlacement)) {
+      return false;
+    }
+
+    const previousStage = stageOrderIndex > 0 ? stageOrder[stageOrderIndex - 1] : undefined;
+    const nextStage =
+      stageOrderIndex < stageOrder.length - 1 ? stageOrder[stageOrderIndex + 1] : undefined;
+    const previousIndex = previousStage ? indexByStage.get(previousStage) : undefined;
+    const nextIndex = nextStage ? indexByStage.get(nextStage) : undefined;
+    const minIndex = previousIndex !== undefined ? previousIndex + 1 : 0;
+    const maxIndex =
+      nextIndex !== undefined ? nextIndex - 1 : Math.max(path.length - 1, 0);
+
+    if (minIndex > maxIndex) {
+      return false;
+    }
+
+    const candidateIndices: number[] = [];
+    const maxRange = Math.max(stageIndex - minIndex, maxIndex - stageIndex);
+    for (let offset = 1; offset <= maxRange; offset++) {
+      const backward = stageIndex - offset;
+      const forward = stageIndex + offset;
+      if (backward >= minIndex) {
+        candidateIndices.push(backward);
+      }
+      if (forward <= maxIndex) {
+        candidateIndices.push(forward);
+      }
+    }
+
+    for (const candidateIndex of candidateIndices) {
+      if (takenIndices.has(candidateIndex)) {
+        continue;
+      }
+      const candidateCoord = path[candidateIndex];
+      if (!candidateCoord) {
+        continue;
+      }
+      const [x, y] = candidateCoord;
+      if (isTooCloseToOthers(stage, { x, y })) {
+        continue;
+      }
+      moveStage(stage, candidateIndex);
+      return true;
+    }
+
+    return false;
+  };
+
+  let spacingAdjusted = false;
+  do {
+    spacingAdjusted = false;
+    for (const stage of stageOrder) {
+      if (tryRelocateStage(stage)) {
+        spacingAdjusted = true;
+      }
+    }
+  } while (spacingAdjusted);
+
   return assignments;
 }
 
@@ -3259,7 +3360,16 @@ function isWalkable(x: number, y: number, fromX?: number, fromY?: number) {
   }
   const terrain = world[y][x];
   if (currentWorldMode === "open-world") {
-    return terrain.base !== TILE_KIND.WATER;
+    if (terrain.base === TILE_KIND.WATER || terrain.overlay === TILE_KIND.WATER) {
+      return false;
+    }
+    if (terrain.object) {
+      return false;
+    }
+    if (BUILDING_BY_COORD.has(coordKey(x, y))) {
+      return false;
+    }
+    return true;
   }
   // Un chemin peut être soit en base soit en overlay
   const isPath = terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
@@ -4519,12 +4629,25 @@ export default function ExplorateurIA({
   const arrivalEffectRef = useRef<ArrivalEffect | null>(null);
   const autoWalkQueue = useRef<Coord[]>([]);
   const autoWalkTarget = useRef<Coord | null>(null);
+  const lastMoveDirectionRef = useRef<Coord | null>(null);
   const [isAutoWalking, setIsAutoWalking] = useState(false);
   const cancelAutoWalk = useCallback(() => {
     autoWalkQueue.current = [];
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+  const hasReachedAutoTarget = useCallback(() => {
+    const target = autoWalkTarget.current;
+    if (!target) {
+      return false;
+    }
+    if (isOpenWorldExperience) {
+      const distance =
+        Math.abs(player.x - target[0]) + Math.abs(player.y - target[1]);
+      return distance <= 1;
+    }
+    return player.x === target[0] && player.y === target[1];
+  }, [isOpenWorldExperience, player.x, player.y]);
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
@@ -4754,6 +4877,12 @@ export default function ExplorateurIA({
     [progress]
   );
 
+  const hasCollectedAllInventoryItems = useMemo(
+    () =>
+      INVENTORY_ITEMS.every((item) => isQuarterCompleted(item.stage)),
+    [derivedQuarterData, isQuarterCompleted]
+  );
+
   const activeGateKeys = useMemo(() => {
     const active = new Set<CoordKey>();
     for (const gate of PATH_GATES) {
@@ -4883,30 +5012,159 @@ export default function ExplorateurIA({
           attemptPlayMusic();
         }
         setWalkStep((step) => step + 1);
+        lastMoveDirectionRef.current = [dx, dy];
         moved = true;
         return { x: nx, y: ny };
       });
       return moved;
     },
-    [attemptPlayMusic, isIntroPlaying, isMusicEnabled, isQuarterCompleted]
+    [
+      attemptPlayMusic,
+      isIntroPlaying,
+      isMusicEnabled,
+      isQuarterCompleted,
+    ]
   );
 
-  const buildingAt = useCallback((x: number, y: number) => {
-    return buildings.find((building) => building.x === x && building.y === y) || null;
-  }, []);
+  type BuildingCandidate = {
+    building: (typeof buildings)[number];
+    distance: number;
+    direction: Coord | null;
+  };
+
+  const buildingAt = useCallback(
+    (x: number, y: number) => {
+      const candidates: BuildingCandidate[] = [];
+      for (const building of buildings) {
+        const distance = Math.abs(building.x - x) + Math.abs(building.y - y);
+        if (distance === 0) {
+          candidates.push({ building, distance, direction: null });
+          continue;
+        }
+        if (distance === 1 && isOpenWorldExperience) {
+          candidates.push({
+            building,
+            distance,
+            direction: [building.x - x, building.y - y],
+          });
+        }
+      }
+
+      if (candidates.length === 0) {
+        return null;
+      }
+
+      const interactable = candidates.filter(({ building }) => {
+        if (isQuarterCompleted(building.id)) {
+          return false;
+        }
+        if (building.id === "mairie" && !hasCollectedAllInventoryItems) {
+          return false;
+        }
+        return true;
+      });
+
+      if (interactable.length === 0) {
+        return null;
+      }
+
+      const direct = interactable.find((candidate) => candidate.distance === 0);
+      if (direct) {
+        return direct.building;
+      }
+
+      if (isOpenWorldExperience) {
+        const lastDirection = lastMoveDirectionRef.current;
+        if (lastDirection) {
+          const facing = interactable.find((candidate) => {
+            if (!candidate.direction) {
+              return false;
+            }
+            return (
+              candidate.direction[0] === lastDirection[0] &&
+              candidate.direction[1] === lastDirection[1]
+            );
+          });
+          if (facing) {
+            return facing.building;
+          }
+        }
+      }
+
+      const best = interactable.reduce<BuildingCandidate | null>(
+        (currentBest, candidate) => {
+          if (!currentBest) {
+            return candidate;
+          }
+          if (candidate.distance < currentBest.distance) {
+            return candidate;
+          }
+          if (candidate.distance > currentBest.distance) {
+            return currentBest;
+          }
+          const currentBestIndex = BUILDING_DISPLAY_ORDER.indexOf(
+            currentBest.building.id
+          );
+          const candidateIndex = BUILDING_DISPLAY_ORDER.indexOf(
+            candidate.building.id
+          );
+          if (candidateIndex === -1) {
+            return currentBest;
+          }
+          if (currentBestIndex === -1 || candidateIndex < currentBestIndex) {
+            return candidate;
+          }
+          return currentBest;
+        },
+        null
+      );
+
+      return best?.building ?? null;
+    },
+    [
+      hasCollectedAllInventoryItems,
+      isOpenWorldExperience,
+      isQuarterCompleted,
+    ]
+  );
 
   const openIfOnBuilding = useCallback(() => {
     const hit = buildingAt(player.x, player.y);
     if (!hit) {
+      if (!hasCollectedAllInventoryItems) {
+        const nearMairie = buildings.some((building) => {
+          if (building.id !== "mairie") {
+            return false;
+          }
+          const distance =
+            Math.abs(building.x - player.x) + Math.abs(building.y - player.y);
+          if (distance === 0) {
+            return true;
+          }
+          return isOpenWorldExperience && distance === 1;
+        });
+        if (nearMairie) {
+          setBlockedStage("mairie");
+        }
+      }
       setMobilePrompt(null);
       return;
     }
+    setBlockedStage(null);
     if (isMobile && !isEditMode) {
       setMobilePrompt(hit.id);
       return;
     }
     setOpen(hit.id);
-  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
+  }, [
+    buildingAt,
+    hasCollectedAllInventoryItems,
+    isEditMode,
+    isMobile,
+    isOpenWorldExperience,
+    player.x,
+    player.y,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -5208,7 +5466,10 @@ export default function ExplorateurIA({
         const dy = targetY - player.y;
         if (Math.abs(dx) + Math.abs(dy) === 1) {
           cancelAutoWalk();
-          move(dx, dy);
+          const didMove = move(dx, dy);
+          if (!didMove && isOpenWorldExperience) {
+            openIfOnBuilding();
+          }
         }
         return;
       }
@@ -5248,11 +5509,7 @@ export default function ExplorateurIA({
     }
 
     if (!isAutoWalking) {
-      if (
-        autoWalkTarget.current &&
-        player.x === autoWalkTarget.current[0] &&
-        player.y === autoWalkTarget.current[1]
-      ) {
+      if (hasReachedAutoTarget()) {
         openIfOnBuilding();
         autoWalkTarget.current = null;
       }
@@ -5261,11 +5518,7 @@ export default function ExplorateurIA({
 
     if (autoWalkQueue.current.length === 0) {
       setIsAutoWalking(false);
-      if (
-        autoWalkTarget.current &&
-        player.x === autoWalkTarget.current[0] &&
-        player.y === autoWalkTarget.current[1]
-      ) {
+      if (hasReachedAutoTarget()) {
         openIfOnBuilding();
       }
       autoWalkTarget.current = null;
@@ -5297,6 +5550,7 @@ export default function ExplorateurIA({
     isIntroPlaying,
     isAutoWalking,
     isMobile,
+    hasReachedAutoTarget,
     move,
     openIfOnBuilding,
     player.x,
@@ -5520,9 +5774,23 @@ export default function ExplorateurIA({
     if (!mobilePromptBuilding) {
       return false;
     }
+    if (isQuarterCompleted(mobilePromptBuilding.id)) {
+      return true;
+    }
+    if (
+      mobilePromptBuilding.id === "mairie" &&
+      !hasCollectedAllInventoryItems
+    ) {
+      return true;
+    }
     const key = coordKey(mobilePromptBuilding.x, mobilePromptBuilding.y);
     return activeGateKeys.has(key);
-  }, [activeGateKeys, mobilePromptBuilding]);
+  }, [
+    activeGateKeys,
+    hasCollectedAllInventoryItems,
+    isQuarterCompleted,
+    mobilePromptBuilding,
+  ]);
 
   const handleMobileEnter = useCallback(() => {
     if (!mobilePromptBuilding || mobilePromptLocked || isIntroPlaying) {
@@ -5619,19 +5887,6 @@ export default function ExplorateurIA({
                   <span aria-hidden="true">←</span>
                   <span className="sr-only">Revenir à la liste des activités</span>
                 </button>
-                <span
-                  className={classNames(
-                    "inline-flex items-center gap-2 rounded-full border bg-slate-900/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur",
-                    isOpenWorldExperience
-                      ? "border-emerald-400/70 text-emerald-100"
-                      : "border-white/40 text-white"
-                  )}
-                  title={experienceModeMeta.description}
-                  aria-label={`Mode d'exploration : ${experienceModeMeta.label}`}
-                >
-                  <span aria-hidden="true">{experienceModeMeta.icon}</span>
-                  {experienceModeMeta.badge}
-                </span>
                 {isEditMode && (
                   <button
                     type="button"
@@ -5647,16 +5902,6 @@ export default function ExplorateurIA({
                 )}
               </div>
               <div className="pointer-events-auto flex flex-col items-end gap-2">
-                <div
-                  className={classNames(
-                    "max-w-xs rounded-2xl border bg-slate-900/80 px-3 py-2 text-left text-xs font-medium text-white shadow-sm backdrop-blur",
-                    isOpenWorldExperience
-                      ? "border-emerald-400/60"
-                      : "border-white/50"
-                  )}
-                >
-                  {experienceModeMeta.runtimeHint}
-                </div>
                 <button
                   type="button"
                   onClick={handleOpenInventory}
