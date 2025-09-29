@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.admin_store import AdminStore, AdminStoreError, LocalUser
+from backend.app.admin_store import AdminStore, AdminStoreError, InvitationCode, LocalUser
 from backend.app.main import (
     _require_admin_store,
     _require_admin_user,
@@ -170,3 +171,64 @@ def test_admin_create_and_reset_user_endpoints(tmp_path) -> None:
         assert admin_store.verify_credentials("coach", "CoachPwdUpdated!") is not None
     finally:
         app.dependency_overrides.clear()
+
+
+def test_invitation_consumption_and_role_creation(tmp_path) -> None:
+    store = AdminStore(path=tmp_path / "admin.json")
+
+    with pytest.raises(AdminStoreError):
+        store.create_user_with_role("createuse", "CreatorPwd1!", "creator")
+
+    with pytest.raises(AdminStoreError):
+        store.create_user_with_role("etudfail", "StudentPwd1!", "student")
+
+    invitation_creator = InvitationCode(code="CREATOR-XYZ", role="creator")
+    invitation_student = InvitationCode(code="STUDENT-ABC", role="student")
+    store._data.setdefault("invitation_codes", []).extend(
+        [
+            invitation_creator.model_dump(by_alias=True, mode="json"),
+            invitation_student.model_dump(by_alias=True, mode="json"),
+        ]
+    )
+    store._write()
+
+    with pytest.raises(AdminStoreError):
+        store.create_user_with_role(
+            "wrongrole",
+            "CreatorPwd1!",
+            "creator",
+            invitation_code="STUDENT-ABC",
+        )
+
+    creator = store.create_user_with_role(
+        "createuse",
+        "CreatorPwd1!",
+        "creator",
+        invitation_code="CREATOR-XYZ",
+    )
+    assert creator.roles == ["creator"]
+    assert creator.invitation_code == "CREATOR-XYZ"
+
+    student = store.create_user_with_role(
+        "etudtest",
+        "StudentPwd1!",
+        "student",
+        invitation_code="STUDENT-ABC",
+    )
+    assert student.roles == ["student"]
+    assert student.invitation_code == "STUDENT-ABC"
+
+    with pytest.raises(AdminStoreError):
+        store.consume_invitation("STUDENT-ABC")
+
+    consumed_creator = next(
+        code for code in store.list_invitation_codes() if code.code == "CREATOR-XYZ"
+    )
+    assert consumed_creator.consumed_by == "createuse"
+    assert consumed_creator.consumed_at is not None
+
+    consumed_student = next(
+        code for code in store.list_invitation_codes() if code.code == "STUDENT-ABC"
+    )
+    assert consumed_student.consumed_by == "etudtest"
+    assert consumed_student.consumed_at is not None

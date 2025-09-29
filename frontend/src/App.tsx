@@ -14,6 +14,8 @@ import { AdminGuard } from "./pages/admin/AdminGuard";
 import { AdminLayout } from "./pages/admin/AdminLayout";
 import { AdminLocalUsersPage } from "./pages/admin/AdminLocalUsersPage";
 import { LoginPage } from "./pages/LoginPage";
+import { CreatorSignupPage } from "./pages/CreatorSignupPage";
+import { StudentSignupPage } from "./pages/StudentSignupPage";
 import { AdminLtiUsersPage } from "./pages/admin/AdminLtiUsersPage";
 import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
@@ -125,6 +127,8 @@ function App(): JSX.Element {
       />
       <Route path="/admin/connexion" element={<AdminLoginRedirect />} />
       <Route path="/connexion" element={<LoginPage />} />
+      <Route path="/inscription/createur" element={<CreatorSignupPage />} />
+      <Route path="/inscription/etudiant" element={<StudentSignupPage />} />
       <Route element={<AdminGuard />}>
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="platforms" replace />} />

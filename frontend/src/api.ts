@@ -229,6 +229,14 @@ export interface AdminLoginPayload {
   remember?: boolean;
 }
 
+export interface CreatorSignupPayload {
+  username: string;
+  password: string;
+  invitationCode: string;
+}
+
+export interface StudentSignupPayload extends CreatorSignupPayload {}
+
 export interface AdminAuthResponse {
   token: string;
   expiresAt?: string;
@@ -612,6 +620,34 @@ export const admin = {
   auth: {
     login: async (payload: AdminLoginPayload): Promise<AdminAuthResponse> =>
       fetchJson<AdminAuthResponse>(`${API_BASE_URL}/admin/auth/login`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        )
+      ),
+    signupCreator: async (
+      payload: CreatorSignupPayload
+    ): Promise<AdminAuthResponse> =>
+      fetchJson<AdminAuthResponse>(`${API_BASE_URL}/auth/signup`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          },
+        )
+      ),
+    signupStudent: async (
+      payload: StudentSignupPayload
+    ): Promise<AdminAuthResponse> =>
+      fetchJson<AdminAuthResponse>(`${API_BASE_URL}/auth/signup/student`,
         withAdminCredentials(
           {
             method: "POST",

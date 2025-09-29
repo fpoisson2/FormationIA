@@ -6,7 +6,18 @@ import { AdminSkeleton } from "../components/admin/AdminSkeleton";
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
-const USER_ROLES = ["usager", "user", "participant", "learner", "etudiant", "étudiant"];
+const USER_ROLES = [
+  "usager",
+  "user",
+  "participant",
+  "learner",
+  "etudiant",
+  "étudiant",
+  "student",
+  "creator",
+  "creatrice",
+  "créatrice",
+];
 
 interface LocationState {
   from?: string;
@@ -271,6 +282,24 @@ export function LoginPage(): JSX.Element {
         <div className="mt-6 space-y-2 text-center text-xs text-[color:var(--brand-charcoal)]/70">
           <p>
             Accès Moodle ou autre plateforme ? Passez par votre cours pour une connexion LTI automatique.
+          </p>
+          <p>
+            Besoin d’un accès créateur ?
+            <Link
+              to="/inscription/createur"
+              className="ml-1 font-medium text-[color:var(--brand-red)] hover:underline"
+            >
+              Crée ton compte
+            </Link>
+          </p>
+          <p>
+            Tu es étudiant·e avec un code ?
+            <Link
+              to="/inscription/etudiant"
+              className="ml-1 font-medium text-[color:var(--brand-red)] hover:underline"
+            >
+              Active ton accès
+            </Link>
           </p>
           <Link to="/" className="font-medium text-[color:var(--brand-red)] hover:underline">
             ← Retourner à l’accueil

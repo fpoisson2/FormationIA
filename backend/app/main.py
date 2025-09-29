@@ -782,6 +782,23 @@ class AdminLoginRequest(BaseModel):
     remember: bool = False
 
 
+class CreatorSignupRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=8, max_length=256)
+    invitation_code: str = Field(
+        ...,
+        alias="invitationCode",
+        min_length=1,
+        max_length=128,
+    )
+
+
+class StudentSignupRequest(CreatorSignupRequest):
+    pass
+
+
 class LocalUserCreateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -2267,6 +2284,7 @@ class LTIContextResponse(BaseModel):
 
 
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 admin_auth_router = APIRouter(prefix="/api/admin/auth", tags=["admin-auth"])
 admin_users_router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
@@ -2954,6 +2972,7 @@ def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
         "createdAt": user.created_at,
         "updatedAt": user.updated_at,
         "fromEnv": user.from_env,
+        "invitationCode": user.invitation_code,
     }
 
 
@@ -3190,6 +3209,72 @@ def admin_login(
     ttl = _admin_token_ttl(payload.remember)
     token, expires_at = create_admin_token(user.username, _ADMIN_AUTH_SECRET, expires_in=ttl)
     _set_admin_cookie(response, token, ttl)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": _serialize_local_user(user),
+    }
+
+
+@auth_router.post("/signup", status_code=status.HTTP_201_CREATED)
+def creator_signup(
+    payload: CreatorSignupRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    try:
+        user = store.create_user_with_role(
+            payload.username,
+            payload.password,
+            "creator",
+            invitation_code=payload.invitation_code,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, expires_at = create_admin_token(
+        user.username,
+        _ADMIN_AUTH_SECRET,
+        expires_in=_ADMIN_SESSION_TTL,
+    )
+    _set_admin_cookie(response, token, _ADMIN_SESSION_TTL)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": _serialize_local_user(user),
+    }
+
+
+@auth_router.post("/signup/student", status_code=status.HTTP_201_CREATED)
+def student_signup(
+    payload: StudentSignupRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    try:
+        user = store.create_user_with_role(
+            payload.username,
+            payload.password,
+            "student",
+            invitation_code=payload.invitation_code,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, expires_at = create_admin_token(
+        user.username,
+        _ADMIN_AUTH_SECRET,
+        expires_in=_ADMIN_SESSION_TTL,
+    )
+    _set_admin_cookie(response, token, _ADMIN_SESSION_TTL)
     response.headers["Cache-Control"] = "no-store"
     return {
         "token": token,
@@ -3922,6 +4007,7 @@ def admin_get_activity_generation_job(
     return _serialize_activity_generation_job(job)
 
 
+app.include_router(auth_router)
 app.include_router(admin_auth_router)
 app.include_router(admin_users_router)
 app.include_router(admin_router)
