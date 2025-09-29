@@ -2817,7 +2817,7 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     const nextIndex = nextStage ? indexByStage.get(nextStage) : undefined;
     const minIndex = previousIndex !== undefined ? previousIndex + 1 : 0;
     const maxIndex =
-      nextIndex !== undefined ? nextIndex - 1 : Math.max(generatedWorld.path.length - 1, 0);
+      nextIndex !== undefined ? nextIndex - 1 : Math.max(path.length - 1, 0);
 
     if (minIndex > maxIndex) {
       return false;
@@ -2840,7 +2840,7 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
       if (takenIndices.has(candidateIndex)) {
         continue;
       }
-      const candidateCoord = generatedWorld.path[candidateIndex];
+      const candidateCoord = path[candidateIndex];
       if (!candidateCoord) {
         continue;
       }
