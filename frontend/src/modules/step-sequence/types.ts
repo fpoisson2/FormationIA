@@ -85,6 +85,7 @@ export type StepComponentWithMetadata = ComponentType<StepComponentProps> & {
   stepSequenceWrapper?: StepSequenceWrapperPreference;
   stepSequenceLayoutOverrides?: StepSequenceLayoutOverrides;
   stepSequenceHideTitleInHeader?: boolean;
+  stepSequenceContainerClassName?: string;
 };
 
 export type StepRegistry = Record<string, StepComponentWithMetadata>;

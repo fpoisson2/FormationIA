@@ -130,8 +130,8 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
             </div>
           )}
         </div>
-        <div className="relative flex justify-center">
-          <div className="relative w-full max-w-[520px]">
+        <div className="relative flex justify-start">
+          <div className="relative w-full">
             <div className="relative aspect-square w-full">
               <div
                 ref={gridRef}
@@ -191,7 +191,7 @@ export function ClarityGrid({ player, target, blocked, visited }: ClarityGridPro
         </div>
         <div aria-hidden />
         <div
-          className="relative mx-auto text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
+          className="relative text-[11px] font-semibold text-[color:var(--brand-charcoal)]/70 md:text-xs"
           style={{
             width: gridRect.width > 0 ? gridRect.width : undefined,
             height: hasTileMeasurements ? tileHeight : undefined,

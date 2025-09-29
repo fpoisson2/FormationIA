@@ -194,6 +194,10 @@ export function StepSequenceActivity({
         return <StepComponent {...componentProps} />;
       }
 
+      const containerClassName =
+        StepComponent.stepSequenceContainerClassName ??
+        "mx-auto flex w-full max-w-4xl flex-col gap-6";
+
       const canGoBack = stepIndex > 0;
       const isLastStep = stepIndex === stepCount - 1;
       const resolvedComponentKey = resolveStepComponentKey(step);
@@ -273,7 +277,7 @@ export function StepSequenceActivity({
         StepComponent.stepSequenceHideTitleInHeader !== true;
 
       return (
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+        <div className={containerClassName}>
           <header className="space-y-3 text-center">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {indicatorLabel}
