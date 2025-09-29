@@ -1,6 +1,8 @@
 import json
 from copy import deepcopy
 
+from collections.abc import Mapping
+
 from fastapi.testclient import TestClient
 
 import backend.app.main as main
@@ -27,6 +29,19 @@ def _auto_drive_generation(job_id: str) -> None:
 
         feedback = main.ActivityGenerationFeedbackRequest(action="approve")
         main._process_activity_generation_feedback(job_id, feedback)
+
+
+def _message_text(entry: Mapping[str, object]) -> str | None:
+    content = entry.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, Mapping):
+                text = item.get("text")
+                if isinstance(text, str):
+                    return text
+    elif isinstance(content, str):
+        return content
+    return None
 
 
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
@@ -625,12 +640,12 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
             assert (
-                first_request["input"][0]["content"]
+                _message_text(first_request["input"][0])
                 == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
             )
             assert first_request["input"][1]["role"] == "developer"
             assert (
-                first_request["input"][1]["content"]
+                _message_text(first_request["input"][1])
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
 
@@ -807,12 +822,12 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
             assert (
-                first_request["input"][0]["content"]
+                _message_text(first_request["input"][0])
                 == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
             )
             assert first_request["input"][1]["role"] == "developer"
             assert (
-                first_request["input"][1]["content"]
+                _message_text(first_request["input"][1])
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
 
@@ -978,12 +993,12 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
             assert (
-                first_request["input"][0]["content"]
+                _message_text(first_request["input"][0])
                 == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
             )
             assert first_request["input"][1]["role"] == "developer"
             assert (
-                first_request["input"][1]["content"]
+                _message_text(first_request["input"][1])
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
 
@@ -1137,11 +1152,11 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
         assert (
-            first_request["input"][0]["content"]
+            _message_text(first_request["input"][0])
             == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
         )
         assert first_request["input"][1]["role"] == "developer"
-        assert first_request["input"][1]["content"] == custom_message
+        assert _message_text(first_request["input"][1]) == custom_message
 
         persisted = json.loads(config_path.read_text(encoding="utf-8"))
         assert (
@@ -1268,10 +1283,10 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
 
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
-        assert first_request["input"][0]["content"] == custom_system_message
+        assert _message_text(first_request["input"][0]) == custom_system_message
         assert first_request["input"][1]["role"] == "developer"
         assert (
-            first_request["input"][1]["content"]
+            _message_text(first_request["input"][1])
             == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
         )
 
@@ -1285,6 +1300,144 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
         )
     finally:
         app.dependency_overrides.clear()
+
+
+def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    captured_requests: list[dict[str, object]] = []
+
+    class DummyResponse:
+        def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+            self.output = output
+
+    class FakeResponsesClient:
+        def __init__(self) -> None:
+            self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan_revision",
+                            "arguments": {
+                                "overview": "Plan ajusté",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Nouvelle introduction",
+                                        "objective": "Clarifier les attentes",
+                                    }
+                                ],
+                                "notes": "Prendre en compte les retours",
+                            },
+                        }
+                    ]
+                ),
+            ]
+            self._index = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
+            response = self._responses[self._index]
+            self._index += 1
+            return response
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id: main._run_activity_generation_job(job_id),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Révision"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["awaitingUserAction"] is True
+            assert status_payload["pendingToolCall"]["name"] == "propose_step_sequence_plan"
+
+            feedback = {
+                "action": "revise",
+                "message": "Précise davantage la progression.",
+            }
+            feedback_response = client.post(
+                f"/api/admin/activities/generate/{job_id}/respond",
+                json=feedback,
+            )
+            assert feedback_response.status_code == 200, feedback_response.text
+
+            updated_status = client.get(
+                f"/api/admin/activities/generate/{job_id}"
+            )
+            assert updated_status.status_code == 200
+            updated_payload = updated_status.json()
+            assert updated_payload["awaitingUserAction"] is True
+            assert updated_payload["pendingToolCall"]["name"] == "propose_step_sequence_plan"
+
+    finally:
+        app.dependency_overrides.clear()
+
+    assert len(captured_requests) == 2
+    second_request = captured_requests[1]
+    second_input = second_request["input"]
+    assert second_input[3]["role"] == "assistant"
+    tool_call = second_input[3]["content"][0]
+    assert tool_call["type"] == "tool_call"
+    assert tool_call["name"] == "propose_step_sequence_plan"
+    assert isinstance(tool_call["arguments"], str)
+    assert second_input[4]["role"] == "tool"
+    assert second_input[4]["tool_call_id"] == tool_call["id"]
+    tool_content = second_input[4]["content"][0]
+    assert tool_content["type"] == "output_text"
+    assert isinstance(tool_content["text"], str) and tool_content["text"]
+    assert second_input[5]["role"] == "user"
+    assert second_input[5]["content"][0]["type"] == "text"
+    assert second_input[5]["content"][0]["text"].startswith(
+        "Corrige le plan selon les indications suivantes :"
+    )
 
 
 def test_admin_generate_activity_allows_request_developer_message_override(
@@ -1403,11 +1556,11 @@ def test_admin_generate_activity_allows_request_developer_message_override(
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
         assert (
-            first_request["input"][0]["content"]
+            _message_text(first_request["input"][0])
             == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
         )
         assert first_request["input"][1]["role"] == "developer"
-        assert first_request["input"][1]["content"] == override_message
+        assert _message_text(first_request["input"][1]) == override_message
 
         persisted = json.loads(config_path.read_text(encoding="utf-8"))
         assert (
@@ -1540,10 +1693,10 @@ def test_admin_generate_activity_allows_request_system_message_override(
 
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
-        assert first_request["input"][0]["content"] == override_system_message
+        assert _message_text(first_request["input"][0]) == override_system_message
         assert first_request["input"][1]["role"] == "developer"
         assert (
-            first_request["input"][1]["content"]
+            _message_text(first_request["input"][1])
             == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
         )
 

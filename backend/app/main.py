@@ -3700,6 +3700,127 @@ def _normalize_response_item(item: Any) -> dict[str, Any]:
     return normalized
 
 
+def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a Responses API compatible message built from ``message``."""
+
+    summary = message.get("summary")
+
+    def _maybe_attach_summary(payload: dict[str, Any]) -> dict[str, Any]:
+        if summary is not None:
+            payload["summary"] = summary
+        return payload
+
+    def _ensure_content_list(content: Any) -> list[dict[str, Any]]:
+        if isinstance(content, list):
+            normalized: list[dict[str, Any]] = []
+            for item in content:
+                if isinstance(item, Mapping):
+                    normalized.append(deepcopy(item))
+                elif isinstance(item, str):
+                    normalized.append({"type": "text", "text": item})
+                else:
+                    normalized.append({"type": "text", "text": json.dumps(item)})
+            return normalized
+        if isinstance(content, Mapping):
+            return [deepcopy(content)]
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}]
+        if content is None:
+            return []
+        return [{"type": "text", "text": json.dumps(content)}]
+
+    if "role" in message:
+        role_message: dict[str, Any] = {"role": message["role"]}
+        content = message.get("content")
+        role_message["content"] = _ensure_content_list(content)
+        if message.get("role") == "tool":
+            tool_call_id = message.get("tool_call_id") or message.get("call_id")
+            if tool_call_id is not None:
+                role_message["tool_call_id"] = str(tool_call_id)
+            if message.get("name"):
+                role_message["name"] = message["name"]
+        for extra_key in ("metadata",):
+            if extra_key in message:
+                role_message[extra_key] = deepcopy(message[extra_key])
+        return _maybe_attach_summary(role_message)
+
+    message_type = message.get("type")
+
+    if message_type == "function_call":
+        call_id = (
+            message.get("call_id")
+            or message.get("id")
+            or f"call_{hashlib.sha1(json.dumps(message, sort_keys=True).encode()).hexdigest()[:8]}"
+        )
+        arguments = message.get("arguments")
+        if isinstance(arguments, str):
+            arguments_text = arguments
+        else:
+            try:
+                arguments_text = json.dumps(arguments)
+            except TypeError:
+                arguments_text = json.dumps(arguments, default=str)
+        payload = {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": str(call_id),
+                    "name": message.get("name"),
+                    "arguments": arguments_text,
+                }
+            ],
+        }
+        return _maybe_attach_summary(payload)
+
+    if message_type == "function_call_output":
+        output = message.get("output")
+        if isinstance(output, str):
+            output_text = output
+        else:
+            try:
+                output_text = json.dumps(output)
+            except TypeError:
+                output_text = json.dumps(output, default=str)
+        payload = {
+            "role": "tool",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": output_text,
+                }
+            ],
+        }
+        call_id = message.get("call_id") or message.get("id")
+        if call_id is not None:
+            payload["tool_call_id"] = str(call_id)
+        return _maybe_attach_summary(payload)
+
+    fallback = {
+        key: deepcopy(value)
+        for key, value in message.items()
+        if key not in {"type", "summary"}
+    }
+    if "role" not in fallback:
+        fallback["role"] = "assistant"
+    fallback["content"] = _ensure_content_list(fallback.get("content"))
+    return _maybe_attach_summary(fallback)
+
+
+def _serialize_conversation_for_responses(
+    conversation: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return a list of messages compliant with the Responses API."""
+
+    serialized: list[dict[str, Any]] = []
+    for message in conversation:
+        try:
+            serialized.append(_serialize_conversation_entry(message))
+        except Exception:  # pragma: no cover - defensive
+            serialized.append({"role": "assistant", "content": []})
+    return serialized
+
+
 def _prepare_activity_generation_iteration(
     job_id: str,
 ) -> tuple[
@@ -3795,7 +3916,7 @@ def _run_activity_generation_job(job_id: str) -> None:
         client = _ensure_client()
         response = client.responses.create(
             model=model_name,
-            input=conversation,
+            input=_serialize_conversation_for_responses(conversation),
             tools=tools,
             parallel_tool_calls=False,
             text={"verbosity": verbosity},
