@@ -28,6 +28,7 @@ from .admin_store import (
     AdminAuthError,
     AdminStore,
     AdminStoreError,
+    InvitationCode,
     LocalUser,
     LtiUserStat,
     create_admin_token,
@@ -787,16 +788,46 @@ class CreatorSignupRequest(BaseModel):
 
     username: str = Field(..., min_length=1, max_length=128)
     password: str = Field(..., min_length=8, max_length=256)
-    invitation_code: str = Field(
-        ...,
+    invitation_code: str | None = Field(
+        default=None,
         alias="invitationCode",
         min_length=1,
         max_length=128,
     )
 
+    @model_validator(mode="after")
+    def _normalize_invitation(self) -> "CreatorSignupRequest":
+        if self.invitation_code is None:
+            return self
+        trimmed = self.invitation_code.strip()
+        object.__setattr__(self, "invitation_code", trimmed or None)
+        return self
+
 
 class StudentSignupRequest(CreatorSignupRequest):
-    pass
+    @model_validator(mode="after")
+    def _require_invitation(self) -> "StudentSignupRequest":
+        if not self.invitation_code:
+            raise ValueError("Un code d'invitation est requis pour l'inscription étudiante.")
+        return self
+
+
+class InvitationCodeCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: str = Field(..., min_length=1, max_length=32)
+    code: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "InvitationCodeCreateRequest":
+        normalized_role = self.role.strip().lower()
+        object.__setattr__(self, "role", normalized_role)
+        if normalized_role not in {"creator", "student"}:
+            raise ValueError("role doit valoir 'creator' ou 'student'.")
+        if self.code is not None:
+            trimmed = self.code.strip()
+            object.__setattr__(self, "code", trimmed or None)
+        return self
 
 
 class LocalUserCreateRequest(BaseModel):
@@ -2976,6 +3007,16 @@ def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
     }
 
 
+def _serialize_invitation_code(invitation: InvitationCode) -> dict[str, Any]:
+    return {
+        "code": invitation.code,
+        "role": invitation.role,
+        "createdAt": invitation.created_at,
+        "consumedAt": invitation.consumed_at,
+        "consumedBy": invitation.consumed_by,
+    }
+
+
 def _serialize_platform(config: LTIPlatformConfig, store: AdminStore | None) -> dict[str, Any]:
     issuer = str(config.issuer)
     metadata = store.get_platform(issuer, config.client_id) if store else None
@@ -3373,6 +3414,29 @@ def admin_update_local_user(
     except AdminStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"user": _serialize_local_user(updated)}
+
+
+@admin_router.get("/invitations")
+def admin_list_invitations(
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    items = [_serialize_invitation_code(code) for code in store.list_invitation_codes()]
+    items.sort(key=lambda entry: entry.get("createdAt") or "", reverse=True)
+    return {"invitations": items}
+
+
+@admin_router.post("/invitations", status_code=status.HTTP_201_CREATED)
+def admin_create_invitation(
+    payload: InvitationCodeCreateRequest,
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    try:
+        invitation = store.generate_invitation_code(payload.role, code=payload.code)
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"invitation": _serialize_invitation_code(invitation)}
 
 
 @admin_router.get("/lti-platforms")

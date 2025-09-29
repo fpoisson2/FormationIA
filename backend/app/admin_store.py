@@ -180,6 +180,20 @@ class InvitationCode(BaseModel):
         return self
 
 
+def _generate_invitation_value(length: int = 12) -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    if length < 4:
+        length = 4
+    chunks: list[str] = []
+    remaining = length
+    while remaining > 0:
+        chunk_size = 4 if remaining >= 4 else remaining
+        chunk = "".join(secrets.choice(alphabet) for _ in range(chunk_size))
+        chunks.append(chunk)
+        remaining -= chunk_size
+    return "-".join(chunks)
+
+
 def _hash_password(password: str) -> str:
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
     return f"bcrypt${hashed.decode('utf-8')}"
@@ -642,15 +656,17 @@ class AdminStore:
             raise AdminStoreError("Un compte avec ce nom existe déjà.")
 
         invitation_value: str | None = None
-        if not invitation_code or not invitation_code.strip():
-            raise AdminStoreError("Un code d'invitation valide est requis pour créer ce compte.")
-
-        consumed = self.consume_invitation(
-            invitation_code.strip(),
-            username=username_value,
-            role=normalized_role,
-        )
-        invitation_value = consumed.code
+        if invitation_code and invitation_code.strip():
+            consumed = self.consume_invitation(
+                invitation_code.strip(),
+                username=username_value,
+                role=normalized_role,
+            )
+            invitation_value = consumed.code
+        elif normalized_role == "student":
+            raise AdminStoreError(
+                "Un code d'invitation valide est requis pour créer un compte étudiant."
+            )
 
         return self.create_user(
             username_value,
@@ -660,6 +676,45 @@ class AdminStore:
             from_env=False,
             invitation_code=invitation_value,
         )
+
+    def generate_invitation_code(
+        self, role: str, *, code: str | None = None
+    ) -> InvitationCode:
+        normalized_role = role.strip().lower()
+        if normalized_role not in {"creator", "student"}:
+            raise AdminStoreError("Rôle d'invitation invalide.")
+
+        requested_code = code.strip() if isinstance(code, str) else None
+        if requested_code == "":
+            requested_code = None
+
+        with self._lock:
+            records = self._data.setdefault("invitation_codes", [])
+            existing_codes = {
+                str(item.get("code"))
+                for item in records
+                if isinstance(item, dict) and item.get("code")
+            }
+
+            if requested_code:
+                if requested_code in existing_codes:
+                    raise AdminStoreError("Ce code d'invitation existe déjà.")
+                candidate = requested_code
+            else:
+                # Attempt to generate a unique code up to a reasonable number of tries
+                for _ in range(20):
+                    candidate = _generate_invitation_value()
+                    if candidate not in existing_codes:
+                        break
+                else:
+                    raise AdminStoreError(
+                        "Impossible de générer un code d'invitation unique."
+                    )
+
+            invitation = InvitationCode(code=candidate, role=normalized_role)
+            records.append(invitation.model_dump(by_alias=True, mode="json"))
+            self._write()
+            return invitation
 
     def set_password(self, username: str, password: str) -> LocalUser:
         username_value = username.strip()

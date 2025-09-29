@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.app.admin_store import AdminStore, AdminStoreError, InvitationCode, LocalUser
+from backend.app.admin_store import AdminStore, AdminStoreError, LocalUser
 from backend.app.main import (
     _require_admin_store,
     _require_admin_user,
@@ -176,59 +176,92 @@ def test_admin_create_and_reset_user_endpoints(tmp_path) -> None:
 def test_invitation_consumption_and_role_creation(tmp_path) -> None:
     store = AdminStore(path=tmp_path / "admin.json")
 
-    with pytest.raises(AdminStoreError):
-        store.create_user_with_role("createuse", "CreatorPwd1!", "creator")
+    # Creators can register without invitation codes
+    creator_free = store.create_user_with_role("createfree", "CreatorPwd1!", "creator")
+    assert creator_free.roles == ["creator"]
+    assert creator_free.invitation_code is None
 
+    # Students still require a code
     with pytest.raises(AdminStoreError):
         store.create_user_with_role("etudfail", "StudentPwd1!", "student")
 
-    invitation_creator = InvitationCode(code="CREATOR-XYZ", role="creator")
-    invitation_student = InvitationCode(code="STUDENT-ABC", role="student")
-    store._data.setdefault("invitation_codes", []).extend(
-        [
-            invitation_creator.model_dump(by_alias=True, mode="json"),
-            invitation_student.model_dump(by_alias=True, mode="json"),
-        ]
-    )
-    store._write()
+    invitation_creator = store.generate_invitation_code("creator", code="CREATOR-XYZ")
+    invitation_student = store.generate_invitation_code("student", code="STUDENT-ABC")
 
     with pytest.raises(AdminStoreError):
         store.create_user_with_role(
             "wrongrole",
             "CreatorPwd1!",
             "creator",
-            invitation_code="STUDENT-ABC",
+            invitation_code=invitation_student.code,
         )
 
     creator = store.create_user_with_role(
         "createuse",
         "CreatorPwd1!",
         "creator",
-        invitation_code="CREATOR-XYZ",
+        invitation_code=invitation_creator.code,
     )
     assert creator.roles == ["creator"]
-    assert creator.invitation_code == "CREATOR-XYZ"
+    assert creator.invitation_code == invitation_creator.code
 
     student = store.create_user_with_role(
         "etudtest",
         "StudentPwd1!",
         "student",
-        invitation_code="STUDENT-ABC",
+        invitation_code=invitation_student.code,
     )
     assert student.roles == ["student"]
-    assert student.invitation_code == "STUDENT-ABC"
+    assert student.invitation_code == invitation_student.code
 
     with pytest.raises(AdminStoreError):
-        store.consume_invitation("STUDENT-ABC")
+        store.consume_invitation(invitation_student.code)
 
     consumed_creator = next(
-        code for code in store.list_invitation_codes() if code.code == "CREATOR-XYZ"
+        code for code in store.list_invitation_codes() if code.code == invitation_creator.code
     )
     assert consumed_creator.consumed_by == "createuse"
     assert consumed_creator.consumed_at is not None
 
     consumed_student = next(
-        code for code in store.list_invitation_codes() if code.code == "STUDENT-ABC"
+        code for code in store.list_invitation_codes() if code.code == invitation_student.code
     )
     assert consumed_student.consumed_by == "etudtest"
     assert consumed_student.consumed_at is not None
+
+
+def test_admin_invitation_endpoints(tmp_path) -> None:
+    admin_store = AdminStore(path=tmp_path / "admin.json")
+    admin_user = LocalUser(username="root", password_hash="bcrypt$dummy", roles=["admin"])
+
+    app.dependency_overrides[_require_admin_store] = lambda: admin_store
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    try:
+        with TestClient(app) as client:
+            initial = client.get("/api/admin/invitations")
+            assert initial.status_code == 200, initial.text
+            assert initial.json() == {"invitations": []}
+
+            created = client.post(
+                "/api/admin/invitations",
+                json={"role": "student"},
+            )
+            assert created.status_code == 201, created.text
+            payload = created.json()
+            assert payload["invitation"]["role"] == "student"
+            assert payload["invitation"]["code"]
+
+            duplicate = client.post(
+                "/api/admin/invitations",
+                json={"role": "student", "code": payload["invitation"]["code"]},
+            )
+            assert duplicate.status_code == 400
+
+            after = client.get("/api/admin/invitations")
+            assert after.status_code == 200
+            after_payload = after.json()
+            assert len(after_payload["invitations"]) == 1
+            assert after_payload["invitations"][0]["code"] == payload["invitation"]["code"]
+    finally:
+        app.dependency_overrides.clear()

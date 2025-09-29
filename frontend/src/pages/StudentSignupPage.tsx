@@ -140,6 +140,9 @@ export function StudentSignupPage(): JSX.Element {
               Saisis le code d'invitation partagé par ton enseignante ou enseignant pour activer ton accès aux
               activités Formation IA.
             </p>
+            <p className="text-xs text-[color:var(--brand-charcoal)]/80">
+              Les comptes créateur·trice n'ont pas besoin de code : utilise plutôt l'inscription dédiée.
+            </p>
           </div>
           <form className="space-y-4" onSubmit={handleSubmit} noValidate>
             <div className="space-y-2 text-left">

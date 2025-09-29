@@ -48,7 +48,6 @@ export function CreatorSignupPage(): JSX.Element {
   const { status, user, signupCreator, isProcessing, error } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [invitationCode, setInvitationCode] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -89,13 +88,12 @@ export function CreatorSignupPage(): JSX.Element {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
-    const trimmedCode = invitationCode.trim();
     const trimmedUsername = username.trim();
     const trimmedPassword = password.trim();
     const trimmedConfirm = confirmPassword.trim();
 
-    if (!trimmedCode || !trimmedUsername || !trimmedPassword) {
-      setFormError("Ajoute ton code d'invitation, ton identifiant et un mot de passe valide.");
+    if (!trimmedUsername || !trimmedPassword) {
+      setFormError("Ajoute ton identifiant et un mot de passe valide.");
       return;
     }
 
@@ -112,7 +110,6 @@ export function CreatorSignupPage(): JSX.Element {
     const result = await signupCreator({
       username: trimmedUsername,
       password: trimmedPassword,
-      invitationCode: trimmedCode,
     });
 
     if (result.ok) {
@@ -137,27 +134,14 @@ export function CreatorSignupPage(): JSX.Element {
           <div className="space-y-3">
             <h1 className="text-2xl font-semibold text-[color:var(--brand-black)]">Crée ton compte</h1>
             <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
-              Utilise le code d'invitation transmis par l'équipe Formation IA pour activer ton accès créateur et
-              explorer le studio complet dès validation de l'inscription.
+              Crée ton accès créateur·trice pour explorer le studio Formation IA. Une personne administratrice pourra
+              ensuite attribuer les autorisations nécessaires selon ton rôle.
+            </p>
+            <p className="text-xs text-[color:var(--brand-charcoal)]/80">
+              Besoin d'un accès étudiant ? Cette inscription nécessite un code dédié.
             </p>
           </div>
           <form className="space-y-4" onSubmit={handleSubmit} noValidate>
-            <div className="space-y-2 text-left">
-              <label className="text-sm font-medium text-[color:var(--brand-charcoal)]" htmlFor="invitationCode">
-                Code d'invitation
-              </label>
-              <input
-                id="invitationCode"
-                name="invitationCode"
-                type="text"
-                autoComplete="one-time-code"
-                value={invitationCode}
-                onChange={(event) => setInvitationCode(event.target.value)}
-                className="w-full rounded-2xl border border-[color:var(--brand-charcoal)]/20 bg-white/80 px-4 py-3 text-sm shadow-inner focus:border-[color:var(--brand-red)] focus:outline-none"
-                placeholder="Ex. FORM-2024-CREA"
-                required
-              />
-            </div>
             <div className="space-y-2 text-left">
               <label className="text-sm font-medium text-[color:var(--brand-charcoal)]" htmlFor="username">
                 Adresse courriel professionnelle
@@ -234,7 +218,7 @@ export function CreatorSignupPage(): JSX.Element {
                 to="/inscription/etudiant"
                 className="ml-1 font-semibold text-[color:var(--brand-red)] hover:underline"
               >
-                Utilise ton code d'invitation dédié
+                Rejoins la page d'inscription étudiante
               </Link>
             </p>
           </div>

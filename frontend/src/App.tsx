@@ -20,6 +20,7 @@ import { AdminLtiUsersPage } from "./pages/admin/AdminLtiUsersPage";
 import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
 import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
+import { AdminInvitationCodesPage } from "./pages/admin/AdminInvitationCodesPage";
 import { activities as activitiesClient } from "./api";
 
 function AdminLoginRedirect(): JSX.Element {
@@ -139,6 +140,7 @@ function App(): JSX.Element {
           <Route path="platforms" element={<AdminPlatformsPage />} />
           <Route path="lti-users" element={<AdminLtiUsersPage />} />
           <Route path="local-users" element={<AdminLocalUsersPage />} />
+          <Route path="invitations" element={<AdminInvitationCodesPage />} />
           <Route
             path="activity-tracking"
             element={<AdminActivityTrackingPage />}
