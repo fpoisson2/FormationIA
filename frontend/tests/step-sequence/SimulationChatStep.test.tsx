@@ -1,10 +1,14 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SimulationChatConfig } from "../../src/modules/step-sequence/modules";
 import { DEFAULT_SIMULATION_SYSTEM_MESSAGE } from "../../src/modules/step-sequence/modules";
 import SimulationChatStep from "../../src/modules/step-sequence/modules/SimulationChatStep";
-import type { StepComponentProps } from "../../src/modules/step-sequence/types";
+import { StepSequenceContext } from "../../src/modules/step-sequence/types";
+import type {
+  StepComponentProps,
+  StepSequenceContextValue,
+} from "../../src/modules/step-sequence/types";
 
 function renderSimulationChatStep(config: SimulationChatConfig) {
   const props: StepComponentProps = {
@@ -131,5 +135,80 @@ describe("SimulationChatStep", () => {
     const helpTextarea = within(settingsPanel as HTMLElement).getByLabelText("Aide contextuelle");
     fireEvent.change(helpTextarea, { target: { value: "" } });
     expect(helpTextarea).toHaveValue("");
+  });
+
+  it("registers a manual advance handler once the live conversation ends", async () => {
+    const setManualAdvanceHandler = vi.fn();
+    const setManualAdvanceDisabled = vi.fn();
+    const onAdvance = vi.fn();
+
+    const config: SimulationChatConfig = {
+      ...baseConfig,
+      mode: "live",
+      stages: [],
+    };
+
+    const props: StepComponentProps = {
+      definition: { id: "simulation", component: "simulation-chat", config },
+      config,
+      payload: {
+        history: [],
+        runId: "run-42",
+        conversation: {
+          messages: [
+            { id: "msg-user", role: "user", content: "Bonjour" },
+            { id: "msg-ai", role: "ai", content: "Salut" },
+          ],
+          finished: true,
+        },
+      },
+      isActive: true,
+      isEditMode: false,
+      onAdvance,
+      onUpdateConfig: vi.fn(),
+    };
+
+    const contextValue: StepSequenceContextValue = {
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [],
+      payloads: {},
+      isEditMode: false,
+      onAdvance: vi.fn(),
+      onUpdateConfig: vi.fn(),
+      goToStep: vi.fn(),
+      setManualAdvanceHandler,
+      setManualAdvanceDisabled,
+      getManualAdvanceState: () => ({ handler: null, disabled: false }),
+    };
+
+    render(
+      <StepSequenceContext.Provider value={contextValue}>
+        <SimulationChatStep {...props} />
+      </StepSequenceContext.Provider>
+    );
+
+    await waitFor(() => {
+      expect(setManualAdvanceHandler).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    expect(onAdvance).not.toHaveBeenCalled();
+
+    const lastCallIndex = setManualAdvanceHandler.mock.calls.length - 1;
+    const handler = lastCallIndex >= 0 ? (setManualAdvanceHandler.mock.calls[lastCallIndex]?.[0] as (() => unknown)) : undefined;
+    expect(typeof handler).toBe("function");
+    expect(handler?.()).toEqual({
+      history: [],
+      runId: "run-42",
+      conversation: {
+        messages: [
+          { id: "msg-user", role: "user", content: "Bonjour" },
+          { id: "msg-ai", role: "ai", content: "Salut" },
+        ],
+        finished: true,
+      },
+    });
+
+    expect(setManualAdvanceDisabled).toHaveBeenCalledWith(false);
   });
 });

@@ -680,6 +680,9 @@ export function SimulationChatStep({
   const effectiveOnAdvance = context?.onAdvance ?? onAdvance;
   const effectiveOnUpdateConfig = context?.onUpdateConfig ?? onUpdateConfig;
   const isDesignerMode = context?.isEditMode ?? isEditMode;
+  const setManualAdvanceHandler = context?.setManualAdvanceHandler;
+  const setManualAdvanceDisabled = context?.setManualAdvanceDisabled;
+  const supportsManualAdvance = Boolean(setManualAdvanceHandler) && !isDesignerMode;
 
   const typedConfig = useMemo(() => normalizeSimulationChatConfig(config), [config]);
   const stageCount = typedConfig.stages.length;
@@ -914,19 +917,21 @@ export function SimulationChatStep({
                   message.id === aiMessageId ? { ...message, isStreaming: false } : message
                 );
                 conversationRef.current = next;
-                if (shouldEnd) {
-                  const storedMessages = next.map(({ isStreaming: _omit, ...rest }) => rest);
+                return next;
+              });
+              setConversationFinished(shouldEnd);
+              if (shouldEnd) {
+                setLiveError(null);
+                if (!supportsManualAdvance) {
+                  const storedMessages = conversationRef.current.map(
+                    ({ isStreaming: _omit, ...rest }) => rest
+                  );
                   effectiveOnAdvance({
                     history,
                     runId: runId ?? null,
                     conversation: { messages: storedMessages, finished: true },
                   });
                 }
-                return next;
-              });
-              setConversationFinished(shouldEnd);
-              if (shouldEnd) {
-                setLiveError(null);
               }
             },
             onError: (message) => {
@@ -963,8 +968,46 @@ export function SimulationChatStep({
       isStreamingLiveReply,
       liveInput,
       runId,
+      supportsManualAdvance,
     ]
   );
+
+  const manualAdvanceHandler = useCallback(() => {
+    return {
+      history,
+      runId: runId ?? null,
+      conversation: {
+        messages: conversationRef.current.map(({ isStreaming: _omit, ...rest }) => rest),
+        finished: true,
+      },
+    };
+  }, [history, runId]);
+
+  useEffect(() => {
+    if (!supportsManualAdvance || !setManualAdvanceHandler) {
+      return;
+    }
+
+    if (!conversationFinished) {
+      setManualAdvanceHandler(null);
+      setManualAdvanceDisabled?.(false);
+      return;
+    }
+
+    setManualAdvanceHandler(manualAdvanceHandler);
+    setManualAdvanceDisabled?.(false);
+
+    return () => {
+      setManualAdvanceHandler(null);
+      setManualAdvanceDisabled?.(false);
+    };
+  }, [
+    conversationFinished,
+    manualAdvanceHandler,
+    setManualAdvanceDisabled,
+    setManualAdvanceHandler,
+    supportsManualAdvance,
+  ]);
 
   const pushConfigChange = useCallback(
     (updater: (prev: SimulationChatConfig) => SimulationChatConfig) => {
