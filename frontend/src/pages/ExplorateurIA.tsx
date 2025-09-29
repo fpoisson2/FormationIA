@@ -2455,6 +2455,53 @@ let currentWorldSeed = WORLD_SEED;
 
 const DEFAULT_TERRAIN_THEME_ID: TerrainThemeId = "sand";
 
+export type ExplorateurExperienceMode = "guided" | "open-world";
+
+const DEFAULT_EXPERIENCE_MODE: ExplorateurExperienceMode = "guided";
+
+type ExperienceModeDefinition = {
+  label: string;
+  badge: string;
+  icon: string;
+  description: string;
+  designerDescription: string;
+  runtimeHint: string;
+};
+
+const EXPERIENCE_MODE_DEFINITIONS: Record<
+  ExplorateurExperienceMode,
+  ExperienceModeDefinition
+> = Object.freeze({
+  guided: {
+    label: "Parcours guidé",
+    badge: "Mode guidé",
+    icon: "🧭",
+    description:
+      "Les quartiers se débloquent dans un ordre conseillé avec un accompagnement constant.",
+    designerDescription:
+      "Le monde suit un déroulé linéaire : chaque quartier propose une mission cadrée avant de passer au suivant.",
+    runtimeHint:
+      "Avance quartier par quartier en suivant les missions proposées pour débloquer ton inventaire.",
+  },
+  "open-world": {
+    label: "Mode open world",
+    badge: "Mode open world",
+    icon: "🌍",
+    description:
+      "Exploration libre : l'explorateur·rice peut se déplacer sans contrainte et choisir son propre chemin.",
+    designerDescription:
+      "Le personnage se promène librement, rencontre d'autres personnages et débloque les objets via leurs échanges.",
+    runtimeHint:
+      "Mode libre : le personnage se promène pour aller parler à d'autres personnages afin d'aller récupérer les objets.",
+  },
+});
+
+const EXPERIENCE_MODE_OPTIONS = Object.freeze(
+  Object.entries(EXPERIENCE_MODE_DEFINITIONS) as Array<
+    [ExplorateurExperienceMode, ExperienceModeDefinition]
+  >
+);
+
 export interface ExplorateurIATerrainConfig {
   themeId: TerrainThemeId;
   seed: number;
@@ -2465,6 +2512,7 @@ export interface ExplorateurIAConfig {
   steps: StepDefinition[];
   quarterDesignerSteps: QuarterSteps;
   quarters: ExplorateurIAQuarterConfig[];
+  experienceMode: ExplorateurExperienceMode;
 }
 
 function sanitizeTerrainConfig(
@@ -2487,6 +2535,18 @@ function sanitizeTerrainConfig(
       ? Math.trunc(base.seed)
       : WORLD_SEED;
   return { themeId, seed } satisfies ExplorateurIATerrainConfig;
+}
+
+function sanitizeExperienceMode(
+  value: unknown
+): ExplorateurExperienceMode {
+  if (value === "open-world") {
+    return "open-world";
+  }
+  if (value === "guided") {
+    return "guided";
+  }
+  return DEFAULT_EXPERIENCE_MODE;
 }
 
 function getDefaultExplorateurSteps(): StepDefinition[] {
@@ -2516,6 +2576,7 @@ export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
     steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
     quarterDesignerSteps: designerSteps,
     quarters,
+    experienceMode: DEFAULT_EXPERIENCE_MODE,
   };
 }
 
@@ -2530,6 +2591,7 @@ export function sanitizeExplorateurIAConfig(
     steps?: unknown;
     quarters?: unknown;
     quarterDesignerSteps?: unknown;
+    experienceMode?: unknown;
   };
   const terrain = sanitizeTerrainConfig(base.terrain);
   const steps = sanitizeSteps(base.steps);
@@ -2537,6 +2599,7 @@ export function sanitizeExplorateurIAConfig(
     base.quarters,
     DEFAULT_EXPLORATEUR_QUARTERS
   );
+  const experienceMode = sanitizeExperienceMode(base.experienceMode);
   const derived = deriveQuarterData(quarters);
   const expandedQuarterSteps = expandQuarterSteps(
     steps.length > 0 ? steps : getDefaultExplorateurSteps(),
@@ -2553,6 +2616,7 @@ export function sanitizeExplorateurIAConfig(
     steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
     quarterDesignerSteps: designerSteps,
     quarters,
+    experienceMode,
   };
 }
 
@@ -4334,6 +4398,13 @@ export default function ExplorateurIA({
     [config]
   );
 
+  const experienceModeMeta = useMemo(
+    () => EXPERIENCE_MODE_DEFINITIONS[sanitizedConfig.experienceMode],
+    [sanitizedConfig.experienceMode]
+  );
+  const isOpenWorldExperience =
+    sanitizedConfig.experienceMode === "open-world";
+
   const derivedQuarterData = useMemo(
     () => deriveQuarterData(sanitizedConfig.quarters),
     [sanitizedConfig.quarters]
@@ -4423,6 +4494,9 @@ export default function ExplorateurIA({
         nextQuarters,
         expandedQuarterSteps
       );
+      const nextExperienceMode = sanitizeExperienceMode(
+        patch.experienceMode ?? sanitizedConfig.experienceMode
+      );
       const next: ExplorateurIAConfig = {
         terrain: {
           themeId:
@@ -4432,6 +4506,7 @@ export default function ExplorateurIA({
         steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
         quarterDesignerSteps: cloneQuarterStepMap(designerSteps),
         quarters: nextQuarters,
+        experienceMode: nextExperienceMode,
       };
       effectiveOnUpdateConfig(next);
     },
@@ -4465,6 +4540,13 @@ export default function ExplorateurIA({
     [emitConfig, sanitizedConfig.terrain.seed, sanitizedConfig.terrain.themeId]
   );
 
+  const emitExperienceMode = useCallback(
+    (mode: ExplorateurExperienceMode) => {
+      emitConfig({ experienceMode: mode });
+    },
+    [emitConfig]
+  );
+
   const isConfigDesignerView = isEditMode && activityContext == null;
 
   if (isConfigDesignerView) {
@@ -4474,6 +4556,7 @@ export default function ExplorateurIA({
         onUpdateQuarters={emitQuarterConfig}
         onUpdateQuarterDesignerSteps={emitQuarterDesignerSteps}
         onUpdateTerrain={emitTerrainConfig}
+        onUpdateExperienceMode={emitExperienceMode}
         onReset={() => {
           const defaultQuarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
             ...quarter,
@@ -4500,6 +4583,7 @@ export default function ExplorateurIA({
               themeId: DEFAULT_TERRAIN_THEME_ID,
               seed: WORLD_SEED,
             },
+            experienceMode: DEFAULT_EXPERIENCE_MODE,
           });
         }}
       />
@@ -5476,6 +5560,19 @@ export default function ExplorateurIA({
                   <span aria-hidden="true">←</span>
                   <span className="sr-only">Revenir à la liste des activités</span>
                 </button>
+                <span
+                  className={classNames(
+                    "inline-flex items-center gap-2 rounded-full border bg-slate-900/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur",
+                    isOpenWorldExperience
+                      ? "border-emerald-400/70 text-emerald-100"
+                      : "border-white/40 text-white"
+                  )}
+                  title={experienceModeMeta.description}
+                  aria-label={`Mode d'exploration : ${experienceModeMeta.label}`}
+                >
+                  <span aria-hidden="true">{experienceModeMeta.icon}</span>
+                  {experienceModeMeta.badge}
+                </span>
                 {isEditMode && (
                   <button
                     type="button"
@@ -5491,6 +5588,16 @@ export default function ExplorateurIA({
                 )}
               </div>
               <div className="pointer-events-auto flex flex-col items-end gap-2">
+                <div
+                  className={classNames(
+                    "max-w-xs rounded-2xl border bg-slate-900/80 px-3 py-2 text-left text-xs font-medium text-white shadow-sm backdrop-blur",
+                    isOpenWorldExperience
+                      ? "border-emerald-400/60"
+                      : "border-white/50"
+                  )}
+                >
+                  {experienceModeMeta.runtimeHint}
+                </div>
                 <button
                   type="button"
                   onClick={handleOpenInventory}
@@ -5815,6 +5922,7 @@ interface ConfigDesignerProps {
   onUpdateQuarters: (quarters: ExplorateurIAQuarterConfig[]) => void;
   onUpdateQuarterDesignerSteps: (steps: QuarterSteps) => void;
   onUpdateTerrain: (patch: Partial<ExplorateurIATerrainConfig>) => void;
+  onUpdateExperienceMode: (mode: ExplorateurExperienceMode) => void;
   onReset: () => void;
 }
 
@@ -5848,11 +5956,17 @@ function ExplorateurIAConfigDesigner({
   onUpdateQuarters,
   onUpdateQuarterDesignerSteps,
   onUpdateTerrain,
+  onUpdateExperienceMode,
   onReset,
 }: ConfigDesignerProps) {
   const nonGoalQuarterCount = useMemo(
     () => config.quarters.filter((quarter) => !quarter.isGoal).length,
     [config.quarters]
+  );
+
+  const experienceModeMeta = useMemo(
+    () => EXPERIENCE_MODE_DEFINITIONS[config.experienceMode],
+    [config.experienceMode]
   );
 
   const [expandedQuarterIds, setExpandedQuarterIds] = useState<QuarterId[]>([]);
@@ -5956,6 +6070,13 @@ function ExplorateurIAConfigDesigner({
       }
     },
     [onUpdateTerrain]
+  );
+
+  const handleExperienceModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      onUpdateExperienceMode(event.target.value as ExplorateurExperienceMode);
+    },
+    [onUpdateExperienceMode]
   );
 
   const handleDesignerStepConfigChange = useCallback(
@@ -6402,7 +6523,28 @@ function ExplorateurIAConfigDesigner({
             Réinitialiser
           </button>
         </div>
-        <dl className="grid gap-4 sm:grid-cols-3">
+        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Mode d'exploration
+            </dt>
+            <dd className="mt-2 space-y-2">
+              <select
+                value={config.experienceMode}
+                onChange={handleExperienceModeChange}
+                className="w-full rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+              >
+                {EXPERIENCE_MODE_OPTIONS.map(([value, meta]) => (
+                  <option key={value} value={value}>
+                    {meta.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-orange-700">
+                {experienceModeMeta.designerDescription}
+              </p>
+            </dd>
+          </div>
           <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
             <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
               Thème du terrain

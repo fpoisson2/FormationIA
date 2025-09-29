@@ -1647,7 +1647,7 @@ const createExplorateurWorldStep: StepSequenceFunctionTool<
     type: "function",
     name: "create_explorateur_world_step",
     description:
-      "Instancie le mini-monde Explorateur IA complet avec sa configuration (terrains, quartiers, missions).",
+      "Instancie le mini-monde Explorateur IA complet avec sa configuration (terrains, quartiers, missions). Le champ `config.experienceMode` permet de choisir entre le parcours guidé (défaut) et le mode \"open-world\" où le personnage explore librement la ville pour discuter avec d'autres personnages et récupérer les objets.",
     strict: true,
     parameters: {
       type: "object",
