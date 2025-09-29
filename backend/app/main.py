@@ -3710,29 +3710,48 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             payload["summary"] = summary
         return payload
 
-    def _ensure_content_list(content: Any) -> list[dict[str, Any]]:
+    def _resolve_text_type(role: str | None) -> str:
+        if role in {"system", "developer", "user"}:
+            return "input_text"
+        return "output_text"
+
+    def _normalize_text_item(role: str | None, text_value: str) -> dict[str, Any]:
+        return {"type": _resolve_text_type(role), "text": text_value}
+
+    def _coerce_mapping_item(role: str | None, item: Mapping[str, Any]) -> dict[str, Any]:
+        coerced = deepcopy(item)
+        item_type = coerced.get("type")
+        if item_type is None and "text" in coerced:
+            coerced["type"] = _resolve_text_type(role)
+        elif item_type == "text":
+            coerced["type"] = _resolve_text_type(role)
+        return coerced
+
+    def _ensure_content_list(content: Any, role: str | None) -> list[dict[str, Any]]:
         if isinstance(content, list):
             normalized: list[dict[str, Any]] = []
             for item in content:
                 if isinstance(item, Mapping):
-                    normalized.append(deepcopy(item))
+                    normalized.append(_coerce_mapping_item(role, item))
                 elif isinstance(item, str):
-                    normalized.append({"type": "text", "text": item})
+                    normalized.append(_normalize_text_item(role, item))
                 else:
-                    normalized.append({"type": "text", "text": json.dumps(item)})
+                    normalized.append(
+                        _normalize_text_item(role, json.dumps(item, default=str))
+                    )
             return normalized
         if isinstance(content, Mapping):
-            return [deepcopy(content)]
+            return [_coerce_mapping_item(role, content)]
         if isinstance(content, str):
-            return [{"type": "text", "text": content}]
+            return [_normalize_text_item(role, content)]
         if content is None:
             return []
-        return [{"type": "text", "text": json.dumps(content)}]
+        return [_normalize_text_item(role, json.dumps(content, default=str))]
 
     if "role" in message:
         role_message: dict[str, Any] = {"role": message["role"]}
         content = message.get("content")
-        role_message["content"] = _ensure_content_list(content)
+        role_message["content"] = _ensure_content_list(content, message.get("role"))
         if message.get("role") == "tool":
             tool_call_id = message.get("tool_call_id") or message.get("call_id")
             if tool_call_id is not None:
@@ -3803,7 +3822,8 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
     }
     if "role" not in fallback:
         fallback["role"] = "assistant"
-    fallback["content"] = _ensure_content_list(fallback.get("content"))
+    fallback_role = fallback.get("role")
+    fallback["content"] = _ensure_content_list(fallback.get("content"), fallback_role)
     return _maybe_attach_summary(fallback)
 
 
@@ -4358,8 +4378,16 @@ def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: S
             with client.responses.stream(
                 model=model,
                 input=[
-                    {"role": "system", "content": "Tu réponds en français et restes synthétique."},
-                    {"role": "user", "content": prompt},
+                    {
+                        "role": "system",
+                        "content": [
+                            {"type": "input_text", "text": "Tu réponds en français et restes synthétique."}
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": prompt}],
+                    },
                 ],
                 text={"verbosity": payload.verbosity},
                 reasoning={"effort": payload.thinking, "summary": "auto"},
@@ -4403,8 +4431,14 @@ def _handle_prompt_evaluation(payload: PromptEvaluationRequest) -> PromptEvaluat
         response = client.responses.create(
             model=model,
             input=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt},
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_message}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                },
             ],
             text=text_config,
             reasoning={"effort": payload.thinking, "summary": "auto"},
@@ -4466,8 +4500,16 @@ def _handle_flashcards(payload: FlashcardRequest) -> JSONResponse:
         response = client.responses.create(
             model=model,
             input=[
-                {"role": "system", "content": "Tu produis uniquement du JSON valide sans texte supplémentaire."},
-                {"role": "user", "content": prompt},
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "input_text", "text": "Tu produis uniquement du JSON valide sans texte supplémentaire."}
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                },
             ],
             text={"verbosity": payload.verbosity},
             reasoning={"effort": payload.thinking, "summary": "auto"},

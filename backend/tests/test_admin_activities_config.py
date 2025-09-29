@@ -1434,7 +1434,7 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
     assert tool_content["type"] == "output_text"
     assert isinstance(tool_content["text"], str) and tool_content["text"]
     assert second_input[5]["role"] == "user"
-    assert second_input[5]["content"][0]["type"] == "text"
+    assert second_input[5]["content"][0]["type"] == "input_text"
     assert second_input[5]["content"][0]["text"].startswith(
         "Corrige le plan selon les indications suivantes :"
     )
