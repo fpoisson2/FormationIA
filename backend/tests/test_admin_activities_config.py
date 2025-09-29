@@ -1424,10 +1424,13 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
     second_request = captured_requests[1]
     second_input = second_request["input"]
     assert second_input[3]["role"] == "assistant"
-    tool_call = second_input[3]["content"][0]
-    assert tool_call["type"] == "tool_call"
-    assert tool_call["name"] == "propose_step_sequence_plan"
-    assert isinstance(tool_call["arguments"], str)
+    assert second_input[3]["content"] == []
+    tool_calls = second_input[3].get("tool_calls")
+    assert isinstance(tool_calls, list) and len(tool_calls) == 1
+    tool_call = tool_calls[0]
+    assert tool_call["type"] == "function"
+    assert tool_call["function"]["name"] == "propose_step_sequence_plan"
+    assert isinstance(tool_call["function"]["arguments"], str)
     assert second_input[4]["role"] == "tool"
     assert second_input[4]["tool_call_id"] == tool_call["id"]
     tool_content = second_input[4]["content"][0]

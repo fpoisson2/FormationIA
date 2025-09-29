@@ -3810,14 +3810,18 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
                 arguments_text = json.dumps(arguments)
             except TypeError:
                 arguments_text = json.dumps(arguments, default=str)
+        function_call: dict[str, Any] = {"arguments": arguments_text}
+        name_value = message.get("name")
+        if isinstance(name_value, str) and name_value:
+            function_call["name"] = name_value
         payload = {
             "role": "assistant",
-            "content": [
+            "content": [],
+            "tool_calls": [
                 {
-                    "type": "tool_call",
                     "id": call_id,
-                    "name": message.get("name"),
-                    "arguments": arguments_text,
+                    "type": "function",
+                    "function": function_call,
                 }
             ],
         }
