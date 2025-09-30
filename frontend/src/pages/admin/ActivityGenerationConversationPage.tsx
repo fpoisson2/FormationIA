@@ -422,7 +422,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             </span>
           </p>
           <div className="rounded-2xl border border-sky-100 bg-white/90 p-3 text-xs text-sky-900/80">
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">
+            <pre className="max-h-64 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-xs">
               {JSON.stringify(toolCall.result, null, 2)}
             </pre>
           </div>
@@ -436,7 +436,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           Appel d'outil en attente
         </h3>
         <div className="rounded-2xl border border-sky-100 bg-white/95 p-3 text-xs text-sky-900/80">
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">
+          <pre className="max-h-64 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-xs">
             {JSON.stringify(toolCall.result ?? toolCall.arguments ?? {}, null, 2)}
           </pre>
         </div>
