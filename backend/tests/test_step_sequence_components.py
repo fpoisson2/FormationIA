@@ -376,6 +376,15 @@ def test_create_step_sequence_activity_sets_defaults() -> None:
     assert activity["stepSequence"] == []
 
 
+def test_create_step_sequence_activity_recovers_missing_component_key() -> None:
+    activity = create_step_sequence_activity(
+        activity_id="atelier",
+        metadata={"componentKey": None},
+    )
+
+    assert activity["componentKey"] == "step-sequence"
+
+
 def test_create_step_sequence_activity_keeps_metadata_and_steps() -> None:
     steps = [create_rich_content_step(step_id="intro", title="Intro")]
     activity = create_step_sequence_activity(

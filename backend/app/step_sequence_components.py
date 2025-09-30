@@ -175,6 +175,12 @@ def create_step_sequence_activity(
             }
         )
 
+    component_key = normalized_metadata["componentKey"]
+    if not isinstance(component_key, str) or not component_key.strip():
+        normalized_metadata["componentKey"] = "step-sequence"
+    else:
+        normalized_metadata["componentKey"] = component_key.strip()
+
     return {
         "id": str(activity_id),
         "componentKey": normalized_metadata["componentKey"],
