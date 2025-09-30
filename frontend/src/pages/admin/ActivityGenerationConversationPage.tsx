@@ -49,6 +49,50 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
   const pollIntervalRef = useRef<number | null>(null);
 
+  const generatedActivityId = useMemo(() => {
+    if (jobStatus?.activityId) {
+      return jobStatus.activityId;
+    }
+    if (conversation?.activityId) {
+      return conversation.activityId;
+    }
+    return null;
+  }, [conversation?.activityId, jobStatus?.activityId]);
+
+  const generatedActivityTitle = useMemo(() => {
+    if (jobStatus?.activityTitle) {
+      return jobStatus.activityTitle;
+    }
+    if (conversation?.activityTitle) {
+      return conversation.activityTitle;
+    }
+    return null;
+  }, [conversation?.activityTitle, jobStatus?.activityTitle]);
+
+  const generatedActivityPath = useMemo(() => {
+    const payload = jobStatus?.activity;
+    if (payload && typeof payload === "object") {
+      const pathValue = (payload as { path?: unknown }).path;
+      if (typeof pathValue === "string" && pathValue.trim()) {
+        return pathValue;
+      }
+      const cardValue = (payload as { card?: unknown }).card;
+      if (cardValue && typeof cardValue === "object") {
+        const ctaValue = (cardValue as { cta?: unknown }).cta;
+        if (ctaValue && typeof ctaValue === "object") {
+          const toValue = (ctaValue as { to?: unknown }).to;
+          if (typeof toValue === "string" && toValue.trim()) {
+            return toValue;
+          }
+        }
+      }
+    }
+    if (generatedActivityId) {
+      return `/activites/${generatedActivityId}`;
+    }
+    return null;
+  }, [generatedActivityId, jobStatus?.activity]);
+
   // Charge la conversation initiale
   useEffect(() => {
     if (!jobId) {
@@ -668,6 +712,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {conversation?.status === "complete" && generatedActivityPath ? (
+              <button
+                onClick={() => navigate(generatedActivityPath)}
+                className="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700"
+              >
+                Ouvrir {generatedActivityTitle ?? "l’activité"}
+              </button>
+            ) : null}
             <button
               onClick={() => setShowHistory(!showHistory)}
               className="rounded-full border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -766,11 +818,39 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                     </div>
                   </div>
                 </div>
+              ) : jobStatus?.status === "complete" ? (
+                <div className="space-y-3 rounded-3xl border border-green-200/70 bg-green-50/80 p-5 text-sm text-green-900 shadow-sm">
+                  <p>
+                    La génération est terminée. L’activité «
+                    {" "}
+                    {generatedActivityTitle ?? generatedActivityId ?? "sans titre"}
+                    {" "}
+                    » est prête à être testée.
+                  </p>
+                  {generatedActivityPath ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => navigate(generatedActivityPath)}
+                        className="inline-flex items-center justify-center rounded-full bg-green-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700"
+                      >
+                        Ouvrir l’activité
+                      </button>
+                      <button
+                        onClick={() => navigate("/activites")}
+                        className="inline-flex items-center justify-center rounded-full border border-green-500 px-4 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100"
+                      >
+                        Voir toutes les activités
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-green-800/70">
+                      L’identifiant de l’activité est {generatedActivityId ?? "indisponible"}. Accédez-y depuis le catalogue si nécessaire.
+                    </p>
+                  )}
+                </div>
               ) : (
                 <div className="rounded-3xl border border-gray-200/70 bg-white/90 p-4 text-xs text-gray-500">
-                  {jobStatus?.status === "complete"
-                    ? "La génération est terminée. Consultez l'activité finalisée depuis l'historique."
-                    : jobStatus?.status === "error"
+                  {jobStatus?.status === "error"
                     ? jobStatus.message ||
                       "La génération s'est interrompue. Vous pouvez relancer une nouvelle demande."
                     : "Aucune validation n'est requise pour le moment."}
