@@ -170,7 +170,7 @@ def create_step_sequence_activity(
                 "enabled": metadata.get("enabled"),
                 "header": deepcopy(metadata.get("header")),
                 "layout": deepcopy(metadata.get("layout")),
-                "card": deepcopy(metadata.get("card")),
+                "card": _normalize_card_metadata(metadata.get("card")),
                 "overrides": deepcopy(metadata.get("overrides")),
             }
         )
@@ -193,6 +193,67 @@ def create_step_sequence_activity(
         "stepSequence": list(steps) if steps else [],
         "overrides": normalized_metadata["overrides"],
     }
+
+
+def _normalize_card_metadata(raw_card: Any) -> dict[str, Any] | None:
+    """Return a defensive copy of ``raw_card`` with sane defaults.
+
+    The IA tooling occasionally emits a ``cta`` value as a plain string instead
+    of an object – the frontend expects ``{label, to}``.  This helper coerces the
+    structure while keeping the existing keys untouched when possible.
+    """
+
+    if not isinstance(raw_card, Mapping):
+        return None
+
+    normalized: dict[str, Any] = {key: deepcopy(value) for key, value in raw_card.items()}
+
+    highlights = normalized.get("highlights")
+    if isinstance(highlights, Sequence) and not isinstance(highlights, (str, bytes)):
+        sanitized_highlights = []
+        for item in highlights:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                sanitized_highlights.append(text)
+        normalized["highlights"] = sanitized_highlights
+    else:
+        normalized["highlights"] = []
+
+    normalized["cta"] = _normalize_card_cta(
+        normalized.get("cta"), fallback_label=str(normalized.get("title") or "").strip()
+    )
+
+    return normalized
+
+
+def _normalize_card_cta(cta: Any, *, fallback_label: str | None = None) -> dict[str, str] | None:
+    """Ensure ``cta`` matches the ``{label, to}`` structure required by the UI."""
+
+    if isinstance(cta, Mapping):
+        label = cta.get("label")
+        destination = cta.get("to")
+    elif isinstance(cta, str):
+        label = fallback_label
+        destination = cta
+    else:
+        return None
+
+    label_text = str(label).strip() if isinstance(label, str) else ""
+    destination_text = str(destination).strip() if isinstance(destination, str) else ""
+
+    if not destination_text:
+        return None
+
+    if not label_text:
+        label_text = fallback_label or ""
+        label_text = label_text.strip()
+
+    if not label_text:
+        label_text = "Découvrir l’activité"
+
+    return {"label": label_text, "to": destination_text}
 
 
 def _append_step(
