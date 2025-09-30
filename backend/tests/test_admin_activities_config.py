@@ -44,6 +44,18 @@ def _message_text(entry: Mapping[str, object]) -> str | None:
     return None
 
 
+def _is_tool_output_only_request(payload: Mapping[str, object]) -> bool:
+    inputs = payload.get("input")
+    if not isinstance(inputs, list) or not inputs:
+        return False
+    for item in inputs:
+        if not isinstance(item, Mapping):
+            return False
+        if item.get("type") != "function_call_output":
+            return False
+    return True
+
+
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "activities_config.json"
     monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
@@ -577,6 +589,8 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
@@ -643,15 +657,28 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             assert step["config"]["media"] == []
             assert step["config"]["sidebar"] is None
 
-            assert len(captured_requests) == 4
+            assert len(captured_requests) == 8
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 4
+            standard_requests = [
+                request
+                for request in captured_requests
+                if not _is_tool_output_only_request(request)
+            ]
+            assert len(standard_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
             created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
-                assert request["tools"] == expected_tools
                 assert request["conversation"] == created_conversation
+            for request in standard_requests:
+                assert request["tools"] == expected_tools
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
@@ -782,6 +809,8 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
@@ -839,15 +868,28 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             assert media_item.get("caption") is None
             assert isinstance(media_item.get("id"), str) and media_item["id"].startswith("intro-media")
 
-            assert len(captured_requests) == 4
+            assert len(captured_requests) == 8
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 4
+            standard_requests = [
+                request
+                for request in captured_requests
+                if not _is_tool_output_only_request(request)
+            ]
+            assert len(standard_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
             created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
-                assert request["tools"] == expected_tools
                 assert request["conversation"] == created_conversation
+            for request in standard_requests:
+                assert request["tools"] == expected_tools
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
@@ -961,6 +1003,8 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
@@ -1024,15 +1068,28 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             }
             assert step.get("composite") is None
 
-            assert len(captured_requests) == 4
+            assert len(captured_requests) == 8
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 4
+            standard_requests = [
+                request
+                for request in captured_requests
+                if not _is_tool_output_only_request(request)
+            ]
+            assert len(standard_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
             created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
-                assert request["tools"] == expected_tools
                 assert request["conversation"] == created_conversation
+            for request in standard_requests:
+                assert request["tools"] == expected_tools
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
@@ -1161,6 +1218,8 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
@@ -1306,6 +1365,8 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
@@ -1432,6 +1493,8 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
@@ -1501,20 +1564,32 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
     finally:
         app.dependency_overrides.clear()
 
-    assert len(captured_requests) == 2
+    assert len(captured_requests) == 4
     created_conversation = fake_client.conversations.created[0]
     for request in captured_requests:
         assert request["conversation"] == created_conversation
 
-    second_request = captured_requests[1]
-    second_input = second_request["input"]
-    assert len(second_input) == 2
-    tool_output = second_input[0]
-    assert tool_output["type"] == "function_call_output"
-    assert tool_output["call_id"] == "fc_call_plan"
-    assert json.loads(tool_output["output"])["overview"] == "Plan global"
+    tool_only_requests = [
+        request for request in captured_requests if _is_tool_output_only_request(request)
+    ]
+    assert len(tool_only_requests) == 2
+    standard_requests = [
+        request for request in captured_requests if not _is_tool_output_only_request(request)
+    ]
+    assert len(standard_requests) == 2
 
-    user_feedback = second_input[1]
+    first_tool = tool_only_requests[0]["input"][0]
+    assert first_tool["type"] == "function_call_output"
+    assert first_tool["call_id"] == "fc_call_plan"
+    assert json.loads(first_tool["output"])["overview"] == "Plan global"
+
+    second_tool = tool_only_requests[1]["input"][0]
+    assert second_tool["type"] == "function_call_output"
+    assert second_tool["call_id"] == "fc_call_plan_revision"
+    assert json.loads(second_tool["output"])["overview"] == "Plan ajusté"
+
+    user_request = standard_requests[1]
+    user_feedback = user_request["input"][0]
     assert user_feedback["role"] == "user"
     assert user_feedback["content"][0]["type"] == "input_text"
     assert user_feedback["content"][0]["text"].startswith(
@@ -1612,6 +1687,8 @@ def test_admin_generate_activity_allows_request_developer_message_override(
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
@@ -1762,6 +1839,8 @@ def test_admin_generate_activity_allows_request_system_message_override(
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response

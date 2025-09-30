@@ -4251,13 +4251,38 @@ def _run_activity_generation_job(job_id: str) -> None:
             )
             return
 
-        conversation.append(
-            {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": serialized_output,
-            }
-        )
+        tool_output_message = {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": serialized_output,
+        }
+        conversation.append(tool_output_message)
+
+        if conversation_id is not None:
+            try:
+                client.responses.create(
+                    model=model_name,
+                    input=[_serialize_conversation_entry(tool_output_message)],
+                    conversation=conversation_id,
+                    tools=tools,
+                    parallel_tool_calls=False,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Erreur lors de l'envoi du résultat d'outil au modèle",
+                    exc_info=exc,
+                )
+                _update_activity_generation_job(
+                    job_id,
+                    status="error",
+                    message="La génération a échoué lors de la transmission d'un résultat d'outil.",
+                    error=str(exc) or "Erreur lors de la transmission d'un résultat d'outil.",
+                    conversation=conversation,
+                    cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
+                )
+                return
 
         if name == "build_step_sequence_activity":
             _update_activity_generation_job(
@@ -4364,7 +4389,7 @@ def _run_activity_generation_job(job_id: str) -> None:
                 + ". Validez ou demandez une révision."
             )
 
-        pending_cursor = max(0, len(conversation) - 1)
+        pending_cursor = len(conversation)
 
         _update_activity_generation_job(
             job_id,
