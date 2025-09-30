@@ -1428,7 +1428,7 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
     assert function_call["name"] == "propose_step_sequence_plan"
     assert isinstance(function_call["arguments"], str)
     call_id = function_call["call_id"]
-    assert isinstance(call_id, str) and call_id.startswith("msg_")
+    assert isinstance(call_id, str) and call_id.startswith("fc_")
     function_output = second_input[4]
     assert function_output["type"] == "function_call_output"
     assert function_output["call_id"] == call_id

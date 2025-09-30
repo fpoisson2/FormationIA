@@ -3692,7 +3692,9 @@ def admin_save_landing_page_config_endpoint(
 _TOOL_CALL_ID_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
-def _normalize_tool_call_identifier(value: Any, fallback_seed: str | None = None) -> str:
+def _normalize_tool_call_identifier(
+    value: Any, fallback_seed: str | None = None, *, prefix: str = "msg_"
+) -> str:
     if isinstance(value, str):
         candidate = value.strip()
     elif value is None:
@@ -3712,11 +3714,30 @@ def _normalize_tool_call_identifier(value: Any, fallback_seed: str | None = None
     if not sanitized:
         sanitized = secrets.token_hex(8)
 
-    if not sanitized.startswith("msg_"):
-        sanitized = f"msg_{sanitized}"
+    known_prefixes = ("msg_", "fc_")
+    base_identifier = sanitized
+    while True:
+        matched_prefix = False
+        for known_prefix in known_prefixes:
+            if base_identifier.startswith(known_prefix):
+                base_identifier = base_identifier[len(known_prefix) :]
+                matched_prefix = True
+                break
+        if not matched_prefix:
+            break
+
+    base_identifier = base_identifier.lstrip("_")
+    if not base_identifier:
+        base_identifier = secrets.token_hex(8)
+
+    normalized_prefix = prefix if prefix else ""
+    if normalized_prefix and not normalized_prefix.endswith("_"):
+        normalized_prefix = f"{normalized_prefix}_"
+
+    normalized = f"{normalized_prefix}{base_identifier}"
 
     # Trim overly long identifiers to stay within service expectations
-    return sanitized[:120]
+    return normalized[:120]
 
 
 def _normalize_response_item(item: Any) -> dict[str, Any]:
@@ -3796,7 +3817,9 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
         )
         call_id = _normalize_tool_call_identifier(
-            message.get("call_id") or message.get("id"), fallback_seed=fallback_seed
+            message.get("call_id") or message.get("id"),
+            fallback_seed=fallback_seed,
+            prefix="fc_",
         )
         arguments = message.get("arguments")
         if isinstance(arguments, str):
@@ -3817,7 +3840,9 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         }
         message_id = message.get("id")
         if isinstance(message_id, str) and message_id:
-            payload["id"] = _normalize_tool_call_identifier(message_id, fallback_seed=fallback_seed)
+            payload["id"] = _normalize_tool_call_identifier(
+                message_id, fallback_seed=fallback_seed, prefix="fc_"
+            )
         status = message.get("status")
         if isinstance(status, str) and status:
             payload["status"] = status
@@ -3836,7 +3861,9 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
         )
         call_id = _normalize_tool_call_identifier(
-            message.get("call_id") or message.get("id"), fallback_seed=fallback_seed
+            message.get("call_id") or message.get("id"),
+            fallback_seed=fallback_seed,
+            prefix="fc_",
         )
         payload = {
             "type": "function_call_output",
@@ -3845,7 +3872,9 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         }
         message_id = message.get("id")
         if isinstance(message_id, str) and message_id:
-            payload["id"] = _normalize_tool_call_identifier(message_id, fallback_seed=fallback_seed)
+            payload["id"] = _normalize_tool_call_identifier(
+                message_id, fallback_seed=fallback_seed, prefix="fc_"
+            )
         status = message.get("status")
         if isinstance(status, str) and status:
             payload["status"] = status
@@ -3858,13 +3887,17 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         if message.get("role") == "tool":
             tool_call_id = message.get("tool_call_id") or message.get("call_id")
             if tool_call_id is not None:
-                role_message["tool_call_id"] = _normalize_tool_call_identifier(tool_call_id)
+                role_message["tool_call_id"] = _normalize_tool_call_identifier(
+                    tool_call_id, prefix="fc_"
+                )
             if message.get("name"):
                 role_message["name"] = message["name"]
         if message.get("role") == "assistant":
             call_id = message.get("call_id")
             if call_id is not None:
-                role_message["call_id"] = _normalize_tool_call_identifier(call_id)
+                role_message["call_id"] = _normalize_tool_call_identifier(
+                    call_id, prefix="fc_"
+                )
         for extra_key in ("metadata",):
             if extra_key in message:
                 role_message[extra_key] = deepcopy(message[extra_key])
@@ -4082,7 +4115,9 @@ def _run_activity_generation_job(job_id: str) -> None:
 
         raw_call_id = item.get("call_id") or item.get("id")
         fallback_seed = f"{name}_{iteration}_{len(conversation)}"
-        call_id = _normalize_tool_call_identifier(raw_call_id, fallback_seed=fallback_seed)
+        call_id = _normalize_tool_call_identifier(
+            raw_call_id, fallback_seed=fallback_seed, prefix="fc_"
+        )
         item["call_id"] = call_id
         raw_arguments = item.get("arguments")
         arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
