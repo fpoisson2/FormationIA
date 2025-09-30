@@ -10,10 +10,14 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4173,http://localhost:5173}
       API_AUTH_TOKEN: ${API_AUTH_TOKEN}
       PORT: "8001"
+    ports:
+      - "8001:8001"
     volumes:
       - ./lti-keys:/app/lti-keys
       - ./storage:/app/storage
-    network_mode: "host"
+    networks:
+      - default
+      - moodle-network
 
   frontend:
     build:
@@ -27,6 +31,8 @@ services:
       - backend
     ports:
       - "4173:80"
+    networks:
+      - default
 
 networks:
   moodle-network:
