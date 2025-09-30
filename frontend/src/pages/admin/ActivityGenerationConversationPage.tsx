@@ -687,11 +687,13 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       {/* Contenu principal */}
       <div className="flex flex-1 overflow-hidden">
         {/* Zone de conversation */}
-        <div className="flex-1 overflow-hidden">
-          <ConversationView
-            messages={conversation.messages}
-            isLoading={isPolling && conversation.status === "running"}
-          />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            <ConversationView
+              messages={conversation.messages}
+              isLoading={isPolling && conversation.status === "running"}
+            />
+          </div>
           {jobId && (
             <div className="border-t border-gray-100 bg-white/95 px-6 py-4">
               {jobStatus?.awaitingUserAction ? (
