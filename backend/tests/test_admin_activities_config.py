@@ -1,6 +1,8 @@
 import json
 from copy import deepcopy
 
+from collections.abc import Mapping
+
 from fastapi.testclient import TestClient
 
 import backend.app.main as main
@@ -8,9 +10,50 @@ from backend.app.admin_store import LocalUser
 from backend.app.main import (
     STEP_SEQUENCE_TOOL_DEFINITIONS,
     _require_admin_user,
-    _run_activity_generation_job,
     app,
 )
+
+
+def _auto_drive_generation(job_id: str) -> None:
+    while True:
+        main._run_activity_generation_job(job_id)
+        state = main._get_activity_generation_job(job_id)
+        if state is None or state.status in ("complete", "error"):
+            return
+        if not state.awaiting_user_action:
+            continue
+
+        pending_call = state.pending_tool_call
+        if pending_call is None:
+            raise AssertionError("Job is waiting for feedback but no pending tool call is registered.")
+
+        feedback = main.ActivityGenerationFeedbackRequest(action="approve")
+        main._process_activity_generation_feedback(job_id, feedback)
+
+
+def _message_text(entry: Mapping[str, object]) -> str | None:
+    content = entry.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, Mapping):
+                text = item.get("text")
+                if isinstance(text, str):
+                    return text
+    elif isinstance(content, str):
+        return content
+    return None
+
+
+def _is_tool_output_only_request(payload: Mapping[str, object]) -> bool:
+    inputs = payload.get("input")
+    if not isinstance(inputs, list) or not inputs:
+        return False
+    for item in inputs:
+        if not isinstance(item, Mapping):
+            return False
+        if item.get("type") != "function_call_output":
+            return False
+    return True
 
 
 def test_admin_save_activities_with_step_sequence(tmp_path, monkeypatch) -> None:
@@ -462,6 +505,26 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
                     [
                         {
                             "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
                             "name": "create_step_sequence_activity",
                             "call_id": "call_1",
                             "arguments": {"activityId": "atelier-intro"},
@@ -526,20 +589,37 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
-    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
     monkeypatch.setattr(
         "backend.app.main._launch_activity_generation_job",
-        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
+
+    job_id: str | None = None
 
     try:
         with TestClient(app) as client:
@@ -561,6 +641,8 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             status_payload = status_response.json()
 
             assert status_payload["status"] == "complete"
+            assert status_payload["awaitingUserAction"] is False
+            assert status_payload["pendingToolCall"] is None
             assert status_payload["activityId"] == "atelier-intro"
             assert status_payload["activityTitle"] == "atelier-intro"
             assert status_payload["reasoningSummary"] == "Synthèse"
@@ -575,23 +657,38 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             assert step["config"]["media"] == []
             assert step["config"]["sidebar"] is None
 
-            assert len(captured_requests) == 3
+            assert len(captured_requests) == 8
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 4
+            standard_requests = [
+                request
+                for request in captured_requests
+                if not _is_tool_output_only_request(request)
+            ]
+            assert len(standard_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
+            created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
+                assert request["conversation"] == created_conversation
+            for request in standard_requests:
                 assert request["tools"] == expected_tools
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
             assert (
-                first_request["input"][0]["content"]
+                _message_text(first_request["input"][0])
                 == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
             )
             assert first_request["input"][1]["role"] == "developer"
             assert (
-                first_request["input"][1]["content"]
+                _message_text(first_request["input"][1])
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
 
@@ -627,6 +724,26 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
     class FakeResponsesClient:
         def __init__(self) -> None:
             self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
                 DummyResponse(
                     [
                         {
@@ -692,18 +809,33 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
-    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
     monkeypatch.setattr(
         "backend.app.main._launch_activity_generation_job",
-        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -726,6 +858,8 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             assert status_response.status_code == 200
             status_payload = status_response.json()
             assert status_payload["status"] == "complete"
+            assert status_payload["awaitingUserAction"] is False
+            assert status_payload["pendingToolCall"] is None
 
             activity = status_payload["activity"]
             media_item = activity["stepSequence"][0]["config"]["media"][0]
@@ -734,23 +868,38 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             assert media_item.get("caption") is None
             assert isinstance(media_item.get("id"), str) and media_item["id"].startswith("intro-media")
 
-            assert len(captured_requests) == 3
+            assert len(captured_requests) == 8
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 4
+            standard_requests = [
+                request
+                for request in captured_requests
+                if not _is_tool_output_only_request(request)
+            ]
+            assert len(standard_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
+            created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
+                assert request["conversation"] == created_conversation
+            for request in standard_requests:
                 assert request["tools"] == expected_tools
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
             assert (
-                first_request["input"][0]["content"]
+                _message_text(first_request["input"][0])
                 == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
             )
             assert first_request["input"][1]["role"] == "developer"
             assert (
-                first_request["input"][1]["content"]
+                _message_text(first_request["input"][1])
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
 
@@ -785,6 +934,26 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
     class FakeResponsesClient:
         def __init__(self) -> None:
             self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
                 DummyResponse(
                     [
                         {
@@ -834,18 +1003,33 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
 
         def create(self, **kwargs):  # type: ignore[no-untyped-def]
             captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
             response = self._responses[self._index]
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
-    monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
     monkeypatch.setattr(
         "backend.app.main._launch_activity_generation_job",
-        lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+        lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -868,6 +1052,8 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             assert status_response.status_code == 200
             status_payload = status_response.json()
             assert status_payload["status"] == "complete"
+            assert status_payload["awaitingUserAction"] is False
+            assert status_payload["pendingToolCall"] is None
 
             activity = status_payload["activity"]
             step = activity["stepSequence"][0]
@@ -882,23 +1068,38 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             }
             assert step.get("composite") is None
 
-            assert len(captured_requests) == 3
+            assert len(captured_requests) == 8
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 4
+            standard_requests = [
+                request
+                for request in captured_requests
+                if not _is_tool_output_only_request(request)
+            ]
+            assert len(standard_requests) == 4
             expected_tools = [
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
+            created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
+                assert request["conversation"] == created_conversation
+            for request in standard_requests:
                 assert request["tools"] == expected_tools
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
             assert (
-                first_request["input"][0]["content"]
+                _message_text(first_request["input"][0])
                 == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
             )
             assert first_request["input"][1]["role"] == "developer"
             assert (
-                first_request["input"][1]["content"]
+                _message_text(first_request["input"][1])
                 == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
             )
 
@@ -951,6 +1152,26 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -997,18 +1218,34 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
+                self.conversations = FakeConversationsClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1031,11 +1268,11 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
         assert (
-            first_request["input"][0]["content"]
+            _message_text(first_request["input"][0])
             == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
         )
         assert first_request["input"][1]["role"] == "developer"
-        assert first_request["input"][1]["content"] == custom_message
+        assert _message_text(first_request["input"][1]) == custom_message
 
         persisted = json.loads(config_path.read_text(encoding="utf-8"))
         assert (
@@ -1084,6 +1321,26 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1108,18 +1365,33 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1141,10 +1413,10 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
 
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
-        assert first_request["input"][0]["content"] == custom_system_message
+        assert _message_text(first_request["input"][0]) == custom_system_message
         assert first_request["input"][1]["role"] == "developer"
         assert (
-            first_request["input"][1]["content"]
+            _message_text(first_request["input"][1])
             == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
         )
 
@@ -1158,6 +1430,337 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
         )
     finally:
         app.dependency_overrides.clear()
+
+
+def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    captured_requests: list[dict[str, object]] = []
+
+    class DummyResponse:
+        def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+            self.output = output
+
+    class FakeResponsesClient:
+        def __init__(self) -> None:
+            self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Introduction",
+                                        "objective": "Lancer l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        }
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan_revision",
+                            "arguments": {
+                                "overview": "Plan ajusté",
+                                "steps": [
+                                    {
+                                        "id": "intro",
+                                        "title": "Nouvelle introduction",
+                                        "objective": "Clarifier les attentes",
+                                    }
+                                ],
+                                "notes": "Prendre en compte les retours",
+                            },
+                        }
+                    ]
+                ),
+            ]
+            self._index = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
+            response = self._responses[self._index]
+            self._index += 1
+            return response
+
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
+
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id: main._run_activity_generation_job(job_id),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Révision"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["awaitingUserAction"] is True
+            assert status_payload["pendingToolCall"]["name"] == "propose_step_sequence_plan"
+
+            feedback = {
+                "action": "revise",
+                "message": "Précise davantage la progression.",
+            }
+            feedback_response = client.post(
+                f"/api/admin/activities/generate/{job_id}/respond",
+                json=feedback,
+            )
+            assert feedback_response.status_code == 200, feedback_response.text
+
+            updated_status = client.get(
+                f"/api/admin/activities/generate/{job_id}"
+            )
+            assert updated_status.status_code == 200
+            updated_payload = updated_status.json()
+            assert updated_payload["awaitingUserAction"] is True
+            assert updated_payload["pendingToolCall"]["name"] == "propose_step_sequence_plan"
+
+    finally:
+        app.dependency_overrides.clear()
+
+    assert len(captured_requests) == 4
+    created_conversation = fake_client.conversations.created[0]
+    for request in captured_requests:
+        assert request["conversation"] == created_conversation
+
+    tool_only_requests = [
+        request for request in captured_requests if _is_tool_output_only_request(request)
+    ]
+    assert len(tool_only_requests) == 2
+    standard_requests = [
+        request for request in captured_requests if not _is_tool_output_only_request(request)
+    ]
+    assert len(standard_requests) == 2
+
+    first_tool = tool_only_requests[0]["input"][0]
+    assert first_tool["type"] == "function_call_output"
+    assert first_tool["call_id"] == "call_plan"
+    assert json.loads(first_tool["output"])["overview"] == "Plan global"
+
+    second_tool = tool_only_requests[1]["input"][0]
+    assert second_tool["type"] == "function_call_output"
+    assert second_tool["call_id"] == "call_plan_revision"
+    assert json.loads(second_tool["output"])["overview"] == "Plan ajusté"
+
+    user_request = standard_requests[1]
+    user_feedback = user_request["input"][0]
+    assert user_feedback["role"] == "user"
+    assert user_feedback["content"][0]["type"] == "input_text"
+    assert user_feedback["content"][0]["text"].startswith(
+        "Corrige le plan selon les indications suivantes :"
+    )
+
+    assert isinstance(job_id, str)
+    job_state = main._get_activity_generation_job(job_id)
+    assert job_state is not None
+    assert len(job_state.conversation) >= 5
+    plan_call = job_state.conversation[3]
+    assert plan_call.get("type") == "function_call"
+    assert plan_call.get("name") == "propose_step_sequence_plan"
+    plan_output = job_state.conversation[4]
+    assert plan_output.get("type") == "function_call_output"
+
+
+def test_activity_generation_defers_additional_tool_calls_until_validation(
+    monkeypatch,
+) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    captured_requests: list[dict[str, object]] = []
+
+    class DummyResponse:
+        def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+            self.output = output
+
+    class FakeResponsesClient:
+        def __init__(self) -> None:
+            self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "phase-1",
+                                        "title": "Phase 1",
+                                        "objective": "Introduire l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        },
+                        {
+                            "type": "function_call",
+                            "name": "create_rich_content_step",
+                            "call_id": "call_unexpected_step",
+                            "arguments": {
+                                "step_id": "phase-1",
+                                "title": "Phase 1",
+                                "body": "Contenu préliminaire",
+                            },
+                        },
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "create_rich_content_step",
+                            "call_id": "call_step",
+                            "arguments": {
+                                "step_id": "phase-1",
+                                "title": "Phase 1",
+                                "body": "Contenu préliminaire",
+                            },
+                        }
+                    ]
+                ),
+            ]
+            self._index = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
+            response = self._responses[self._index]
+            self._index += 1
+            return response
+
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
+
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id: main._run_activity_generation_job(job_id),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Organisation"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["awaitingUserAction"] is True
+            assert status_payload["pendingToolCall"]["name"] == "propose_step_sequence_plan"
+
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 2
+
+            plan_result = json.loads(tool_only_requests[0]["input"][0]["output"])
+            assert plan_result["overview"] == "Plan global"
+
+            deferral_payload = json.loads(tool_only_requests[1]["input"][0]["output"])
+            assert deferral_payload["status"] == "skipped"
+            assert deferral_payload["tool"] == "create_rich_content_step"
+            assert "plan" in deferral_payload["message"].lower()
+
+            feedback_response = client.post(
+                f"/api/admin/activities/generate/{job_id}/respond",
+                json={"action": "approve"},
+            )
+            assert feedback_response.status_code == 200, feedback_response.text
+
+            next_status = client.get(
+                f"/api/admin/activities/generate/{job_id}"
+            )
+            assert next_status.status_code == 200
+            next_payload = next_status.json()
+            assert next_payload["awaitingUserAction"] is True
+            assert next_payload["pendingToolCall"]["name"] == "create_rich_content_step"
+
+    finally:
+        app.dependency_overrides.clear()
+
+    assert len(captured_requests) >= 5
+    tool_only_requests = [
+        request for request in captured_requests if _is_tool_output_only_request(request)
+    ]
+    assert len(tool_only_requests) == 3
+
+    step_payload = json.loads(tool_only_requests[-1]["input"][0]["output"])
+    assert step_payload["component"] == "rich-content"
 
 
 def test_admin_generate_activity_allows_request_developer_message_override(
@@ -1196,6 +1799,26 @@ def test_admin_generate_activity_allows_request_developer_message_override(
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1220,18 +1843,33 @@ def test_admin_generate_activity_allows_request_developer_message_override(
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1255,11 +1893,11 @@ def test_admin_generate_activity_allows_request_developer_message_override(
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
         assert (
-            first_request["input"][0]["content"]
+            _message_text(first_request["input"][0])
             == main.DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE
         )
         assert first_request["input"][1]["role"] == "developer"
-        assert first_request["input"][1]["content"] == override_message
+        assert _message_text(first_request["input"][1]) == override_message
 
         persisted = json.loads(config_path.read_text(encoding="utf-8"))
         assert (
@@ -1313,6 +1951,26 @@ def test_admin_generate_activity_allows_request_system_message_override(
                         [
                             {
                                 "type": "function_call",
+                                "name": "propose_step_sequence_plan",
+                                "call_id": "call_plan",
+                                "arguments": {
+                                    "overview": "Plan global",
+                                    "steps": [
+                                        {
+                                            "id": "intro",
+                                            "title": "Introduction",
+                                            "objective": "Lancer l'activité",
+                                        }
+                                    ],
+                                    "notes": None,
+                                },
+                            }
+                        ]
+                    ),
+                    DummyResponse(
+                        [
+                            {
+                                "type": "function_call",
                                 "name": "create_step_sequence_activity",
                                 "call_id": "call_1",
                                 "arguments": {"activityId": "atelier-intro"},
@@ -1337,18 +1995,33 @@ def test_admin_generate_activity_allows_request_system_message_override(
 
             def create(self, **kwargs):  # type: ignore[no-untyped-def]
                 captured_requests.append(kwargs)
+                if _is_tool_output_only_request(kwargs):
+                    return DummyResponse([])
                 response = self._responses[self._index]
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
 
-        monkeypatch.setattr("backend.app.main._ensure_client", lambda: FakeClient())
+        fake_client = FakeClient()
+        monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
         monkeypatch.setattr(
             "backend.app.main._launch_activity_generation_job",
-            lambda job_id, payload: _run_activity_generation_job(job_id, payload),
+            lambda job_id: _auto_drive_generation(job_id),
         )
         main._ACTIVITY_GENERATION_JOBS.clear()
 
@@ -1371,10 +2044,10 @@ def test_admin_generate_activity_allows_request_system_message_override(
 
         first_request = captured_requests[0]
         assert first_request["input"][0]["role"] == "system"
-        assert first_request["input"][0]["content"] == override_system_message
+        assert _message_text(first_request["input"][0]) == override_system_message
         assert first_request["input"][1]["role"] == "developer"
         assert (
-            first_request["input"][1]["content"]
+            _message_text(first_request["input"][1])
             == main.DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE
         )
 

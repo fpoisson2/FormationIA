@@ -20,6 +20,7 @@ import {
   type ActivityGenerationDetailsPayload,
   type GenerateActivityPayload,
   type ActivityGenerationAdminConfig,
+  type ActivityGenerationJobToolCall,
 } from "../api";
 import {
   getDefaultActivityDefinitions,
@@ -101,6 +102,21 @@ function extractErrorMessage(error: unknown): string | null {
   }
 
   return trimmed;
+}
+
+interface PendingPlanStep {
+  id?: string;
+  title?: string;
+  objective?: string;
+  description?: string | null;
+  deliverable?: string | null;
+  duration?: string | null;
+}
+
+interface PendingPlanResult {
+  overview?: string;
+  steps?: PendingPlanStep[];
+  notes?: string | null;
 }
 
 interface ActivityGenerationFormState {
@@ -715,8 +731,109 @@ function ActivitySelector(): JSX.Element {
     useState<string | null>(null);
   const [generationReasoningSummary, setGenerationReasoningSummary] =
     useState<string | null>(null);
+  const [pendingGenerationToolCall, setPendingGenerationToolCall] =
+    useState<ActivityGenerationJobToolCall | null>(null);
+  const [isAwaitingGenerationValidation, setIsAwaitingGenerationValidation] =
+    useState(false);
+  const [generationFeedback, setGenerationFeedback] = useState("");
+  const [isSendingGenerationFeedback, setIsSendingGenerationFeedback] =
+    useState(false);
+  const [generationFeedbackError, setGenerationFeedbackError] =
+    useState<string | null>(null);
   const [stepSequenceEditorActivityId, setStepSequenceEditorActivityId] =
     useState<string | null>(null);
+  const pendingToolCallContent = useMemo(() => {
+    if (!pendingGenerationToolCall) {
+      return null;
+    }
+    if (pendingGenerationToolCall.name === "propose_step_sequence_plan") {
+      const plan = pendingGenerationToolCall.result as PendingPlanResult | null;
+      const steps = Array.isArray(plan?.steps) ? plan?.steps ?? [] : [];
+      return (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-sky-900">Plan proposé</h4>
+          {plan?.overview ? (
+            <p className="text-sm text-sky-900/90">{plan.overview}</p>
+          ) : null}
+          {steps.length > 0 ? (
+            <ol className="space-y-2 text-sm text-sky-900">
+              {steps.map((step, index) => (
+                <li
+                  key={step.id ?? `plan-step-${index}`}
+                  className="rounded-xl border border-sky-200/60 bg-white/90 p-3"
+                >
+                  <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-sky-600">
+                    <span>Étape {index + 1}</span>
+                    {step.duration ? <span>{step.duration}</span> : null}
+                  </div>
+                  <p className="text-sm font-semibold text-sky-900">{step.title ?? step.id ?? `Étape ${index + 1}`}</p>
+                  {step.objective ? (
+                    <p className="text-xs text-sky-900/80">Objectif : {step.objective}</p>
+                  ) : null}
+                  {step.description ? (
+                    <p className="text-xs text-sky-900/70">{step.description}</p>
+                  ) : null}
+                  {step.deliverable ? (
+                    <p className="text-xs text-sky-900/70">Livrable attendu : {step.deliverable}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+          {plan?.notes ? (
+            <p className="text-xs text-sky-900/70">Notes : {plan.notes}</p>
+          ) : null}
+        </div>
+      );
+    }
+    if (pendingGenerationToolCall.name === "create_step_sequence_activity") {
+      const result = pendingGenerationToolCall.result as Record<string, unknown> | null;
+      const metadataCandidate =
+        (result?.metadata as Record<string, unknown> | undefined) ||
+        (pendingGenerationToolCall.arguments["metadata"] as Record<string, unknown> | undefined);
+      const activityId =
+        (typeof result?.id === "string" && result?.id) ||
+        (typeof pendingGenerationToolCall.arguments["activityId"] === "string"
+          ? (pendingGenerationToolCall.arguments["activityId"] as string)
+          : null);
+      return (
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-sky-900">Structure de l’activité</h4>
+          {activityId ? (
+            <p className="text-xs text-sky-900/80">Identifiant suggéré : <span className="font-semibold">{activityId}</span></p>
+          ) : null}
+          {metadataCandidate ? (
+            <pre className="max-h-48 overflow-auto rounded-lg bg-sky-50/70 p-3 text-xs leading-relaxed text-sky-900">
+              {JSON.stringify(metadataCandidate, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      );
+    }
+    if (pendingGenerationToolCall.name.startsWith("create_")) {
+      const step = pendingGenerationToolCall.result as StepDefinition | null;
+      const componentKey = step ? resolveStepComponentKey(step) ?? step.component ?? "" : "";
+      return (
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-sky-900">Étape générée</h4>
+          {step?.id ? (
+            <p className="text-xs text-sky-900/80">Identifiant : <span className="font-semibold">{step.id}</span></p>
+          ) : null}
+          {componentKey ? (
+            <p className="text-xs text-sky-900/80">Composant : {getStepTypeLabel(componentKey)}</p>
+          ) : null}
+          <pre className="max-h-56 overflow-auto rounded-lg bg-sky-50/70 p-3 text-xs leading-relaxed text-sky-900">
+            {JSON.stringify(step?.config ?? step, null, 2)}
+          </pre>
+        </div>
+      );
+    }
+    return (
+      <pre className="max-h-56 overflow-auto rounded-lg bg-sky-50/70 p-3 text-xs leading-relaxed text-sky-900">
+        {JSON.stringify(pendingGenerationToolCall.result, null, 2)}
+      </pre>
+    );
+  }, [pendingGenerationToolCall]);
   const generationControllerRef = useRef<AbortController | null>(null);
   const loadConfigMutexRef = useRef(false);
   const [generationStatusMessage, setGenerationStatusMessage] =
@@ -1082,14 +1199,31 @@ function ActivitySelector(): JSX.Element {
           if (status.reasoningSummary) {
             setGenerationReasoningSummary(status.reasoningSummary.trim());
           }
+          if (status.awaitingUserAction) {
+            setIsAwaitingGenerationValidation(true);
+            setPendingGenerationToolCall(status.pendingToolCall ?? null);
+            if (!status.message) {
+              setGenerationStatusMessage("Validation requise avant de poursuivre.");
+            }
+          } else {
+            setIsAwaitingGenerationValidation(false);
+            setPendingGenerationToolCall(null);
+            setGenerationFeedback("");
+            setGenerationFeedbackError(null);
+          }
 
           if (status.status === "complete") {
             const reasoning = status.reasoningSummary?.trim() ?? null;
             setGenerationReasoningSummary(reasoning);
             setGenerationStatusMessage(null);
             setGenerationError(null);
+            setIsAwaitingGenerationValidation(false);
+            setPendingGenerationToolCall(null);
+            setGenerationFeedback("");
+            setGenerationFeedbackError(null);
 
             try {
+
               const resolved = await refreshGeneratedActivity(
                 status.activityId ?? null
               );
@@ -1133,6 +1267,10 @@ function ActivitySelector(): JSX.Element {
             setGenerationReasoningSummary(null);
             setGenerationStatusMessage(null);
             setActiveGenerationJobId(null);
+            setIsAwaitingGenerationValidation(false);
+            setPendingGenerationToolCall(null);
+            setGenerationFeedback("");
+            setGenerationFeedbackError(null);
             return;
           }
 
@@ -1152,6 +1290,10 @@ function ActivitySelector(): JSX.Element {
         setGenerationReasoningSummary(null);
         setGenerationStatusMessage(null);
         setActiveGenerationJobId(null);
+        setIsAwaitingGenerationValidation(false);
+        setPendingGenerationToolCall(null);
+        setGenerationFeedback("");
+        setGenerationFeedbackError(null);
       } finally {
         if (generationControllerRef.current === controller) {
           generationControllerRef.current = null;
@@ -1668,6 +1810,10 @@ function ActivitySelector(): JSX.Element {
     setGenerationStatusMessage("Initialisation de la génération...");
     setLastGeneratedActivityId(null);
     setActiveGenerationJobId(null);
+    setPendingGenerationToolCall(null);
+    setIsAwaitingGenerationValidation(false);
+    setGenerationFeedback("");
+    setGenerationFeedbackError(null);
 
     generationControllerRef.current?.abort();
     const controller = new AbortController();
@@ -1763,6 +1909,96 @@ function ActivitySelector(): JSX.Element {
     trimmedGenerationForm,
     token,
   ]);
+  const handleGenerationFeedbackChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      setGenerationFeedback(event.target.value);
+      if (generationFeedbackError) {
+        setGenerationFeedbackError(null);
+      }
+    },
+    [generationFeedbackError]
+  );
+
+  const handleApprovePendingToolCall = useCallback(async () => {
+    if (!activeGenerationJobId || isSendingGenerationFeedback) {
+      return;
+    }
+    setIsSendingGenerationFeedback(true);
+    setGenerationFeedbackError(null);
+    try {
+      const status = await admin.activities.respondToGenerationJob(
+        activeGenerationJobId,
+        { action: "approve" },
+        token
+      );
+      setGenerationStatusMessage(status.message ?? null);
+      if (status.reasoningSummary) {
+        setGenerationReasoningSummary(status.reasoningSummary.trim());
+      }
+      setPendingGenerationToolCall(status.pendingToolCall ?? null);
+      setIsAwaitingGenerationValidation(status.awaitingUserAction);
+      if (!status.awaitingUserAction) {
+        setGenerationFeedback("");
+      }
+    } catch (error) {
+      const detail =
+        extractErrorMessage(error) ||
+        (error instanceof Error ? error.message : null);
+      setGenerationFeedbackError(
+        detail ?? "Impossible d'envoyer la validation. Veuillez réessayer."
+      );
+    } finally {
+      setIsSendingGenerationFeedback(false);
+    }
+  }, [
+    activeGenerationJobId,
+    isSendingGenerationFeedback,
+    token,
+  ]);
+
+  const handleRequestGenerationRevision = useCallback(async () => {
+    if (!activeGenerationJobId || isSendingGenerationFeedback) {
+      return;
+    }
+    const trimmed = generationFeedback.trim();
+    if (!trimmed) {
+      setGenerationFeedbackError("Merci de préciser les ajustements souhaités.");
+      return;
+    }
+    setIsSendingGenerationFeedback(true);
+    setGenerationFeedbackError(null);
+    try {
+      const status = await admin.activities.respondToGenerationJob(
+        activeGenerationJobId,
+        { action: "revise", message: trimmed },
+        token
+      );
+      setGenerationStatusMessage(status.message ?? null);
+      if (status.reasoningSummary) {
+        setGenerationReasoningSummary(status.reasoningSummary.trim());
+      }
+      setPendingGenerationToolCall(status.pendingToolCall ?? null);
+      setIsAwaitingGenerationValidation(status.awaitingUserAction);
+      if (!status.awaitingUserAction) {
+        setGenerationFeedback("");
+      }
+    } catch (error) {
+      const detail =
+        extractErrorMessage(error) ||
+        (error instanceof Error ? error.message : null);
+      setGenerationFeedbackError(
+        detail ?? "Impossible d'envoyer la demande de correction."
+      );
+    } finally {
+      setIsSendingGenerationFeedback(false);
+    }
+  }, [
+    activeGenerationJobId,
+    generationFeedback,
+    isSendingGenerationFeedback,
+    token,
+  ]);
+
 
   const activitiesToDisplay = isEditMode
     ? editableActivities
@@ -1935,6 +2171,55 @@ function ActivitySelector(): JSX.Element {
               <p className="text-xs text-sky-800/80">{generationStatusMessage}</p>
             ) : null}
           </div>
+          {pendingToolCallContent ? (
+            <div className="space-y-3 rounded-2xl border border-sky-200/70 bg-white/80 p-4 shadow-sm">
+              {pendingToolCallContent}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-sky-900">
+                  {pendingGenerationToolCall?.name === "propose_step_sequence_plan"
+                    ? "Commentaires sur le plan (optionnel)"
+                    : "Commentaires sur cette étape (optionnel)"}
+                </label>
+                <textarea
+                  value={generationFeedback}
+                  onChange={handleGenerationFeedbackChange}
+                  rows={3}
+                  placeholder={
+                    pendingGenerationToolCall?.name === "propose_step_sequence_plan"
+                      ? "Indiquez les ajustements souhaités pour le plan..."
+                      : "Précisez les corrections à apporter..."
+                  }
+                  className="w-full resize-none rounded-xl border border-sky-200/70 bg-white/90 px-3 py-2 text-sm text-sky-900 focus:border-orange-400 focus:outline-none"
+                  disabled={isSendingGenerationFeedback}
+                />
+                {generationFeedbackError ? (
+                  <p className="text-xs text-red-600">{generationFeedbackError}</p>
+                ) : null}
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleApprovePendingToolCall}
+                  disabled={isSendingGenerationFeedback}
+                  className="inline-flex items-center justify-center rounded-full border border-green-500/40 bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:border-green-600 hover:bg-green-700 disabled:cursor-not-allowed disabled:border-green-200 disabled:bg-green-200"
+                >
+                  {pendingGenerationToolCall?.name === "propose_step_sequence_plan"
+                    ? "Valider le plan"
+                    : "Valider cette étape"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRequestGenerationRevision}
+                  disabled={isSendingGenerationFeedback}
+                  className="inline-flex items-center justify-center rounded-full border border-orange-500/40 bg-white px-4 py-2 text-sm font-semibold text-orange-700 transition hover:border-orange-600 hover:text-orange-800 disabled:cursor-not-allowed disabled:border-orange-200 disabled:text-orange-300"
+                >
+                  {pendingGenerationToolCall?.name === "propose_step_sequence_plan"
+                    ? "Demander une révision du plan"
+                    : "Demander une correction"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {generationError ? (

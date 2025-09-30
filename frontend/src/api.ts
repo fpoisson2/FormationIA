@@ -498,6 +498,20 @@ export interface GenerateActivityPayload {
 }
 
 
+export interface ActivityGenerationJobToolCall {
+  name: string;
+  callId?: string | null;
+  arguments: Record<string, unknown>;
+  result: unknown;
+  argumentsText?: string;
+}
+
+export interface ActivityGenerationFeedbackPayload {
+  action: "approve" | "revise";
+  message?: string | null;
+}
+
+
 export type ActivityGenerationJobStatus =
   | "pending"
   | "running"
@@ -513,6 +527,8 @@ export interface ActivityGenerationJob {
   activityTitle?: string | null;
   activity?: Record<string, unknown> | null;
   error?: string | null;
+  awaitingUserAction: boolean;
+  pendingToolCall?: ActivityGenerationJobToolCall | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -609,6 +625,24 @@ export const admin = {
         withAdminCredentials(
           {
             signal: options?.signal,
+          },
+          token
+        )
+      ),
+    respondToGenerationJob: async (
+      jobId: string,
+      payload: ActivityGenerationFeedbackPayload,
+      token?: string | null
+    ): Promise<ActivityGenerationJob> =>
+      fetchJson<ActivityGenerationJob>(
+        `${API_BASE_URL}/admin/activities/generate/${jobId}/respond`,
+        withAdminCredentials(
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
           },
           token
         )

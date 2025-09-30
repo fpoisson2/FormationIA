@@ -1155,7 +1155,93 @@ STEP_SEQUENCE_ACTIVITY_TOOL_DEFINITION: dict[str, Any] = {
 }
 
 
+PLAN_STEP_SCHEMA = _strict_object_schema(
+    {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "objective": {"type": "string"},
+        "description": _nullable_schema({"type": "string"}),
+        "deliverable": _nullable_schema({"type": "string"}),
+        "duration": _nullable_schema({"type": "string"}),
+    }
+)
+
+
+def propose_step_sequence_plan(
+    *,
+    overview: str,
+    steps: Sequence[Mapping[str, Any]],
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Return a structured outline describing the upcoming activity."""
+
+    if not overview.strip():
+        raise ValueError("Le plan doit contenir un aperçu synthétique.")
+
+    normalized_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, Mapping):
+            raise ValueError("Chaque entrée du plan doit être un objet JSON.")
+        current = {}
+        for key in ("id", "title", "objective", "description", "deliverable", "duration"):
+            if key in step:
+                current[key] = step[key]
+        missing = [field for field in ("id", "title", "objective") if not current.get(field)]
+        if missing:
+            raise ValueError(
+                "Les entrées du plan doivent inclure id, title et objective : "
+                f"élément {index} incomplet"
+            )
+        current["id"] = str(current["id"]).strip()
+        current["title"] = str(current["title"]).strip()
+        current["objective"] = str(current["objective"]).strip()
+        for optional in ("description", "deliverable", "duration"):
+            value = current.get(optional)
+            if value is None:
+                continue
+            text = str(value).strip()
+            current[optional] = text or None
+        normalized_steps.append(current)
+
+    if not normalized_steps:
+        raise ValueError("Le plan doit contenir au moins une étape.")
+
+    normalized_notes: str | None = None
+    if notes is not None:
+        stripped_notes = str(notes).strip()
+        normalized_notes = stripped_notes or None
+
+    return {
+        "overview": overview.strip(),
+        "steps": normalized_steps,
+        "notes": normalized_notes,
+    }
+
+
+STEP_SEQUENCE_PLAN_TOOL_DEFINITION: dict[str, Any] = {
+    "type": "function",
+    "name": "propose_step_sequence_plan",
+    "description": "Propose un plan détaillé de l'activité avant de générer les étapes.",
+    "strict": True,
+    "parameters": _strict_object_schema(
+        {
+            "overview": {
+                "type": "string",
+                "description": "Résumé global présentant l'intention de l'activité.",
+            },
+            "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": PLAN_STEP_SCHEMA,
+            },
+            "notes": _nullable_schema({"type": "string"}),
+        }
+    ),
+}
+
+
 STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
+    STEP_SEQUENCE_PLAN_TOOL_DEFINITION,
     {
         "type": "function",
         "name": "create_step_sequence_activity",
@@ -1461,6 +1547,7 @@ STEP_SEQUENCE_TOOL_DEFINITIONS: list[dict[str, Any]] = [
 
 
 STEP_SEQUENCE_TOOLKIT: dict[str, Callable[..., Any]] = {
+    "propose_step_sequence_plan": propose_step_sequence_plan,
     "create_step_sequence_activity": create_step_sequence_activity,
     "create_rich_content_step": create_rich_content_step,
     "create_form_step": create_form_step,

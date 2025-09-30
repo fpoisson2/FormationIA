@@ -70,7 +70,8 @@ MAX_STEPS_PER_ACTION = 20
 DEFAULT_PLAN_MODEL = "gpt-5-mini"
 DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
-DEFAULT_SIMULATION_CHAT_MODEL = "gpt-5-mini"
+MAX_ACTIVITY_GENERATION_ITERATIONS = 12
+DEFAULT_SIMULATION_CHAT_MODEL = "gpt-5-nano"
 DEFAULT_SIMULATION_CHAT_VERBOSITY = "medium"
 DEFAULT_SIMULATION_CHAT_THINKING = "medium"
 
@@ -85,7 +86,8 @@ DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE = " ".join(
 DEFAULT_ACTIVITY_GENERATION_DEVELOPER_MESSAGE = "\n".join(
     [
         "Utilise exclusivement les fonctions fournies pour construire une activité StepSequence cohérente.",
-        "Commence par create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète.",
+        "Commence impérativement par propose_step_sequence_plan pour décrire le déroulé global.",
+        "Une fois le plan validé, appelle create_step_sequence_activity pour initialiser l'activité, enchaîne avec les create_* adaptées pour définir chaque étape, puis finalise en appelant build_step_sequence_activity lorsque la configuration est complète.",
         "Chaque étape doit rester alignée avec les objectifs fournis et renseigne la carte d'activité ainsi que le header avec des formulations concises, inclusives et professionnelles.",
         "",
         "Exigences de conception :",
@@ -1892,8 +1894,38 @@ class _ActivityGenerationJobState:
     activity_title: str | None = None
     activity_payload: dict[str, Any] | None = None
     error: str | None = None
+    model_name: str = "gpt-5-mini"
+    verbosity: Literal["low", "medium", "high"] = "medium"
+    thinking: Literal["minimal", "medium", "high"] = "medium"
+    payload: ActivityGenerationRequest | None = None
+    conversation: list[dict[str, Any]] = field(default_factory=list)
+    conversation_id: str | None = None
+    conversation_cursor: int = 0
+    cached_steps: dict[str, StepDefinition] = field(default_factory=dict)
+    awaiting_user_action: bool = False
+    pending_tool_call: dict[str, Any] | None = None
+    expecting_plan: bool = True
+    iteration: int = 0
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+
+
+class ActivityGenerationFeedbackRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    action: Literal["approve", "revise"]
+    message: str | None = Field(default=None, max_length=1200)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "ActivityGenerationFeedbackRequest":
+        if isinstance(self.message, str):
+            trimmed = self.message.strip()
+            self.message = trimmed or None
+        if self.action == "revise" and not self.message:
+            raise ValueError(
+                "Un message explicite est requis pour demander une correction."
+            )
+        return self
 
 
 class ActivityGenerationJobStatus(BaseModel):
@@ -1907,6 +1939,10 @@ class ActivityGenerationJobStatus(BaseModel):
     activity_title: str | None = Field(default=None, alias="activityTitle")
     activity: dict[str, Any] | None = None
     error: str | None = None
+    awaiting_user_action: bool = Field(default=False, alias="awaitingUserAction")
+    pending_tool_call: dict[str, Any] | None = Field(
+        default=None, alias="pendingToolCall"
+    )
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -1915,7 +1951,14 @@ _ACTIVITY_GENERATION_JOBS: dict[str, _ActivityGenerationJobState] = {}
 _ACTIVITY_GENERATION_LOCK = Lock()
 
 
-def _create_activity_generation_job() -> _ActivityGenerationJobState:
+def _create_activity_generation_job(
+    payload: ActivityGenerationRequest,
+    conversation: Sequence[Mapping[str, Any]],
+    *,
+    model_name: str,
+) -> _ActivityGenerationJobState:
+    payload_copy = payload.model_copy(deep=True)
+    conversation_copy = [deepcopy(message) for message in conversation]
     while True:
         candidate = secrets.token_hex(8)
         with _ACTIVITY_GENERATION_LOCK:
@@ -1924,6 +1967,11 @@ def _create_activity_generation_job() -> _ActivityGenerationJobState:
             job = _ActivityGenerationJobState(
                 id=candidate,
                 message="Tâche de génération en file d'attente.",
+                payload=payload_copy,
+                conversation=conversation_copy,
+                model_name=model_name,
+                verbosity=payload.verbosity,
+                thinking=payload.thinking,
             )
             _ACTIVITY_GENERATION_JOBS[candidate] = job
             return deepcopy(job)
@@ -1945,6 +1993,14 @@ def _update_activity_generation_job(
     activity_title: str | None = None,
     activity_payload: dict[str, Any] | None = None,
     error: str | None = None,
+    conversation: Sequence[Mapping[str, Any]] | None = None,
+    conversation_id: str | None = None,
+    conversation_cursor: int | None = None,
+    cached_steps: Mapping[str, StepDefinition] | None = None,
+    awaiting_user_action: bool | None = None,
+    pending_tool_call: Mapping[str, Any] | None = None,
+    expecting_plan: bool | None = None,
+    iteration: int | None = None,
 ) -> _ActivityGenerationJobState | None:
     with _ACTIVITY_GENERATION_LOCK:
         job = _ACTIVITY_GENERATION_JOBS.get(job_id)
@@ -1965,6 +2021,28 @@ def _update_activity_generation_job(
             job.activity_payload = deepcopy(activity_payload)
         if error is not None:
             job.error = error
+        if conversation is not None:
+            job.conversation = [deepcopy(message) for message in conversation]
+            if conversation_cursor is None and job.conversation_cursor > len(job.conversation):
+                job.conversation_cursor = len(job.conversation)
+        if cached_steps is not None:
+            job.cached_steps = {str(key): deepcopy(value) for key, value in cached_steps.items()}
+        if awaiting_user_action is not None:
+            job.awaiting_user_action = awaiting_user_action
+        if pending_tool_call is not None:
+            job.pending_tool_call = deepcopy(pending_tool_call)
+        if pending_tool_call is None and awaiting_user_action is False:
+            job.pending_tool_call = None
+        if expecting_plan is not None:
+            job.expecting_plan = expecting_plan
+        if iteration is not None:
+            job.iteration = iteration
+        if conversation_id is not None:
+            job.conversation_id = conversation_id
+        if conversation_cursor is not None:
+            job.conversation_cursor = max(
+                0, min(conversation_cursor, len(job.conversation))
+            )
 
         job.updated_at = datetime.utcnow()
         return deepcopy(job)
@@ -1982,6 +2060,10 @@ def _serialize_activity_generation_job(
         activityTitle=job.activity_title,
         activity=deepcopy(job.activity_payload) if job.activity_payload is not None else None,
         error=job.error,
+        awaitingUserAction=job.awaiting_user_action,
+        pendingToolCall=deepcopy(job.pending_tool_call)
+        if job.pending_tool_call is not None
+        else None,
         createdAt=job.created_at,
         updatedAt=job.updated_at,
     )
@@ -3868,285 +3950,873 @@ def admin_save_landing_page_config_endpoint(
     return {"ok": True, "message": "Configuration sauvegardée avec succès"}
 
 
-def _run_activity_generation_job(
-    job_id: str, payload: ActivityGenerationRequest
-) -> None:
-    job = _update_activity_generation_job(
-        job_id, status="running", message="Initialisation de la génération..."
+_TOOL_CALL_ID_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _normalize_tool_call_identifier(
+    value: Any, fallback_seed: str | None = None, *, prefix: str = "msg_"
+) -> str:
+    if isinstance(value, str):
+        candidate = value.strip()
+    elif value is None:
+        candidate = ""
+    else:
+        candidate = str(value).strip()
+
+    if not candidate and fallback_seed:
+        candidate = fallback_seed
+
+    if not candidate:
+        candidate = secrets.token_hex(8)
+
+    sanitized = _TOOL_CALL_ID_SANITIZE_RE.sub("_", candidate)
+    sanitized = sanitized.strip("_")
+
+    if not sanitized:
+        sanitized = secrets.token_hex(8)
+
+    known_prefixes = ("msg_", "fc_", "call_")
+    base_identifier = sanitized
+    while True:
+        matched_prefix = False
+        for known_prefix in known_prefixes:
+            if base_identifier.startswith(known_prefix):
+                base_identifier = base_identifier[len(known_prefix) :]
+                matched_prefix = True
+                break
+        if not matched_prefix:
+            break
+
+    base_identifier = base_identifier.lstrip("_")
+    if not base_identifier:
+        base_identifier = secrets.token_hex(8)
+
+    normalized_prefix = prefix if prefix else ""
+    if normalized_prefix and not normalized_prefix.endswith("_"):
+        normalized_prefix = f"{normalized_prefix}_"
+
+    normalized = f"{normalized_prefix}{base_identifier}"
+
+    # Trim overly long identifiers to stay within service expectations
+    return normalized[:120]
+
+
+def _normalize_response_item(item: Any) -> dict[str, Any]:
+    if isinstance(item, Mapping):
+        return deepcopy(item)
+    normalized: dict[str, Any] = {}
+    for key in (
+        "type",
+        "role",
+        "content",
+        "name",
+        "arguments",
+        "call_id",
+        "id",
+        "text",
+        "output",
+        "status",
+    ):
+        value = getattr(item, key, None)
+        if value is not None:
+            normalized[key] = value
+    return normalized
+
+
+def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a Responses API compatible message built from ``message``."""
+
+    summary = message.get("summary")
+
+    def _maybe_attach_summary(payload: dict[str, Any]) -> dict[str, Any]:
+        if summary is not None:
+            payload["summary"] = summary
+        return payload
+
+    def _resolve_text_type(role: str | None) -> str:
+        if role in {"system", "developer", "user"}:
+            return "input_text"
+        return "output_text"
+
+    def _normalize_text_item(role: str | None, text_value: str) -> dict[str, Any]:
+        return {"type": _resolve_text_type(role), "text": text_value}
+
+    def _coerce_mapping_item(role: str | None, item: Mapping[str, Any]) -> dict[str, Any]:
+        coerced = deepcopy(item)
+        item_type = coerced.get("type")
+        if item_type is None and "text" in coerced:
+            coerced["type"] = _resolve_text_type(role)
+        elif item_type == "text":
+            coerced["type"] = _resolve_text_type(role)
+        return coerced
+
+    def _ensure_content_list(content: Any, role: str | None) -> list[dict[str, Any]]:
+        if isinstance(content, list):
+            normalized: list[dict[str, Any]] = []
+            for item in content:
+                if isinstance(item, Mapping):
+                    normalized.append(_coerce_mapping_item(role, item))
+                elif isinstance(item, str):
+                    normalized.append(_normalize_text_item(role, item))
+                else:
+                    normalized.append(
+                        _normalize_text_item(role, json.dumps(item, default=str))
+                    )
+            return normalized
+        if isinstance(content, Mapping):
+            return [_coerce_mapping_item(role, content)]
+        if isinstance(content, str):
+            return [_normalize_text_item(role, content)]
+        if content is None:
+            return []
+        return [_normalize_text_item(role, json.dumps(content, default=str))]
+
+    message_type = message.get("type")
+
+    if message_type == "function_call":
+        fallback_seed = (
+            f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
+        )
+        call_id = _normalize_tool_call_identifier(
+            message.get("call_id") or message.get("id"),
+            fallback_seed=fallback_seed,
+            prefix="call",
+        )
+        arguments = message.get("arguments")
+        if isinstance(arguments, str):
+            arguments_text = arguments
+        else:
+            try:
+                arguments_text = json.dumps(arguments)
+            except TypeError:
+                arguments_text = json.dumps(arguments, default=str)
+        name_value = message.get("name")
+        if not isinstance(name_value, str) or not name_value:
+            name_value = "unknown_function"
+        payload: dict[str, Any] = {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": name_value,
+            "arguments": arguments_text,
+        }
+        message_id = message.get("id")
+        if isinstance(message_id, str) and message_id:
+            payload["id"] = _normalize_tool_call_identifier(
+                message_id, fallback_seed=fallback_seed, prefix="fc_"
+            )
+        status = message.get("status")
+        if isinstance(status, str) and status:
+            payload["status"] = status
+        return _maybe_attach_summary(payload)
+
+    if message_type == "function_call_output":
+        output = message.get("output")
+        if isinstance(output, str):
+            output_text = output
+        else:
+            try:
+                output_text = json.dumps(output)
+            except TypeError:
+                output_text = json.dumps(output, default=str)
+        fallback_seed = (
+            f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
+        )
+        call_id = _normalize_tool_call_identifier(
+            message.get("call_id") or message.get("id"),
+            fallback_seed=fallback_seed,
+            prefix="call",
+        )
+        payload = {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": output_text,
+        }
+        message_id = message.get("id")
+        if isinstance(message_id, str) and message_id:
+            payload["id"] = _normalize_tool_call_identifier(
+                message_id, fallback_seed=fallback_seed, prefix="fc_"
+            )
+        status = message.get("status")
+        if isinstance(status, str) and status:
+            payload["status"] = status
+        return _maybe_attach_summary(payload)
+
+    if "role" in message:
+        role_message: dict[str, Any] = {"role": message["role"]}
+        content = message.get("content")
+        role_message["content"] = _ensure_content_list(content, message.get("role"))
+        if message.get("role") == "tool":
+            tool_call_id = message.get("tool_call_id") or message.get("call_id")
+            if tool_call_id is not None:
+                role_message["tool_call_id"] = _normalize_tool_call_identifier(
+                    tool_call_id, prefix="call"
+                )
+            if message.get("name"):
+                role_message["name"] = message["name"]
+        if message.get("role") == "assistant":
+            call_id = message.get("call_id")
+            if call_id is not None:
+                role_message["call_id"] = _normalize_tool_call_identifier(
+                    call_id, prefix="call"
+                )
+        for extra_key in ("metadata",):
+            if extra_key in message:
+                role_message[extra_key] = deepcopy(message[extra_key])
+        return _maybe_attach_summary(role_message)
+
+    fallback = {
+        key: deepcopy(value)
+        for key, value in message.items()
+        if key not in {"type", "summary", "id"}
+    }
+    if "role" not in fallback:
+        fallback["role"] = "assistant"
+    fallback_role = fallback.get("role")
+    fallback["content"] = _ensure_content_list(fallback.get("content"), fallback_role)
+    return _maybe_attach_summary(fallback)
+
+
+def _serialize_conversation_for_responses(
+    conversation: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return a list of messages compliant with the Responses API."""
+
+    serialized: list[dict[str, Any]] = []
+    for message in conversation:
+        try:
+            serialized.append(_serialize_conversation_entry(message))
+        except Exception:  # pragma: no cover - defensive
+            serialized.append({"role": "assistant", "content": []})
+    return serialized
+
+
+def _prepare_activity_generation_iteration(
+    job_id: str,
+) -> tuple[
+    ActivityGenerationRequest,
+    list[dict[str, Any]],
+    dict[str, StepDefinition],
+    bool,
+    str,
+    Literal["low", "medium", "high"],
+    Literal["minimal", "medium", "high"],
+    int,
+    str | None,
+    int,
+] | None:
+    with _ACTIVITY_GENERATION_LOCK:
+        job = _ACTIVITY_GENERATION_JOBS.get(job_id)
+        if job is None:
+            return None
+        if job.status in ("complete", "error"):
+            return None
+        if job.payload is None:
+            job.status = "error"
+            job.message = "Configuration de génération indisponible."
+            job.error = "Payload absent"
+            job.awaiting_user_action = False
+            job.pending_tool_call = None
+            job.updated_at = datetime.utcnow()
+            return None
+        if job.iteration >= MAX_ACTIVITY_GENERATION_ITERATIONS:
+            job.status = "error"
+            job.message = (
+                "Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations."
+            )
+            job.error = "Complétion absente"
+            job.awaiting_user_action = False
+            job.pending_tool_call = None
+            job.updated_at = datetime.utcnow()
+            return None
+        if job.awaiting_user_action:
+            return None
+
+        iteration = job.iteration + 1
+        job.iteration = iteration
+        job.status = "running"
+        job.message = (
+            "Appel au modèle (itération "
+            f"{iteration}/{MAX_ACTIVITY_GENERATION_ITERATIONS})..."
+        )
+        job.pending_tool_call = None
+        job.awaiting_user_action = False
+        job.updated_at = datetime.utcnow()
+        payload_copy = job.payload.model_copy(deep=True)
+        conversation_copy = [deepcopy(message) for message in job.conversation]
+        cached_steps_copy = {
+            str(key): deepcopy(value) for key, value in job.cached_steps.items()
+        }
+        expecting_plan = job.expecting_plan
+        model_name = job.model_name
+        verbosity = job.verbosity
+        thinking = job.thinking
+    return (
+        payload_copy,
+        conversation_copy,
+        cached_steps_copy,
+        expecting_plan,
+        model_name,
+        verbosity,
+        thinking,
+        iteration,
+        job.conversation_id,
+        job.conversation_cursor,
     )
-    if job is None:
+
+
+def _run_activity_generation_job(job_id: str) -> None:
+    prepared = _prepare_activity_generation_iteration(job_id)
+    if prepared is None:
         return
+
+    (
+        payload,
+        conversation,
+        cached_steps,
+        expecting_plan,
+        model_name,
+        verbosity,
+        thinking,
+        iteration,
+        conversation_id,
+        conversation_cursor,
+    ) = prepared
+
+    pending_messages = conversation[conversation_cursor:]
+    if not pending_messages:
+        logger.debug(
+            "Aucune mise à jour de conversation à transmettre pour le job %s", job_id
+        )
+        _update_activity_generation_job(
+            job_id,
+            message="En attente d'une nouvelle instruction utilisateur...",
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
+        )
+        return
+
+    tools = [
+        *STEP_SEQUENCE_TOOL_DEFINITIONS,
+        {"type": "web_search"},
+    ]
 
     try:
         client = _ensure_client()
-        model = _validate_model(payload.model)
-        prompt = _build_activity_generation_prompt(
-            payload.details, payload.existing_activity_ids
-        )
-
-        system_message = _resolve_activity_generation_system_message(payload)
-        developer_message = _resolve_activity_generation_developer_message(payload)
-
-        conversation: list[dict[str, Any]] = [
-            {"role": "system", "content": system_message},
-            {"role": "developer", "content": developer_message},
-            {"role": "user", "content": prompt},
-        ]
-        cached_steps: dict[str, StepDefinition] = {}
-        tools = [
-            *STEP_SEQUENCE_TOOL_DEFINITIONS,
-            {"type": "web_search"},
-        ]
-
-        def _remember_step(result: Any) -> None:
-            if not isinstance(result, Mapping):
-                return
-            component = result.get("component")
-            step_id = result.get("id")
-            if component is None or step_id is None:
-                return
-            cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
-
-        reasoning_summary: str | None = None
-        max_iterations = 12
-
-        for iteration in range(max_iterations):
+        if conversation_id is None:
+            created_conversation = client.conversations.create()
+            conversation_id = getattr(created_conversation, "id", None)
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RuntimeError("Conversation ID manquant")
             _update_activity_generation_job(
-                job_id,
-                status="running",
-                message=(
-                    "Appel au modèle (itération "
-                    f"{iteration + 1}/{max_iterations})..."
-                ),
+                job_id, conversation_id=conversation_id
             )
 
-            try:
-                response = client.responses.create(
-                    model=model,
-                    input=conversation,
-                    tools=tools,
-                    parallel_tool_calls=False,
-                    text={"verbosity": payload.verbosity},
-                    reasoning={"effort": payload.thinking, "summary": "auto"},
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.exception(
-                    "Erreur lors de l'appel au modèle de génération", exc_info=exc
-                )
-                detail = str(exc) or "Erreur du service de génération."
-                _update_activity_generation_job(
-                    job_id,
-                    status="error",
-                    message="La génération a échoué lors de l'appel au modèle.",
-                    error=detail,
-                )
-                return
+        serialized_input = _serialize_conversation_for_responses(pending_messages)
+        if not serialized_input:
+            raise RuntimeError("Conversation vide à transmettre au modèle")
 
-            _update_activity_generation_job(
-                job_id, status="running", message="Analyse de la réponse du modèle..."
-            )
-
-            reasoning_summary = _extract_reasoning_summary(response) or reasoning_summary
-            if reasoning_summary:
-                _update_activity_generation_job(
-                    job_id, reasoning_summary=reasoning_summary
-                )
-
-            output_items = getattr(response, "output", None)
-            if not output_items:
-                continue
-
-            filtered_items: list[Any] = []
-            for item in output_items:
-                item_type = getattr(item, "type", None) or (
-                    item.get("type") if isinstance(item, dict) else None
-                )
-                if item_type == "web_search_call":
-                    logger.debug("Ignoring web_search_call output: %r", item)
-                    continue
-                filtered_items.append(item)
-
-            conversation.extend(filtered_items)
-
-            for item in filtered_items:
-                item_type = getattr(item, "type", None) or (
-                    item.get("type") if isinstance(item, dict) else None
-                )
-                if item_type != "function_call":
-                    continue
-
-                name = getattr(item, "name", None) or (
-                    item.get("name") if isinstance(item, dict) else None
-                )
-                if not name:
-                    continue
-
-                call_id = getattr(item, "call_id", None) or (
-                    item.get("call_id") if isinstance(item, dict) else None
-                )
-                raw_arguments = getattr(item, "arguments", None)
-                if raw_arguments is None and isinstance(item, dict):
-                    raw_arguments = item.get("arguments")
-
-                arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
-                python_arguments = normalize_tool_arguments(arguments_obj)
-
-                if name == "build_step_sequence_activity":
-                    merged_steps = _enrich_steps_argument(
-                        python_arguments.get("steps"), cached_steps
-                    )
-                    if merged_steps:
-                        python_arguments["steps"] = merged_steps
-                        arguments_obj["steps"] = deepcopy(merged_steps)
-                        try:
-                            arguments_text = json.dumps(arguments_obj)
-                        except TypeError:
-                            arguments_text = None
-
-                tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
-                if tool_callable is None:
-                    _update_activity_generation_job(
-                        job_id,
-                        status="error",
-                        message=f"L'outil {name} n'est pas pris en charge par le backend.",
-                        error=f"Outil inconnu: {name}",
-                    )
-                    return
-
-                try:
-                    result = tool_callable(**python_arguments)
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.exception(
-                        "Erreur lors de l'exécution de l'outil %s", name, exc_info=exc
-                    )
-                    detail = str(exc) or "Erreur lors de l'exécution d'un outil."
-                    _update_activity_generation_job(
-                        job_id,
-                        status="error",
-                        message="La génération a échoué lors de l'exécution d'un outil.",
-                        error=detail,
-                    )
-                    return
-
-                if name == "create_step_sequence_activity":
-                    activity_identifier = (
-                        python_arguments.get("activity_id")
-                        or arguments_obj.get("activityId")
-                        or arguments_obj.get("activity_id")
-                    )
-                    if isinstance(activity_identifier, str):
-                        _update_activity_generation_job(
-                            job_id,
-                            activity_id=activity_identifier,
-                            message="Structure de l'activité initialisée.",
-                        )
-
-                if name.startswith("create_") and name != "create_step_sequence_activity":
-                    _remember_step(result)
-                    step_count = len(cached_steps)
-                    highlight = _extract_step_highlight(result)
-                    message = (
-                        f"Étape {step_count} générée"
-                        + (f" – {highlight}" if highlight else "")
-                    )
-                    _update_activity_generation_job(job_id, message=message)
-
-                try:
-                    serialized_output = json.dumps(result)
-                except TypeError as exc:  # pragma: no cover - defensive
-                    logger.exception("Résultat d'outil non sérialisable", exc_info=exc)
-                    _update_activity_generation_job(
-                        job_id,
-                        status="error",
-                        message="Résultat d'outil non sérialisable.",
-                        error="Résultat d'outil non sérialisable",
-                    )
-                    return
-
-                conversation.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": serialized_output,
-                    }
-                )
-
-                if name == "build_step_sequence_activity":
-                    _update_activity_generation_job(
-                        job_id, message="Finalisation de l'activité..."
-                    )
-
-                    try:
-                        persisted = _persist_generated_activity(result)
-                    except HTTPException as exc:
-                        _update_activity_generation_job(
-                            job_id,
-                            status="error",
-                            message="Échec de la sauvegarde de l'activité générée.",
-                            error=str(exc.detail),
-                        )
-                        return
-                    except Exception as exc:  # pragma: no cover - defensive
-                        logger.exception(
-                            "Erreur lors de la sauvegarde de l'activité générée",
-                            exc_info=exc,
-                        )
-                        _update_activity_generation_job(
-                            job_id,
-                            status="error",
-                            message="Échec de la sauvegarde de l'activité générée.",
-                            error=str(exc) or "Erreur inconnue",
-                        )
-                        return
-
-                    activity_title = None
-                    card = persisted.get("card")
-                    if isinstance(card, Mapping):
-                        raw_title = card.get("title")
-                        if isinstance(raw_title, str):
-                            cleaned = raw_title.strip()
-                            activity_title = cleaned or None
-
-                    _update_activity_generation_job(
-                        job_id,
-                        status="complete",
-                        message="Activité générée et enregistrée.",
-                        reasoning_summary=reasoning_summary,
-                        activity_id=persisted.get("id"),
-                        activity_title=activity_title or persisted.get("id"),
-                        activity_payload=persisted,
-                    )
-                    return
-
-        _update_activity_generation_job(
-            job_id,
-            status="error",
-            message="Le modèle n'a pas renvoyé d'activité complète après plusieurs itérations.",
-            error="Complétion absente",
+        response = client.responses.create(
+            model=model_name,
+            input=serialized_input,
+            conversation=conversation_id,
+            tools=tools,
+            parallel_tool_calls=False,
+            text={"verbosity": verbosity},
+            reasoning={"effort": thinking, "summary": "auto"},
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
-            "Erreur inattendue lors de la génération d'activité", exc_info=exc
+            "Erreur lors de l'appel au modèle de génération", exc_info=exc
         )
-        detail = str(exc) or "Erreur interne lors de la génération."
+        detail = str(exc) or "Erreur du service de génération."
         _update_activity_generation_job(
             job_id,
             status="error",
-            message="La génération a échoué.",
+            message="La génération a échoué lors de l'appel au modèle.",
             error=detail,
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
+        )
+        return
+
+    reasoning_summary = _extract_reasoning_summary(response)
+    if reasoning_summary:
+        _update_activity_generation_job(
+            job_id,
+            reasoning_summary=reasoning_summary,
+            conversation_id=conversation_id,
         )
 
+    output_items = getattr(response, "output", None)
+    if not output_items:
+        _update_activity_generation_job(
+            job_id,
+            message="La réponse du modèle était vide, nouvelle tentative...",
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
+        )
+        _launch_activity_generation_job(job_id)
+        return
 
-def _launch_activity_generation_job(
-    job_id: str, payload: ActivityGenerationRequest
-) -> None:
+    filtered_items: list[dict[str, Any]] = []
+    for item in output_items:
+        normalized = _normalize_response_item(item)
+        if not normalized:
+            continue
+        if normalized.get("type") == "web_search_call":
+            logger.debug("Ignoring web_search_call output: %r", item)
+            continue
+        filtered_items.append(normalized)
+
+    if not filtered_items:
+        _update_activity_generation_job(
+            job_id,
+            message="La réponse du modèle n'a pas pu être interprétée, nouvelle tentative...",
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
+        )
+        _launch_activity_generation_job(job_id)
+        return
+
+    conversation.extend(filtered_items)
+
+    def _remember_step(result: Any) -> None:
+        if not isinstance(result, Mapping):
+            return
+        component = result.get("component")
+        step_id = result.get("id")
+        if component is None or step_id is None:
+            return
+        cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
+
+    def _submit_tool_output_message(
+        message: dict[str, Any],
+        *,
+        failure_message: str = "La génération a échoué lors de la transmission d'un résultat d'outil.",
+    ) -> bool:
+        conversation.append(message)
+
+        if conversation_id is not None:
+            try:
+                client.responses.create(
+                    model=model_name,
+                    input=[_serialize_conversation_entry(message)],
+                    conversation=conversation_id,
+                    tools=tools,
+                    parallel_tool_calls=False,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Erreur lors de l'envoi du résultat d'outil au modèle",
+                    exc_info=exc,
+                )
+                _update_activity_generation_job(
+                    job_id,
+                    status="error",
+                    message=failure_message,
+                    error=str(exc) or failure_message,
+                    conversation=conversation,
+                    cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
+                )
+                return False
+
+        return True
+
+    def _acknowledge_additional_tool_calls(
+        remaining_items: Sequence[Mapping[str, Any]],
+        *,
+        reason: Literal["plan_pending", "pending_validation"],
+    ) -> bool:
+        if not remaining_items:
+            return True
+
+        if reason == "plan_pending":
+            explanation = (
+                "Appel ignoré : le plan doit être validé par l'administrateur avant de poursuivre."
+            )
+        else:
+            explanation = (
+                "Appel ignoré : attends la validation de l'étape en cours avant de continuer."
+            )
+
+        for extra in remaining_items:
+            if extra.get("type") != "function_call":
+                continue
+
+            extra_name_value = extra.get("name")
+            extra_name = extra_name_value if isinstance(extra_name_value, str) else None
+
+            fallback_seed = (
+                f"{(extra_name or 'outil')}_{iteration}_{len(conversation)}"
+            )
+            call_id = _normalize_tool_call_identifier(
+                extra.get("call_id") or extra.get("id"),
+                fallback_seed=fallback_seed,
+                prefix="call",
+            )
+            extra["call_id"] = call_id
+
+            payload: dict[str, Any] = {
+                "status": "skipped",
+                "message": explanation,
+            }
+            if extra_name:
+                payload["tool"] = extra_name
+
+            try:
+                output_text = json.dumps(payload)
+            except TypeError:  # pragma: no cover - defensive
+                output_text = json.dumps(payload, default=str)
+
+            deferral_message = {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output_text,
+            }
+
+            if not _submit_tool_output_message(deferral_message):
+                return False
+
+        return True
+
+    handled_tool = False
+
+    for index, item in enumerate(filtered_items):
+        if item.get("type") != "function_call":
+            continue
+
+        name_value = item.get("name")
+        if not isinstance(name_value, str) or not name_value:
+            continue
+        name = name_value
+
+        if expecting_plan and name != "propose_step_sequence_plan":
+            _update_activity_generation_job(
+                job_id,
+                status="error",
+                message="Le modèle doit proposer un plan avant de générer les étapes.",
+                error="Plan manquant",
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            return
+
+        raw_call_id = item.get("call_id") or item.get("id")
+        fallback_seed = f"{name}_{iteration}_{len(conversation)}"
+        call_id = _normalize_tool_call_identifier(
+            raw_call_id, fallback_seed=fallback_seed, prefix="call"
+        )
+        item["call_id"] = call_id
+        raw_arguments = item.get("arguments")
+        arguments_obj, arguments_text = _coerce_tool_arguments(raw_arguments)
+        python_arguments = normalize_tool_arguments(arguments_obj)
+
+        if name == "build_step_sequence_activity":
+            merged_steps = _enrich_steps_argument(
+                python_arguments.get("steps"), cached_steps
+            )
+            if merged_steps:
+                python_arguments["steps"] = merged_steps
+                arguments_obj["steps"] = deepcopy(merged_steps)
+                try:
+                    arguments_text = json.dumps(arguments_obj)
+                except TypeError:
+                    arguments_text = None
+
+        if arguments_text is not None:
+            item["arguments"] = arguments_text
+        else:
+            try:
+                item["arguments"] = json.dumps(arguments_obj)
+            except TypeError:
+                item["arguments"] = arguments_obj
+
+        tool_callable = STEP_SEQUENCE_TOOLKIT.get(name)
+        if tool_callable is None:
+            _update_activity_generation_job(
+                job_id,
+                status="error",
+                message=f"L'outil {name} n'est pas pris en charge par le backend.",
+                error=f"Outil inconnu: {name}",
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            return
+
+        try:
+            result = tool_callable(**python_arguments)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(
+                "Erreur lors de l'exécution de l'outil %s", name, exc_info=exc
+            )
+            detail = str(exc) or "Erreur lors de l'exécution d'un outil."
+            _update_activity_generation_job(
+                job_id,
+                status="error",
+                message="La génération a échoué lors de l'exécution d'un outil.",
+                error=detail,
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            return
+
+        try:
+            serialized_output = json.dumps(result)
+        except TypeError as exc:  # pragma: no cover - defensive
+            logger.exception("Résultat d'outil non sérialisable", exc_info=exc)
+            _update_activity_generation_job(
+                job_id,
+                status="error",
+                message="Résultat d'outil non sérialisable.",
+                error="Résultat d'outil non sérialisable",
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            return
+
+        tool_output_message = {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": serialized_output,
+        }
+        if not _submit_tool_output_message(tool_output_message):
+            return
+
+        if name == "build_step_sequence_activity":
+            _update_activity_generation_job(
+                job_id,
+                message="Finalisation de l'activité...",
+                conversation=conversation,
+                cached_steps=cached_steps,
+                awaiting_user_action=False,
+                pending_tool_call=None,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+
+            try:
+                persisted = _persist_generated_activity(result)
+            except HTTPException as exc:
+                _update_activity_generation_job(
+                    job_id,
+                    status="error",
+                    message="Échec de la sauvegarde de l'activité générée.",
+                    error=str(exc.detail),
+                    conversation=conversation,
+                    cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
+                )
+                return
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Erreur lors de la sauvegarde de l'activité générée",
+                    exc_info=exc,
+                )
+                _update_activity_generation_job(
+                    job_id,
+                    status="error",
+                    message="Échec de la sauvegarde de l'activité générée.",
+                    error=str(exc) or "Erreur inconnue",
+                    conversation=conversation,
+                    cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
+                )
+                return
+
+            activity_title = None
+            card = persisted.get("card")
+            if isinstance(card, Mapping):
+                raw_title = card.get("title")
+                if isinstance(raw_title, str):
+                    cleaned = raw_title.strip()
+                    activity_title = cleaned or None
+
+            _update_activity_generation_job(
+                job_id,
+                status="complete",
+                message="Activité générée et enregistrée.",
+                reasoning_summary=reasoning_summary,
+                activity_id=persisted.get("id"),
+                activity_title=activity_title or persisted.get("id"),
+                activity_payload=persisted,
+                awaiting_user_action=False,
+                pending_tool_call=None,
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            return
+
+        pending_tool_call: dict[str, Any] = {
+            "name": name,
+            "callId": call_id,
+            "arguments": arguments_obj,
+            "result": result,
+        }
+        if arguments_text is not None:
+            pending_tool_call["argumentsText"] = arguments_text
+
+        remaining_items = filtered_items[index + 1 :]
+        defer_reason: Literal["plan_pending", "pending_validation"] = (
+            "plan_pending" if expecting_plan else "pending_validation"
+        )
+        if not _acknowledge_additional_tool_calls(
+            remaining_items, reason=defer_reason
+        ):
+            return
+
+        message = "Résultat disponible."
+        update_kwargs: dict[str, Any] = {}
+
+        if name == "propose_step_sequence_plan":
+            message = (
+                "Plan proposé. Validez-le ou indiquez les ajustements souhaités avant de poursuivre."
+            )
+        elif name == "create_step_sequence_activity":
+            activity_identifier = (
+                python_arguments.get("activity_id")
+                or arguments_obj.get("activityId")
+                or arguments_obj.get("activity_id")
+            )
+            if isinstance(activity_identifier, str):
+                update_kwargs["activity_id"] = activity_identifier
+            message = (
+                "Structure de l'activité initialisée. Confirmez ou ajustez avant de générer la suite."
+            )
+        elif name.startswith("create_"):
+            _remember_step(result)
+            step_count = len(cached_steps)
+            highlight = _extract_step_highlight(result)
+            message = (
+                f"Étape {step_count} générée"
+                + (f" – {highlight}" if highlight else "")
+                + ". Validez ou demandez une révision."
+            )
+
+        pending_cursor = len(conversation)
+
+        _update_activity_generation_job(
+            job_id,
+            message=message,
+            conversation=conversation,
+            cached_steps=cached_steps,
+            awaiting_user_action=True,
+            pending_tool_call=pending_tool_call,
+            conversation_id=conversation_id,
+            conversation_cursor=pending_cursor,
+            **update_kwargs,
+        )
+        handled_tool = True
+        break
+
+    if not handled_tool:
+        _update_activity_generation_job(
+            job_id,
+            message="Aucun appel d'outil détecté, nouvelle tentative en cours...",
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
+        )
+        _launch_activity_generation_job(job_id)
+        return
+
+
+def _launch_activity_generation_job(job_id: str) -> None:
     worker = Thread(
         target=_run_activity_generation_job,
-        args=(job_id, payload),
+        args=(job_id,),
         name=f"activity-generation-{job_id}",
         daemon=True,
     )
     worker.start()
+
+
+def _process_activity_generation_feedback(
+    job_id: str, payload: ActivityGenerationFeedbackRequest
+) -> ActivityGenerationJobStatus:
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+    if job.status in ("complete", "error"):
+        raise HTTPException(
+            status_code=400,
+            detail="La tâche n'accepte plus de retours utilisateur.",
+        )
+    if not job.awaiting_user_action or job.pending_tool_call is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Aucun retour n'est attendu pour cette tâche actuellement.",
+        )
+
+    comment = (payload.message or "").strip()
+    mark_plan_validated = False
+
+    if payload.action == "approve":
+        if job.expecting_plan:
+            base = "Le plan proposé est validé."
+            if comment:
+                base += f" Notes complémentaires : {comment}"
+            feedback_text = (
+                base
+                + " Passe à la création des étapes correspondantes en respectant ce plan."
+            )
+            mark_plan_validated = True
+        else:
+            base = "Cette étape est validée."
+            if comment:
+                base += f" Commentaire : {comment}"
+            feedback_text = base + " Tu peux poursuivre avec l'étape suivante."
+    else:  # payload.action == "revise"
+        if job.expecting_plan:
+            feedback_text = (
+                "Corrige le plan selon les indications suivantes : " + comment
+            )
+        else:
+            feedback_text = (
+                "Corrige cette étape selon les indications suivantes : " + comment
+            )
+
+    next_conversation = list(job.conversation)
+    next_conversation.append({"role": "user", "content": feedback_text})
+
+    update_kwargs: dict[str, Any] = {
+        "status": "running",
+        "message": "Retour transmis au modèle. Nouvelle itération en cours...",
+        "conversation": next_conversation,
+        "awaiting_user_action": False,
+        "pending_tool_call": None,
+    }
+    if mark_plan_validated:
+        update_kwargs["expecting_plan"] = False
+
+    updated = _update_activity_generation_job(job_id, **update_kwargs)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+
+    _launch_activity_generation_job(job_id)
+    return _serialize_activity_generation_job(updated)
 
 
 @admin_router.post("/activities/generate")
@@ -4156,9 +4826,46 @@ def admin_generate_activity(
 ) -> ActivityGenerationJobStatus:
     """Démarre une génération d'activité StepSequence en tâche de fond."""
 
-    job = _create_activity_generation_job()
-    _launch_activity_generation_job(job.id, payload)
+    model = _validate_model(payload.model)
+    prompt = _build_activity_generation_prompt(
+        payload.details, payload.existing_activity_ids
+    )
+    system_message = _resolve_activity_generation_system_message(payload)
+    developer_message = _resolve_activity_generation_developer_message(payload)
+
+    conversation = [
+        {"role": "system", "content": system_message},
+        {"role": "developer", "content": developer_message},
+        {"role": "user", "content": prompt},
+    ]
+
+    job = _create_activity_generation_job(
+        payload,
+        conversation,
+        model_name=model,
+    )
+
+    job = _update_activity_generation_job(
+        job.id,
+        status="running",
+        message="Initialisation de la génération...",
+        conversation=conversation,
+        cached_steps={},
+        awaiting_user_action=False,
+        pending_tool_call=None,
+    ) or job
+
+    _launch_activity_generation_job(job.id)
     return _serialize_activity_generation_job(job)
+
+
+@admin_router.post("/activities/generate/{job_id}/respond")
+def admin_respond_activity_generation(
+    job_id: str,
+    payload: ActivityGenerationFeedbackRequest,
+    _: LocalUser = Depends(_require_admin_user),
+) -> ActivityGenerationJobStatus:
+    return _process_activity_generation_feedback(job_id, payload)
 
 
 @admin_router.get("/activities/generate/{job_id}")
@@ -4194,8 +4901,16 @@ def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: S
             with client.responses.stream(
                 model=model,
                 input=[
-                    {"role": "system", "content": "Tu réponds en français et restes synthétique."},
-                    {"role": "user", "content": prompt},
+                    {
+                        "role": "system",
+                        "content": [
+                            {"type": "input_text", "text": "Tu réponds en français et restes synthétique."}
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": prompt}],
+                    },
                 ],
                 text={"verbosity": payload.verbosity},
                 reasoning={"effort": payload.thinking, "summary": "auto"},
@@ -4239,8 +4954,14 @@ def _handle_prompt_evaluation(payload: PromptEvaluationRequest) -> PromptEvaluat
         response = client.responses.create(
             model=model,
             input=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt},
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": system_message}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                },
             ],
             text=text_config,
             reasoning={"effort": payload.thinking, "summary": "auto"},
@@ -4380,8 +5101,16 @@ def _handle_flashcards(payload: FlashcardRequest) -> JSONResponse:
         response = client.responses.create(
             model=model,
             input=[
-                {"role": "system", "content": "Tu produis uniquement du JSON valide sans texte supplémentaire."},
-                {"role": "user", "content": prompt},
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "input_text", "text": "Tu produis uniquement du JSON valide sans texte supplémentaire."}
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                },
             ],
             text={"verbosity": payload.verbosity},
             reasoning={"effort": payload.thinking, "summary": "auto"},
