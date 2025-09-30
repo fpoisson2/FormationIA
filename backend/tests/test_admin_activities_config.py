@@ -581,9 +581,21 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
     fake_client = FakeClient()
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -592,6 +604,8 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
         lambda job_id: _auto_drive_generation(job_id),
     )
     main._ACTIVITY_GENERATION_JOBS.clear()
+
+    job_id: str | None = None
 
     try:
         with TestClient(app) as client:
@@ -634,8 +648,10 @@ def test_admin_generate_activity_includes_tool_definition(tmp_path, monkeypatch)
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
+            created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
                 assert request["tools"] == expected_tools
+                assert request["conversation"] == created_conversation
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
@@ -770,9 +786,21 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
     fake_client = FakeClient()
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -816,8 +844,10 @@ def test_admin_generate_activity_backfills_missing_config(tmp_path, monkeypatch)
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
+            created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
                 assert request["tools"] == expected_tools
+                assert request["conversation"] == created_conversation
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
@@ -935,9 +965,21 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
     fake_client = FakeClient()
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -987,8 +1029,10 @@ def test_admin_generate_activity_supports_snake_case_step_id(tmp_path, monkeypat
                 *STEP_SEQUENCE_TOOL_DEFINITIONS,
                 {"type": "web_search"},
             ]
+            created_conversation = fake_client.conversations.created[0]
             for request in captured_requests:
                 assert request["tools"] == expected_tools
+                assert request["conversation"] == created_conversation
 
             first_request = captured_requests[0]
             assert first_request["input"][0]["role"] == "system"
@@ -1121,9 +1165,22 @@ def test_admin_generate_activity_uses_saved_developer_message(tmp_path, monkeypa
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
+                self.conversations = FakeConversationsClient()
 
         fake_client = FakeClient()
         monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -1253,9 +1310,21 @@ def test_admin_generate_activity_uses_saved_system_message(tmp_path, monkeypatch
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
 
         fake_client = FakeClient()
         monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -1367,9 +1436,21 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
             self._index += 1
             return response
 
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
     class FakeClient:
         def __init__(self) -> None:
             self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
 
     fake_client = FakeClient()
     monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -1421,23 +1502,28 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
         app.dependency_overrides.clear()
 
     assert len(captured_requests) == 2
+    created_conversation = fake_client.conversations.created[0]
+    for request in captured_requests:
+        assert request["conversation"] == created_conversation
+
     second_request = captured_requests[1]
     second_input = second_request["input"]
-    function_call = second_input[3]
-    assert function_call["type"] == "function_call"
-    assert function_call["name"] == "propose_step_sequence_plan"
-    assert isinstance(function_call["arguments"], str)
-    call_id = function_call["call_id"]
-    assert isinstance(call_id, str) and call_id.startswith("fc_")
-    function_output = second_input[4]
-    assert function_output["type"] == "function_call_output"
-    assert function_output["call_id"] == call_id
-    assert isinstance(function_output["output"], str) and function_output["output"]
-    assert second_input[5]["role"] == "user"
-    assert second_input[5]["content"][0]["type"] == "input_text"
-    assert second_input[5]["content"][0]["text"].startswith(
+    assert len(second_input) == 1
+    assert second_input[0]["role"] == "user"
+    assert second_input[0]["content"][0]["type"] == "input_text"
+    assert second_input[0]["content"][0]["text"].startswith(
         "Corrige le plan selon les indications suivantes :"
     )
+
+    assert isinstance(job_id, str)
+    job_state = main._get_activity_generation_job(job_id)
+    assert job_state is not None
+    assert len(job_state.conversation) >= 5
+    plan_call = job_state.conversation[3]
+    assert plan_call.get("type") == "function_call"
+    assert plan_call.get("name") == "propose_step_sequence_plan"
+    plan_output = job_state.conversation[4]
+    assert plan_output.get("type") == "function_call_output"
 
 
 def test_admin_generate_activity_allows_request_developer_message_override(
@@ -1524,9 +1610,21 @@ def test_admin_generate_activity_allows_request_developer_message_override(
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
 
         fake_client = FakeClient()
         monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
@@ -1662,9 +1760,21 @@ def test_admin_generate_activity_allows_request_system_message_override(
                 self._index += 1
                 return response
 
+        class FakeConversationsClient:
+            def __init__(self) -> None:
+                self._counter = 0
+                self.created: list[str] = []
+
+            def create(self, **kwargs):  # type: ignore[no-untyped-def]
+                self._counter += 1
+                conversation_id = f"conv_test_{self._counter}"
+                self.created.append(conversation_id)
+                return type("Conversation", (), {"id": conversation_id})()
+
         class FakeClient:
             def __init__(self) -> None:
                 self.responses = FakeResponsesClient()
+                self.conversations = FakeConversationsClient()
 
         fake_client = FakeClient()
         monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)

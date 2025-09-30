@@ -1773,6 +1773,8 @@ class _ActivityGenerationJobState:
     thinking: Literal["minimal", "medium", "high"] = "medium"
     payload: ActivityGenerationRequest | None = None
     conversation: list[dict[str, Any]] = field(default_factory=list)
+    conversation_id: str | None = None
+    conversation_cursor: int = 0
     cached_steps: dict[str, StepDefinition] = field(default_factory=dict)
     awaiting_user_action: bool = False
     pending_tool_call: dict[str, Any] | None = None
@@ -1866,6 +1868,8 @@ def _update_activity_generation_job(
     activity_payload: dict[str, Any] | None = None,
     error: str | None = None,
     conversation: Sequence[Mapping[str, Any]] | None = None,
+    conversation_id: str | None = None,
+    conversation_cursor: int | None = None,
     cached_steps: Mapping[str, StepDefinition] | None = None,
     awaiting_user_action: bool | None = None,
     pending_tool_call: Mapping[str, Any] | None = None,
@@ -1893,6 +1897,8 @@ def _update_activity_generation_job(
             job.error = error
         if conversation is not None:
             job.conversation = [deepcopy(message) for message in conversation]
+            if conversation_cursor is None and job.conversation_cursor > len(job.conversation):
+                job.conversation_cursor = len(job.conversation)
         if cached_steps is not None:
             job.cached_steps = {str(key): deepcopy(value) for key, value in cached_steps.items()}
         if awaiting_user_action is not None:
@@ -1905,6 +1911,12 @@ def _update_activity_generation_job(
             job.expecting_plan = expecting_plan
         if iteration is not None:
             job.iteration = iteration
+        if conversation_id is not None:
+            job.conversation_id = conversation_id
+        if conversation_cursor is not None:
+            job.conversation_cursor = max(
+                0, min(conversation_cursor, len(job.conversation))
+            )
 
         job.updated_at = datetime.utcnow()
         return deepcopy(job)
@@ -3940,6 +3952,8 @@ def _prepare_activity_generation_iteration(
     Literal["low", "medium", "high"],
     Literal["minimal", "medium", "high"],
     int,
+    str | None,
+    int,
 ] | None:
     with _ACTIVITY_GENERATION_LOCK:
         job = _ACTIVITY_GENERATION_JOBS.get(job_id)
@@ -3996,6 +4010,8 @@ def _prepare_activity_generation_iteration(
         verbosity,
         thinking,
         iteration,
+        job.conversation_id,
+        job.conversation_cursor,
     )
 
 
@@ -4013,7 +4029,24 @@ def _run_activity_generation_job(job_id: str) -> None:
         verbosity,
         thinking,
         iteration,
+        conversation_id,
+        conversation_cursor,
     ) = prepared
+
+    pending_messages = conversation[conversation_cursor:]
+    if not pending_messages:
+        logger.debug(
+            "Aucune mise à jour de conversation à transmettre pour le job %s", job_id
+        )
+        _update_activity_generation_job(
+            job_id,
+            message="En attente d'une nouvelle instruction utilisateur...",
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
+        )
+        return
 
     tools = [
         *STEP_SEQUENCE_TOOL_DEFINITIONS,
@@ -4022,9 +4055,23 @@ def _run_activity_generation_job(job_id: str) -> None:
 
     try:
         client = _ensure_client()
+        if conversation_id is None:
+            created_conversation = client.conversations.create()
+            conversation_id = getattr(created_conversation, "id", None)
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RuntimeError("Conversation ID manquant")
+            _update_activity_generation_job(
+                job_id, conversation_id=conversation_id
+            )
+
+        serialized_input = _serialize_conversation_for_responses(pending_messages)
+        if not serialized_input:
+            raise RuntimeError("Conversation vide à transmettre au modèle")
+
         response = client.responses.create(
             model=model_name,
-            input=_serialize_conversation_for_responses(conversation),
+            input=serialized_input,
+            conversation=conversation_id,
             tools=tools,
             parallel_tool_calls=False,
             text={"verbosity": verbosity},
@@ -4040,13 +4087,19 @@ def _run_activity_generation_job(job_id: str) -> None:
             status="error",
             message="La génération a échoué lors de l'appel au modèle.",
             error=detail,
+            conversation=conversation,
+            cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
         )
         return
 
     reasoning_summary = _extract_reasoning_summary(response)
     if reasoning_summary:
         _update_activity_generation_job(
-            job_id, reasoning_summary=reasoning_summary
+            job_id,
+            reasoning_summary=reasoning_summary,
+            conversation_id=conversation_id,
         )
 
     output_items = getattr(response, "output", None)
@@ -4056,6 +4109,8 @@ def _run_activity_generation_job(job_id: str) -> None:
             message="La réponse du modèle était vide, nouvelle tentative...",
             conversation=conversation,
             cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
         )
         _launch_activity_generation_job(job_id)
         return
@@ -4076,6 +4131,8 @@ def _run_activity_generation_job(job_id: str) -> None:
             message="La réponse du modèle n'a pas pu être interprétée, nouvelle tentative...",
             conversation=conversation,
             cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
         )
         _launch_activity_generation_job(job_id)
         return
@@ -4110,6 +4167,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 error="Plan manquant",
                 conversation=conversation,
                 cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
             )
             return
 
@@ -4152,6 +4211,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 error=f"Outil inconnu: {name}",
                 conversation=conversation,
                 cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
             )
             return
 
@@ -4169,6 +4230,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 error=detail,
                 conversation=conversation,
                 cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
             )
             return
 
@@ -4183,6 +4246,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 error="Résultat d'outil non sérialisable",
                 conversation=conversation,
                 cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
             )
             return
 
@@ -4202,6 +4267,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 cached_steps=cached_steps,
                 awaiting_user_action=False,
                 pending_tool_call=None,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
             )
 
             try:
@@ -4214,6 +4281,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                     error=str(exc.detail),
                     conversation=conversation,
                     cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
                 )
                 return
             except Exception as exc:  # pragma: no cover - defensive
@@ -4228,6 +4297,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                     error=str(exc) or "Erreur inconnue",
                     conversation=conversation,
                     cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
                 )
                 return
 
@@ -4251,6 +4322,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 pending_tool_call=None,
                 conversation=conversation,
                 cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
             )
             return
 
@@ -4298,6 +4371,8 @@ def _run_activity_generation_job(job_id: str) -> None:
             cached_steps=cached_steps,
             awaiting_user_action=True,
             pending_tool_call=pending_tool_call,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
             **update_kwargs,
         )
         handled_tool = True
@@ -4309,6 +4384,8 @@ def _run_activity_generation_job(job_id: str) -> None:
             message="Aucun appel d'outil détecté, nouvelle tentative en cours...",
             conversation=conversation,
             cached_steps=cached_steps,
+            conversation_id=conversation_id,
+            conversation_cursor=len(conversation),
         )
         _launch_activity_generation_job(job_id)
         return
