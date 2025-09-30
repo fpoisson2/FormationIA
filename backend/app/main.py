@@ -4364,6 +4364,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 + ". Validez ou demandez une révision."
             )
 
+        pending_cursor = max(0, len(conversation) - 1)
+
         _update_activity_generation_job(
             job_id,
             message=message,
@@ -4372,7 +4374,7 @@ def _run_activity_generation_job(job_id: str) -> None:
             awaiting_user_action=True,
             pending_tool_call=pending_tool_call,
             conversation_id=conversation_id,
-            conversation_cursor=len(conversation),
+            conversation_cursor=pending_cursor,
             **update_kwargs,
         )
         handled_tool = True

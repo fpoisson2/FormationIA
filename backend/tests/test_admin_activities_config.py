@@ -1508,10 +1508,16 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
 
     second_request = captured_requests[1]
     second_input = second_request["input"]
-    assert len(second_input) == 1
-    assert second_input[0]["role"] == "user"
-    assert second_input[0]["content"][0]["type"] == "input_text"
-    assert second_input[0]["content"][0]["text"].startswith(
+    assert len(second_input) == 2
+    tool_output = second_input[0]
+    assert tool_output["type"] == "function_call_output"
+    assert tool_output["call_id"] == "fc_call_plan"
+    assert json.loads(tool_output["output"])["overview"] == "Plan global"
+
+    user_feedback = second_input[1]
+    assert user_feedback["role"] == "user"
+    assert user_feedback["content"][0]["type"] == "input_text"
+    assert user_feedback["content"][0]["text"].startswith(
         "Corrige le plan selon les indications suivantes :"
     )
 
