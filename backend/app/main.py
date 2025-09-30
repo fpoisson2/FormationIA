@@ -4629,7 +4629,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
     fallback = {
         key: deepcopy(value)
         for key, value in message.items()
-        if key not in {"type", "summary", "id"}
+        if key not in {"type", "summary", "id", "timestamp"}
     }
     if "role" not in fallback:
         fallback["role"] = "assistant"
