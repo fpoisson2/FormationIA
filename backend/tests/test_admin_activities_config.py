@@ -1580,12 +1580,12 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
 
     first_tool = tool_only_requests[0]["input"][0]
     assert first_tool["type"] == "function_call_output"
-    assert first_tool["call_id"] == "fc_call_plan"
+    assert first_tool["call_id"] == "call_plan"
     assert json.loads(first_tool["output"])["overview"] == "Plan global"
 
     second_tool = tool_only_requests[1]["input"][0]
     assert second_tool["type"] == "function_call_output"
-    assert second_tool["call_id"] == "fc_call_plan_revision"
+    assert second_tool["call_id"] == "call_plan_revision"
     assert json.loads(second_tool["output"])["overview"] == "Plan ajusté"
 
     user_request = standard_requests[1]

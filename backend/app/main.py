@@ -3726,7 +3726,7 @@ def _normalize_tool_call_identifier(
     if not sanitized:
         sanitized = secrets.token_hex(8)
 
-    known_prefixes = ("msg_", "fc_")
+    known_prefixes = ("msg_", "fc_", "call_")
     base_identifier = sanitized
     while True:
         matched_prefix = False
@@ -3831,7 +3831,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         call_id = _normalize_tool_call_identifier(
             message.get("call_id") or message.get("id"),
             fallback_seed=fallback_seed,
-            prefix="fc_",
+            prefix="call",
         )
         arguments = message.get("arguments")
         if isinstance(arguments, str):
@@ -3875,7 +3875,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         call_id = _normalize_tool_call_identifier(
             message.get("call_id") or message.get("id"),
             fallback_seed=fallback_seed,
-            prefix="fc_",
+            prefix="call",
         )
         payload = {
             "type": "function_call_output",
@@ -3900,7 +3900,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             tool_call_id = message.get("tool_call_id") or message.get("call_id")
             if tool_call_id is not None:
                 role_message["tool_call_id"] = _normalize_tool_call_identifier(
-                    tool_call_id, prefix="fc_"
+                    tool_call_id, prefix="call"
                 )
             if message.get("name"):
                 role_message["name"] = message["name"]
@@ -3908,7 +3908,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             call_id = message.get("call_id")
             if call_id is not None:
                 role_message["call_id"] = _normalize_tool_call_identifier(
-                    call_id, prefix="fc_"
+                    call_id, prefix="call"
                 )
         for extra_key in ("metadata",):
             if extra_key in message:
@@ -4175,7 +4175,7 @@ def _run_activity_generation_job(job_id: str) -> None:
         raw_call_id = item.get("call_id") or item.get("id")
         fallback_seed = f"{name}_{iteration}_{len(conversation)}"
         call_id = _normalize_tool_call_identifier(
-            raw_call_id, fallback_seed=fallback_seed, prefix="fc_"
+            raw_call_id, fallback_seed=fallback_seed, prefix="call"
         )
         item["call_id"] = call_id
         raw_arguments = item.get("arguments")
