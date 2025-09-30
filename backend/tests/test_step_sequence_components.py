@@ -406,6 +406,38 @@ def test_create_step_sequence_activity_keeps_metadata_and_steps() -> None:
     assert activity["stepSequence"] == steps
 
 
+def test_create_step_sequence_activity_normalizes_card_cta_string() -> None:
+    activity = create_step_sequence_activity(
+        activity_id="loi-ohm",
+        metadata={
+            "card": {
+                "title": "Loi d'Ohm en deux étapes",
+                "description": "Découvrir la relation V = I × R",
+                "highlights": ["Formule", None, "Exercices"],
+                "cta": "/activites/loi-ohm-2-etapes",
+            }
+        },
+    )
+
+    assert activity["card"]["cta"] == {
+        "label": "Loi d'Ohm en deux étapes",
+        "to": "/activites/loi-ohm-2-etapes",
+    }
+    assert activity["card"]["highlights"] == ["Formule", "Exercices"]
+
+
+def test_create_step_sequence_activity_normalizes_card_cta_default_label() -> None:
+    activity = create_step_sequence_activity(
+        activity_id="loi-ohm",
+        metadata={"card": {"cta": "https://example.test/activite"}},
+    )
+
+    assert activity["card"]["cta"] == {
+        "label": "Découvrir l’activité",
+        "to": "https://example.test/activite",
+    }
+
+
 def test_add_wrappers_return_created_step() -> None:
     sequence: list[dict[str, object]] = []
     created = add_clarity_map_step(sequence, step_id="carte")
