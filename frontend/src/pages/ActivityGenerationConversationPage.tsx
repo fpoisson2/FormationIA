@@ -6,10 +6,10 @@ import {
   type ActivityGenerationJobToolCall,
   type Conversation,
   type GenerateActivityPayload,
-} from "../../api";
-import { ConversationView } from "../../components/ConversationView";
-import { useAdminAuth } from "../../providers/AdminAuthProvider";
-import { MODEL_OPTIONS, VERBOSITY_OPTIONS, THINKING_OPTIONS } from "../../config";
+} from "../api";
+import { ConversationView } from "../components/ConversationView";
+import { useAdminAuth } from "../providers/AdminAuthProvider";
+import { MODEL_OPTIONS, VERBOSITY_OPTIONS, THINKING_OPTIONS } from "../config";
 
 interface PendingPlanStep {
   id?: string;
@@ -24,6 +24,23 @@ interface PendingPlanResult {
   overview?: string;
   steps?: PendingPlanStep[];
   notes?: string | null;
+}
+
+const ACTIVITY_GENERATION_BASE_PATH = "/activites/generation";
+
+function MagicWandIcon({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M11.28 1.08a.75.75 0 0 1 1.44 0l.53 1.6 1.6.53a.75.75 0 0 1 0 1.44l-1.6.53-.53 1.6a.75.75 0 0 1-1.44 0l-.53-1.6-1.6-.53a.75.75 0 0 1 0-1.44l1.6-.53.53-1.6z" />
+      <path d="M6.47 4.72a.75.75 0 0 1 1.06 0l2.75 2.75a.75.75 0 0 1 0 1.06l-7.78 7.78a1.5 1.5 0 1 1-2.12-2.12l7.78-7.78a.75.75 0 0 1 0-1.06L6.47 4.72z" />
+      <path d="M15.28 9.78a.75.75 0 0 1 1.44 0l.23.7.7.23a.75.75 0 0 1 0 1.44l-.7.23-.23.7a.75.75 0 0 1-1.44 0l-.23-.7-.7-.23a.75.75 0 0 1 0-1.44l.7-.23.23-.7z" />
+    </svg>
+  );
 }
 
 export function ActivityGenerationConversationPage(): JSX.Element {
@@ -164,7 +181,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
-      navigate(`/admin/activity-generation/conversation?jobId=${conv.jobId}`);
+      navigate(`${ACTIVITY_GENERATION_BASE_PATH}?jobId=${conv.jobId}`);
       setShowHistory(false);
     },
     [navigate]
@@ -191,7 +208,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       const job = await admin.activities.generate(payload, token);
 
       // Rediriger vers la conversation nouvellement créée
-      navigate(`/admin/activity-generation/conversation?jobId=${job.jobId}`);
+      navigate(`${ACTIVITY_GENERATION_BASE_PATH}?jobId=${job.jobId}`);
       setPromptText("");
       setShowNewGenerationForm(false);
     } catch (err) {
@@ -300,7 +317,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           setJobStatus(null);
         }
         if (redirectToHistory) {
-          navigate("/admin/activity-generation/conversation", { replace: true });
+          navigate(ACTIVITY_GENERATION_BASE_PATH, { replace: true });
         }
         const history = await admin.conversations.list(token);
         setConversations(history.conversations);
@@ -463,7 +480,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           <div className="mb-2 text-lg font-semibold text-red-800">Erreur</div>
           <div className="text-sm text-red-600">{error}</div>
           <button
-            onClick={() => navigate("/admin/activity-generation")}
+            onClick={() => navigate(ACTIVITY_GENERATION_BASE_PATH)}
             className="mt-4 rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
           >
             Retour
@@ -498,9 +515,16 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             </div>
             <button
               onClick={() => setShowNewGenerationForm(!showNewGenerationForm)}
-              className="rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-[color:var(--brand-black)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[color:var(--brand-charcoal)]"
             >
-              {showNewGenerationForm ? "Annuler" : "+ Nouvelle génération"}
+              {showNewGenerationForm ? (
+                "Annuler"
+              ) : (
+                <>
+                  <MagicWandIcon className="h-4 w-4" />
+                  Nouvelle génération
+                </>
+              )}
             </button>
           </div>
         </header>
@@ -641,7 +665,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
             <button
-              onClick={() => navigate("/admin/activity-generation/conversation")}
+              onClick={() => navigate(ACTIVITY_GENERATION_BASE_PATH)}
               className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
               title="Retour à l'historique"
             >

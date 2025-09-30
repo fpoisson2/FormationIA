@@ -20,7 +20,7 @@ import { AdminLtiUsersPage } from "./pages/admin/AdminLtiUsersPage";
 import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
 import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
-import { ActivityGenerationConversationPage } from "./pages/admin/ActivityGenerationConversationPage";
+import { ActivityGenerationConversationPage } from "./pages/ActivityGenerationConversationPage";
 import { AdminInvitationCodesPage } from "./pages/admin/AdminInvitationCodesPage";
 import { activities as activitiesClient } from "./api";
 
@@ -127,6 +127,14 @@ function App(): JSX.Element {
           </ActivityAccessGuard>
         }
       />
+      <Route
+        path="/activites/generation"
+        element={
+          <ActivityAccessGuard>
+            <ActivityGenerationConversationPage />
+          </ActivityAccessGuard>
+        }
+      />
       <Route path="/admin/connexion" element={<AdminLoginRedirect />} />
       <Route path="/connexion" element={<LoginPage />} />
       <Route path="/inscription/createur" element={<CreatorSignupPage />} />
@@ -140,7 +148,7 @@ function App(): JSX.Element {
           />
           <Route
             path="activity-generation/conversation"
-            element={<ActivityGenerationConversationPage />}
+            element={<Navigate to="/activites/generation" replace />}
           />
           <Route path="platforms" element={<AdminPlatformsPage />} />
           <Route path="lti-users" element={<AdminLtiUsersPage />} />
