@@ -27,7 +27,7 @@ export function AdminLayout(): JSX.Element {
   }, [expiresAt]);
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-10 px-4 py-10 text-[color:var(--brand-black)] sm:px-6">
+    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-10 px-4 py-10 text-[color:var(--brand-black)] sm:px-6">
       <header className="space-y-6 rounded-3xl border border-white/60 bg-white/95 p-8 shadow-lg backdrop-blur">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-col gap-4 text-sm text-[color:var(--brand-charcoal)]/90 sm:text-base">
@@ -69,8 +69,8 @@ export function AdminLayout(): JSX.Element {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        <aside className="space-y-4 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-md backdrop-blur">
+      <div className="grid w-full gap-6 lg:grid-cols-[260px_1fr]">
+        <aside className="min-w-0 space-y-4 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-md backdrop-blur">
           <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
             Navigation
           </p>
@@ -98,7 +98,7 @@ export function AdminLayout(): JSX.Element {
             </p>
           </div>
         </aside>
-        <section className="rounded-3xl border border-white/60 bg-white/95 p-6 shadow-lg backdrop-blur">
+        <section className="min-w-0 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-lg backdrop-blur">
           <Outlet />
         </section>
       </div>

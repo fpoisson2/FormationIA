@@ -220,8 +220,8 @@ export function AdminActivityTrackingPage(): JSX.Element {
       ) : (
         <>
           {/* Users Table */}
-          <div className="overflow-hidden rounded-3xl border border-white/60 shadow-sm">
-            <table className="min-w-full divide-y divide-[color:var(--brand-charcoal)]/10 text-sm">
+          <div className="w-full overflow-x-auto rounded-3xl border border-white/60 shadow-sm">
+            <table className="w-full min-w-full table-fixed divide-y divide-[color:var(--brand-charcoal)]/10 text-sm">
               <thead className="bg-[color:var(--brand-sand)]/60 text-[color:var(--brand-charcoal)]/80">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold uppercase tracking-wide">Utilisateur</th>
@@ -240,17 +240,17 @@ export function AdminActivityTrackingPage(): JSX.Element {
                           {user.displayName}
                         </span>
                         {user.email && (
-                          <span className="text-xs text-[color:var(--brand-charcoal)]/70">
+                          <span className="break-words text-xs text-[color:var(--brand-charcoal)]/70">
                             {user.email}
                           </span>
                         )}
-                        <span className="text-xs text-[color:var(--brand-charcoal)]/50">
+                        <span className="break-words text-xs text-[color:var(--brand-charcoal)]/50">
                           ID: {user.subject}
                         </span>
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-xs text-[color:var(--brand-charcoal)]">
+                      <span className="break-words text-xs text-[color:var(--brand-charcoal)]">
                         {user.issuer}
                       </span>
                     </td>

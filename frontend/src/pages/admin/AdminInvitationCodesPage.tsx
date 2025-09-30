@@ -185,8 +185,8 @@ export function AdminInvitationCodesPage(): JSX.Element {
           <AdminSkeleton lines={6} />
         </div>
       ) : hasInvitations ? (
-        <div className="overflow-hidden rounded-3xl border border-white/60 bg-white/95 shadow-lg">
-          <table className="min-w-full divide-y divide-[color:var(--brand-charcoal)]/10 text-sm">
+        <div className="w-full overflow-x-auto rounded-3xl border border-white/60 bg-white/95 shadow-lg">
+          <table className="w-full min-w-full table-fixed divide-y divide-[color:var(--brand-charcoal)]/10 text-sm">
             <thead className="bg-[color:var(--brand-sand)]/30 text-left uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
               <tr>
                 <th scope="col" className="px-4 py-3 font-semibold">
