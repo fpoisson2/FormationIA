@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from openai import OpenAI as ResponsesClient
+from openai import BadRequestError, OpenAI as ResponsesClient
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .admin_store import (
@@ -4764,6 +4764,10 @@ def _run_activity_generation_job(job_id: str) -> None:
         {"type": "web_search"},
     ]
 
+    response: Any | None = None
+    override_output_items: list[dict[str, Any]] | None = None
+    override_reasoning_summary: str | None = None
+
     try:
         client = _ensure_client()
         if conversation_id is None:
@@ -4918,23 +4922,69 @@ def _run_activity_generation_job(job_id: str) -> None:
             response = stream.get_final_response()
             _maybe_emit_stream_update(force=True)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.exception(
-            "Erreur lors de l'appel au modèle de génération", exc_info=exc
-        )
-        detail = str(exc) or "Erreur du service de génération."
-        _update_activity_generation_job(
-            job_id,
-            status="error",
-            message="La génération a échoué lors de l'appel au modèle.",
-            error=detail,
-            conversation=conversation,
-            cached_steps=cached_steps,
-            conversation_id=conversation_id,
-            conversation_cursor=len(conversation),
-        )
-        return
+        handled_missing_tool_output = False
+        if isinstance(exc, BadRequestError):
+            message = str(exc)
+            if "No tool output found for function call" in message:
+                missing_call_ids = set(
+                    re.findall(r"call_[A-Za-z0-9_-]+", message)
+                )
+                pending_calls: list[dict[str, Any]] = []
+                for placeholder in streaming_function_placeholders.values():
+                    if not isinstance(placeholder, Mapping):
+                        continue
+                    if placeholder.get("type") != "function_call":
+                        continue
+                    call_identifier = placeholder.get("call_id")
+                    if missing_call_ids and call_identifier not in missing_call_ids:
+                        continue
+                    pending_calls.append(placeholder)
+                if not pending_calls and missing_call_ids:
+                    for call_id in missing_call_ids:
+                        for message_item in reversed(conversation):
+                            if (
+                                isinstance(message_item, Mapping)
+                                and message_item.get("type") == "function_call"
+                                and message_item.get("call_id") == call_id
+                            ):
+                                pending_calls.append(message_item)
+                                break
+                if pending_calls:
+                    try:
+                        pending_calls.sort(
+                            key=lambda item: conversation.index(item)
+                            if item in conversation
+                            else len(conversation)
+                        )
+                    except ValueError:
+                        pending_calls = list(pending_calls)
+                    override_output_items = [deepcopy(item) for item in pending_calls]
+                    override_reasoning_summary = None
+                    handled_missing_tool_output = True
+                    logger.warning(
+                        "Réception d'une erreur liée à un appel d'outil non traité."
+                        " Tentative de récupération avec les données en cache."
+                    )
+        if not handled_missing_tool_output:
+            logger.exception(
+                "Erreur lors de l'appel au modèle de génération", exc_info=exc
+            )
+            detail = str(exc) or "Erreur du service de génération."
+            _update_activity_generation_job(
+                job_id,
+                status="error",
+                message="La génération a échoué lors de l'appel au modèle.",
+                error=detail,
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            return
 
-    reasoning_summary = _extract_reasoning_summary(response)
+    reasoning_summary = override_reasoning_summary
+    if response is not None and reasoning_summary is None:
+        reasoning_summary = _extract_reasoning_summary(response)
     if reasoning_summary:
         _update_activity_generation_job(
             job_id,
@@ -4942,7 +4992,10 @@ def _run_activity_generation_job(job_id: str) -> None:
             conversation_id=conversation_id,
         )
 
-    output_items = getattr(response, "output", None)
+    if override_output_items is not None:
+        output_items: list[dict[str, Any]] | None = override_output_items
+    else:
+        output_items = getattr(response, "output", None)
     if not output_items:
         _update_activity_generation_job(
             job_id,
