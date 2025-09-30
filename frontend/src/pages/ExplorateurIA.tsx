@@ -106,6 +106,10 @@ type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
 
+export type ExplorateurExperienceMode = "guided" | "open-world";
+
+const DEFAULT_EXPERIENCE_MODE: ExplorateurExperienceMode = "guided";
+
 const KNOWN_QUARTER_IDS = new Set<QuarterId>(
   Array.from(DEFAULT_QUARTER_IDS) as QuarterId[]
 );
@@ -122,6 +126,8 @@ let BUILDING_META: Record<
   { label: string; color: string; number?: number }
 > = {} as Record<QuarterId, { label: string; color: string; number?: number }>;
 let INVENTORY_ITEMS: InventoryDefinition[] = [];
+let currentWorldMode: ExplorateurExperienceMode = DEFAULT_EXPERIENCE_MODE;
+let currentUiExperienceMode: ExplorateurExperienceMode = DEFAULT_EXPERIENCE_MODE;
 
 function updateDerivedQuarterCaches(data: DerivedQuarterData) {
   currentDerivedData = cloneDerivedQuarterData(data);
@@ -1255,6 +1261,14 @@ const DEFAULT_ATLAS: Tileset = {
     player: DEFAULT_PLAYER_FRAMES.map((frame) => [...frame] as TileCoord),
   },
 };
+
+const OPEN_WORLD_CHARACTER_SPRITES: Partial<Record<QuarterId, TileCoord>> = Object.freeze({
+  clarte: atlas("mapTile_137.png"),
+  creation: atlas("mapTile_153.png"),
+  decision: atlas("mapTile_154.png"),
+  ethique: atlas("mapTile_170.png"),
+  mairie: atlas("mapTile_136.png"),
+});
 
 function cloneTileset(source: Tileset): Tileset {
   return {
@@ -2455,6 +2469,49 @@ let currentWorldSeed = WORLD_SEED;
 
 const DEFAULT_TERRAIN_THEME_ID: TerrainThemeId = "sand";
 
+type ExperienceModeDefinition = {
+  label: string;
+  badge: string;
+  icon: string;
+  description: string;
+  designerDescription: string;
+  runtimeHint: string;
+};
+
+const EXPERIENCE_MODE_DEFINITIONS: Record<
+  ExplorateurExperienceMode,
+  ExperienceModeDefinition
+> = Object.freeze({
+  guided: {
+    label: "Parcours guidé",
+    badge: "Mode guidé",
+    icon: "🧭",
+    description:
+      "Les quartiers se débloquent dans un ordre conseillé avec un accompagnement constant.",
+    designerDescription:
+      "Le monde suit un déroulé linéaire : chaque quartier propose une mission cadrée avant de passer au suivant.",
+    runtimeHint:
+      "Avance quartier par quartier en suivant les missions proposées pour débloquer ton inventaire.",
+  },
+  "open-world": {
+    label: "Mode open world",
+    badge: "Mode open world",
+    icon: "🌍",
+    description:
+      "Exploration libre : l'explorateur·rice peut se déplacer sans contrainte et choisir son propre chemin.",
+    designerDescription:
+      "Le personnage se promène librement, rencontre d'autres personnages et débloque les objets via leurs échanges.",
+    runtimeHint:
+      "Mode libre : le personnage se promène pour aller parler à d'autres personnages afin d'aller récupérer les objets.",
+  },
+});
+
+const EXPERIENCE_MODE_OPTIONS = Object.freeze(
+  Object.entries(EXPERIENCE_MODE_DEFINITIONS) as Array<
+    [ExplorateurExperienceMode, ExperienceModeDefinition]
+  >
+);
+
 export interface ExplorateurIATerrainConfig {
   themeId: TerrainThemeId;
   seed: number;
@@ -2465,6 +2522,7 @@ export interface ExplorateurIAConfig {
   steps: StepDefinition[];
   quarterDesignerSteps: QuarterSteps;
   quarters: ExplorateurIAQuarterConfig[];
+  experienceMode: ExplorateurExperienceMode;
 }
 
 function sanitizeTerrainConfig(
@@ -2487,6 +2545,18 @@ function sanitizeTerrainConfig(
       ? Math.trunc(base.seed)
       : WORLD_SEED;
   return { themeId, seed } satisfies ExplorateurIATerrainConfig;
+}
+
+function sanitizeExperienceMode(
+  value: unknown
+): ExplorateurExperienceMode {
+  if (value === "open-world") {
+    return "open-world";
+  }
+  if (value === "guided") {
+    return "guided";
+  }
+  return DEFAULT_EXPERIENCE_MODE;
 }
 
 function getDefaultExplorateurSteps(): StepDefinition[] {
@@ -2516,6 +2586,7 @@ export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
     steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
     quarterDesignerSteps: designerSteps,
     quarters,
+    experienceMode: DEFAULT_EXPERIENCE_MODE,
   };
 }
 
@@ -2530,6 +2601,7 @@ export function sanitizeExplorateurIAConfig(
     steps?: unknown;
     quarters?: unknown;
     quarterDesignerSteps?: unknown;
+    experienceMode?: unknown;
   };
   const terrain = sanitizeTerrainConfig(base.terrain);
   const steps = sanitizeSteps(base.steps);
@@ -2537,6 +2609,7 @@ export function sanitizeExplorateurIAConfig(
     base.quarters,
     DEFAULT_EXPLORATEUR_QUARTERS
   );
+  const experienceMode = sanitizeExperienceMode(base.experienceMode);
   const derived = deriveQuarterData(quarters);
   const expandedQuarterSteps = expandQuarterSteps(
     steps.length > 0 ? steps : getDefaultExplorateurSteps(),
@@ -2553,6 +2626,7 @@ export function sanitizeExplorateurIAConfig(
     steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
     quarterDesignerSteps: designerSteps,
     quarters,
+    experienceMode,
   };
 }
 
@@ -2690,6 +2764,107 @@ function assignLandmarksFromPath(path: Coord[]): Record<QuarterId, { x: number; 
     }
   } while (adjusted);
 
+  const MIN_TILE_DISTANCE = 3;
+  const computeDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+  const stageIndexCache = new Map<QuarterId, number>(
+    stageOrder.map((stage, index) => [stage, index] as const)
+  );
+
+  const isTooCloseToOthers = (
+    stage: QuarterId,
+    candidate: { x: number; y: number }
+  ): boolean => {
+    for (const otherStage of stageOrder) {
+      if (otherStage === stage) {
+        continue;
+      }
+      const placement = assignments[otherStage];
+      if (!placement) {
+        continue;
+      }
+      if (computeDistance(candidate, placement) < MIN_TILE_DISTANCE) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const tryRelocateStage = (stage: QuarterId): boolean => {
+    if (stage === "mairie") {
+      return false;
+    }
+    const stageOrderIndex = stageIndexCache.get(stage);
+    const stageIndex = indexByStage.get(stage);
+    if (stageOrderIndex === undefined || stageIndex === undefined) {
+      return false;
+    }
+
+    const currentPlacement = assignments[stage];
+    if (!currentPlacement) {
+      return false;
+    }
+
+    if (!isTooCloseToOthers(stage, currentPlacement)) {
+      return false;
+    }
+
+    const previousStage = stageOrderIndex > 0 ? stageOrder[stageOrderIndex - 1] : undefined;
+    const nextStage =
+      stageOrderIndex < stageOrder.length - 1 ? stageOrder[stageOrderIndex + 1] : undefined;
+    const previousIndex = previousStage ? indexByStage.get(previousStage) : undefined;
+    const nextIndex = nextStage ? indexByStage.get(nextStage) : undefined;
+    const minIndex = previousIndex !== undefined ? previousIndex + 1 : 0;
+    const maxIndex =
+      nextIndex !== undefined ? nextIndex - 1 : Math.max(path.length - 1, 0);
+
+    if (minIndex > maxIndex) {
+      return false;
+    }
+
+    const candidateIndices: number[] = [];
+    const maxRange = Math.max(stageIndex - minIndex, maxIndex - stageIndex);
+    for (let offset = 1; offset <= maxRange; offset++) {
+      const backward = stageIndex - offset;
+      const forward = stageIndex + offset;
+      if (backward >= minIndex) {
+        candidateIndices.push(backward);
+      }
+      if (forward <= maxIndex) {
+        candidateIndices.push(forward);
+      }
+    }
+
+    for (const candidateIndex of candidateIndices) {
+      if (takenIndices.has(candidateIndex)) {
+        continue;
+      }
+      const candidateCoord = path[candidateIndex];
+      if (!candidateCoord) {
+        continue;
+      }
+      const [x, y] = candidateCoord;
+      if (isTooCloseToOthers(stage, { x, y })) {
+        continue;
+      }
+      moveStage(stage, candidateIndex);
+      return true;
+    }
+
+    return false;
+  };
+
+  let spacingAdjusted = false;
+  do {
+    spacingAdjusted = false;
+    for (const stage of stageOrder) {
+      if (tryRelocateStage(stage)) {
+        spacingAdjusted = true;
+      }
+    }
+  } while (spacingAdjusted);
+
   return assignments;
 }
 
@@ -2701,8 +2876,12 @@ const ARRIVAL_FLIGHT_DURATION_MS = 2400;
 const ARRIVAL_GLOW_DURATION_MS = 2500;
 const ARRIVAL_TOTAL_DURATION_MS = ARRIVAL_GLOW_DURATION_MS + 200;
 
-function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
+function generateWorld(
+  seed: number = WORLD_SEED,
+  mode: ExplorateurExperienceMode = currentWorldMode
+): GeneratedWorld {
   currentWorldSeed = seed >>> 0;
+  currentWorldMode = mode;
   const rng = createRng(seed);
   const tiles: TerrainTile[][] = Array.from({ length: WORLD_HEIGHT }, () =>
     Array.from({ length: WORLD_WIDTH }, () => ({ base: TILE_KIND.WATER } as TerrainTile))
@@ -2752,13 +2931,19 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   const pathKeys = carvePathOnIsland(island, desiredPathLength, rng);
   const path: Coord[] = pathKeys.map((key) => coordFromKey(key as CoordKey));
 
+  const isOpenWorld = mode === "open-world";
+
   for (const [x, y] of path) {
     const tile = tiles[y]?.[x];
     if (!tile) {
       continue;
     }
     tile.base = TILE_KIND.SAND;
-    tile.overlay = TILE_KIND.PATH;
+    if (isOpenWorld) {
+      delete tile.overlay;
+    } else {
+      tile.overlay = TILE_KIND.PATH;
+    }
     tile.object = undefined;
   }
 
@@ -2768,6 +2953,13 @@ function generateWorld(seed: number = WORLD_SEED): GeneratedWorld {
   if (path.length > 0) {
     const [goalX, goalY] = path[path.length - 1];
     landmarks.mairie = { x: goalX, y: goalY };
+  }
+
+  for (const { x, y } of Object.values(landmarks)) {
+    const tile = tiles[y]?.[x];
+    if (tile) {
+      tile.object = undefined;
+    }
   }
 
   const markers: PathMarkerPlacement[] = [];
@@ -2865,7 +3057,7 @@ function rebuildBuildings() {
       y: landmark?.y ?? 0,
       label: meta?.label ?? id,
       color: meta?.color ?? "#ffffff",
-      number: meta?.number,
+      number: currentUiExperienceMode === "guided" ? meta?.number : undefined,
     };
   }));
 }
@@ -2889,6 +3081,9 @@ type PathGate = {
 const PATH_GATES: PathGate[] = [];
 function rebuildPathGates() {
   PATH_GATES.splice(0, PATH_GATES.length);
+  if (currentWorldMode === "open-world") {
+    return;
+  }
   const buildingById = new Map(buildings.map((entry) => [entry.id, entry] as const));
 
   for (let index = 0; index < PROGRESSION_SEQUENCE.length; index++) {
@@ -3004,11 +3199,14 @@ function randomWorldSeed(): number {
   return Math.floor(Math.random() * 1_000_000) + 1;
 }
 
-function regenerateWorldInPlace(seed: number = randomWorldSeed()): {
+function regenerateWorldInPlace(
+  seed: number = randomWorldSeed(),
+  mode: ExplorateurExperienceMode = currentWorldMode
+): {
   seed: number;
   start: { x: number; y: number };
 } {
-  const nextWorld = generateWorld(seed);
+  const nextWorld = generateWorld(seed, mode);
 
   world.length = 0;
   for (const row of nextWorld.tiles) {
@@ -3122,7 +3320,14 @@ function BuildingSprite({
   ts: Tileset;
   tileSize: number;
 }) {
-  const numberValue = BUILDING_META[quarter]?.number;
+  const isOpenWorld = currentUiExperienceMode === "open-world";
+  const numberValue = !isOpenWorld ? BUILDING_META[quarter]?.number : undefined;
+  const openWorldCoord = isOpenWorld
+    ? OPEN_WORLD_CHARACTER_SPRITES[quarter] ?? null
+    : null;
+  if (openWorldCoord) {
+    return <SpriteFromAtlas ts={DEFAULT_ATLAS} coord={openWorldCoord} scale={tileSize} />;
+  }
   const activeTileset = ts.mode === "atlas" && ts.url ? ts : DEFAULT_ATLAS;
   const coord =
     (typeof numberValue === "number" ? getNumberTileCoord(numberValue) : null) ??
@@ -3154,6 +3359,18 @@ function isWalkable(x: number, y: number, fromX?: number, fromY?: number) {
     return false;
   }
   const terrain = world[y][x];
+  if (currentWorldMode === "open-world") {
+    if (terrain.base === TILE_KIND.WATER || terrain.overlay === TILE_KIND.WATER) {
+      return false;
+    }
+    if (terrain.object) {
+      return false;
+    }
+    if (BUILDING_BY_COORD.has(coordKey(x, y))) {
+      return false;
+    }
+    return true;
+  }
   // Un chemin peut être soit en base soit en overlay
   const isPath = terrain.base === TILE_KIND.PATH || terrain.overlay === TILE_KIND.PATH;
 
@@ -3297,10 +3514,12 @@ function MobileControlsOverlay({
   building,
   onEnter,
   onMove,
+  showQuarterNumbers,
 }: {
   building: MobilePromptBuilding | null;
   onEnter: () => void;
   onMove: (dx: number, dy: number) => void;
+  showQuarterNumbers: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const promptRef = useRef<HTMLButtonElement | null>(null);
@@ -3359,7 +3578,10 @@ function MobileControlsOverlay({
     updateLayout();
   }, [building, updateLayout]);
 
-  const title = building?.number != null ? `Quartier ${building.number}` : building?.label;
+  const title =
+    showQuarterNumbers && building?.number != null
+      ? `Quartier ${building.number}`
+      : building?.label;
 
   return (
     <div
@@ -4334,14 +4556,22 @@ export default function ExplorateurIA({
     [config]
   );
 
+  const experienceModeMeta = useMemo(
+    () => EXPERIENCE_MODE_DEFINITIONS[sanitizedConfig.experienceMode],
+    [sanitizedConfig.experienceMode]
+  );
+  const isOpenWorldExperience =
+    sanitizedConfig.experienceMode === "open-world";
+
   const derivedQuarterData = useMemo(
     () => deriveQuarterData(sanitizedConfig.quarters),
     [sanitizedConfig.quarters]
   );
 
   useEffect(() => {
+    currentUiExperienceMode = sanitizedConfig.experienceMode;
     applyDerivedQuarterData(derivedQuarterData);
-  }, [derivedQuarterData]);
+  }, [derivedQuarterData, sanitizedConfig.experienceMode]);
 
   const { status: adminStatus, user: adminUser, setEditMode } = useAdminAuth();
   const isMobile = useIsMobile();
@@ -4399,12 +4629,25 @@ export default function ExplorateurIA({
   const arrivalEffectRef = useRef<ArrivalEffect | null>(null);
   const autoWalkQueue = useRef<Coord[]>([]);
   const autoWalkTarget = useRef<Coord | null>(null);
+  const lastMoveDirectionRef = useRef<Coord | null>(null);
   const [isAutoWalking, setIsAutoWalking] = useState(false);
   const cancelAutoWalk = useCallback(() => {
     autoWalkQueue.current = [];
     autoWalkTarget.current = null;
     setIsAutoWalking(false);
   }, []);
+  const hasReachedAutoTarget = useCallback(() => {
+    const target = autoWalkTarget.current;
+    if (!target) {
+      return false;
+    }
+    if (isOpenWorldExperience) {
+      const distance =
+        Math.abs(player.x - target[0]) + Math.abs(player.y - target[1]);
+      return distance <= 1;
+    }
+    return player.x === target[0] && player.y === target[1];
+  }, [isOpenWorldExperience, player.x, player.y]);
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
@@ -4423,6 +4666,9 @@ export default function ExplorateurIA({
         nextQuarters,
         expandedQuarterSteps
       );
+      const nextExperienceMode = sanitizeExperienceMode(
+        patch.experienceMode ?? sanitizedConfig.experienceMode
+      );
       const next: ExplorateurIAConfig = {
         terrain: {
           themeId:
@@ -4432,6 +4678,7 @@ export default function ExplorateurIA({
         steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
         quarterDesignerSteps: cloneQuarterStepMap(designerSteps),
         quarters: nextQuarters,
+        experienceMode: nextExperienceMode,
       };
       effectiveOnUpdateConfig(next);
     },
@@ -4465,6 +4712,13 @@ export default function ExplorateurIA({
     [emitConfig, sanitizedConfig.terrain.seed, sanitizedConfig.terrain.themeId]
   );
 
+  const emitExperienceMode = useCallback(
+    (mode: ExplorateurExperienceMode) => {
+      emitConfig({ experienceMode: mode });
+    },
+    [emitConfig]
+  );
+
   const isConfigDesignerView = isEditMode && activityContext == null;
 
   if (isConfigDesignerView) {
@@ -4474,6 +4728,7 @@ export default function ExplorateurIA({
         onUpdateQuarters={emitQuarterConfig}
         onUpdateQuarterDesignerSteps={emitQuarterDesignerSteps}
         onUpdateTerrain={emitTerrainConfig}
+        onUpdateExperienceMode={emitExperienceMode}
         onReset={() => {
           const defaultQuarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
             ...quarter,
@@ -4500,6 +4755,7 @@ export default function ExplorateurIA({
               themeId: DEFAULT_TERRAIN_THEME_ID,
               seed: WORLD_SEED,
             },
+            experienceMode: DEFAULT_EXPERIENCE_MODE,
           });
         }}
       />
@@ -4507,13 +4763,23 @@ export default function ExplorateurIA({
   }
 
   useEffect(() => {
-    if (sanitizedConfig.terrain.seed === currentWorldSeed) {
+    if (
+      sanitizedConfig.terrain.seed === currentWorldSeed &&
+      sanitizedConfig.experienceMode === currentWorldMode
+    ) {
       return;
     }
-    const { start } = regenerateWorldInPlace(sanitizedConfig.terrain.seed);
+    const { start } = regenerateWorldInPlace(
+      sanitizedConfig.terrain.seed,
+      sanitizedConfig.experienceMode
+    );
     setPlayer({ x: start.x, y: start.y });
     forceWorldRefresh((value) => value + 1);
-  }, [forceWorldRefresh, sanitizedConfig.terrain.seed]);
+  }, [
+    forceWorldRefresh,
+    sanitizedConfig.experienceMode,
+    sanitizedConfig.terrain.seed,
+  ]);
 
   useEffect(() => {
     const theme = TERRAIN_THEMES[selectedTheme];
@@ -4609,6 +4875,12 @@ export default function ExplorateurIA({
       }
     },
     [progress]
+  );
+
+  const hasCollectedAllInventoryItems = useMemo(
+    () =>
+      INVENTORY_ITEMS.every((item) => isQuarterCompleted(item.stage)),
+    [derivedQuarterData, isQuarterCompleted]
   );
 
   const activeGateKeys = useMemo(() => {
@@ -4740,30 +5012,159 @@ export default function ExplorateurIA({
           attemptPlayMusic();
         }
         setWalkStep((step) => step + 1);
+        lastMoveDirectionRef.current = [dx, dy];
         moved = true;
         return { x: nx, y: ny };
       });
       return moved;
     },
-    [attemptPlayMusic, isIntroPlaying, isMusicEnabled, isQuarterCompleted]
+    [
+      attemptPlayMusic,
+      isIntroPlaying,
+      isMusicEnabled,
+      isQuarterCompleted,
+    ]
   );
 
-  const buildingAt = useCallback((x: number, y: number) => {
-    return buildings.find((building) => building.x === x && building.y === y) || null;
-  }, []);
+  type BuildingCandidate = {
+    building: (typeof buildings)[number];
+    distance: number;
+    direction: Coord | null;
+  };
+
+  const buildingAt = useCallback(
+    (x: number, y: number) => {
+      const candidates: BuildingCandidate[] = [];
+      for (const building of buildings) {
+        const distance = Math.abs(building.x - x) + Math.abs(building.y - y);
+        if (distance === 0) {
+          candidates.push({ building, distance, direction: null });
+          continue;
+        }
+        if (distance === 1 && isOpenWorldExperience) {
+          candidates.push({
+            building,
+            distance,
+            direction: [building.x - x, building.y - y],
+          });
+        }
+      }
+
+      if (candidates.length === 0) {
+        return null;
+      }
+
+      const interactable = candidates.filter(({ building }) => {
+        if (isQuarterCompleted(building.id)) {
+          return false;
+        }
+        if (building.id === "mairie" && !hasCollectedAllInventoryItems) {
+          return false;
+        }
+        return true;
+      });
+
+      if (interactable.length === 0) {
+        return null;
+      }
+
+      const direct = interactable.find((candidate) => candidate.distance === 0);
+      if (direct) {
+        return direct.building;
+      }
+
+      if (isOpenWorldExperience) {
+        const lastDirection = lastMoveDirectionRef.current;
+        if (lastDirection) {
+          const facing = interactable.find((candidate) => {
+            if (!candidate.direction) {
+              return false;
+            }
+            return (
+              candidate.direction[0] === lastDirection[0] &&
+              candidate.direction[1] === lastDirection[1]
+            );
+          });
+          if (facing) {
+            return facing.building;
+          }
+        }
+      }
+
+      const best = interactable.reduce<BuildingCandidate | null>(
+        (currentBest, candidate) => {
+          if (!currentBest) {
+            return candidate;
+          }
+          if (candidate.distance < currentBest.distance) {
+            return candidate;
+          }
+          if (candidate.distance > currentBest.distance) {
+            return currentBest;
+          }
+          const currentBestIndex = BUILDING_DISPLAY_ORDER.indexOf(
+            currentBest.building.id
+          );
+          const candidateIndex = BUILDING_DISPLAY_ORDER.indexOf(
+            candidate.building.id
+          );
+          if (candidateIndex === -1) {
+            return currentBest;
+          }
+          if (currentBestIndex === -1 || candidateIndex < currentBestIndex) {
+            return candidate;
+          }
+          return currentBest;
+        },
+        null
+      );
+
+      return best?.building ?? null;
+    },
+    [
+      hasCollectedAllInventoryItems,
+      isOpenWorldExperience,
+      isQuarterCompleted,
+    ]
+  );
 
   const openIfOnBuilding = useCallback(() => {
     const hit = buildingAt(player.x, player.y);
     if (!hit) {
+      if (!hasCollectedAllInventoryItems) {
+        const nearMairie = buildings.some((building) => {
+          if (building.id !== "mairie") {
+            return false;
+          }
+          const distance =
+            Math.abs(building.x - player.x) + Math.abs(building.y - player.y);
+          if (distance === 0) {
+            return true;
+          }
+          return isOpenWorldExperience && distance === 1;
+        });
+        if (nearMairie) {
+          setBlockedStage("mairie");
+        }
+      }
       setMobilePrompt(null);
       return;
     }
+    setBlockedStage(null);
     if (isMobile && !isEditMode) {
       setMobilePrompt(hit.id);
       return;
     }
     setOpen(hit.id);
-  }, [buildingAt, isEditMode, isMobile, player.x, player.y]);
+  }, [
+    buildingAt,
+    hasCollectedAllInventoryItems,
+    isEditMode,
+    isMobile,
+    isOpenWorldExperience,
+    player.x,
+    player.y,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -5065,7 +5466,10 @@ export default function ExplorateurIA({
         const dy = targetY - player.y;
         if (Math.abs(dx) + Math.abs(dy) === 1) {
           cancelAutoWalk();
-          move(dx, dy);
+          const didMove = move(dx, dy);
+          if (!didMove && isOpenWorldExperience) {
+            openIfOnBuilding();
+          }
         }
         return;
       }
@@ -5105,11 +5509,7 @@ export default function ExplorateurIA({
     }
 
     if (!isAutoWalking) {
-      if (
-        autoWalkTarget.current &&
-        player.x === autoWalkTarget.current[0] &&
-        player.y === autoWalkTarget.current[1]
-      ) {
+      if (hasReachedAutoTarget()) {
         openIfOnBuilding();
         autoWalkTarget.current = null;
       }
@@ -5118,11 +5518,7 @@ export default function ExplorateurIA({
 
     if (autoWalkQueue.current.length === 0) {
       setIsAutoWalking(false);
-      if (
-        autoWalkTarget.current &&
-        player.x === autoWalkTarget.current[0] &&
-        player.y === autoWalkTarget.current[1]
-      ) {
+      if (hasReachedAutoTarget()) {
         openIfOnBuilding();
       }
       autoWalkTarget.current = null;
@@ -5154,6 +5550,7 @@ export default function ExplorateurIA({
     isIntroPlaying,
     isAutoWalking,
     isMobile,
+    hasReachedAutoTarget,
     move,
     openIfOnBuilding,
     player.x,
@@ -5377,9 +5774,23 @@ export default function ExplorateurIA({
     if (!mobilePromptBuilding) {
       return false;
     }
+    if (isQuarterCompleted(mobilePromptBuilding.id)) {
+      return true;
+    }
+    if (
+      mobilePromptBuilding.id === "mairie" &&
+      !hasCollectedAllInventoryItems
+    ) {
+      return true;
+    }
     const key = coordKey(mobilePromptBuilding.x, mobilePromptBuilding.y);
     return activeGateKeys.has(key);
-  }, [activeGateKeys, mobilePromptBuilding]);
+  }, [
+    activeGateKeys,
+    hasCollectedAllInventoryItems,
+    isQuarterCompleted,
+    mobilePromptBuilding,
+  ]);
 
   const handleMobileEnter = useCallback(() => {
     if (!mobilePromptBuilding || mobilePromptLocked || isIntroPlaying) {
@@ -5675,6 +6086,7 @@ export default function ExplorateurIA({
                 building={mobilePromptLocked ? null : mobilePromptBuilding}
                 onEnter={handleMobileEnter}
                 onMove={handleOverlayMove}
+                showQuarterNumbers={!isOpenWorldExperience}
               />
             )}
           </div>
@@ -5815,6 +6227,7 @@ interface ConfigDesignerProps {
   onUpdateQuarters: (quarters: ExplorateurIAQuarterConfig[]) => void;
   onUpdateQuarterDesignerSteps: (steps: QuarterSteps) => void;
   onUpdateTerrain: (patch: Partial<ExplorateurIATerrainConfig>) => void;
+  onUpdateExperienceMode: (mode: ExplorateurExperienceMode) => void;
   onReset: () => void;
 }
 
@@ -5848,11 +6261,17 @@ function ExplorateurIAConfigDesigner({
   onUpdateQuarters,
   onUpdateQuarterDesignerSteps,
   onUpdateTerrain,
+  onUpdateExperienceMode,
   onReset,
 }: ConfigDesignerProps) {
   const nonGoalQuarterCount = useMemo(
     () => config.quarters.filter((quarter) => !quarter.isGoal).length,
     [config.quarters]
+  );
+
+  const experienceModeMeta = useMemo(
+    () => EXPERIENCE_MODE_DEFINITIONS[config.experienceMode],
+    [config.experienceMode]
   );
 
   const [expandedQuarterIds, setExpandedQuarterIds] = useState<QuarterId[]>([]);
@@ -5956,6 +6375,13 @@ function ExplorateurIAConfigDesigner({
       }
     },
     [onUpdateTerrain]
+  );
+
+  const handleExperienceModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      onUpdateExperienceMode(event.target.value as ExplorateurExperienceMode);
+    },
+    [onUpdateExperienceMode]
   );
 
   const handleDesignerStepConfigChange = useCallback(
@@ -6402,7 +6828,28 @@ function ExplorateurIAConfigDesigner({
             Réinitialiser
           </button>
         </div>
-        <dl className="grid gap-4 sm:grid-cols-3">
+        <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
+            <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
+              Mode d'exploration
+            </dt>
+            <dd className="mt-2 space-y-2">
+              <select
+                value={config.experienceMode}
+                onChange={handleExperienceModeChange}
+                className="w-full rounded-lg border border-orange-200 px-3 py-2 text-sm text-orange-900 focus:border-orange-400 focus:outline-none"
+              >
+                {EXPERIENCE_MODE_OPTIONS.map(([value, meta]) => (
+                  <option key={value} value={value}>
+                    {meta.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-orange-700">
+                {experienceModeMeta.designerDescription}
+              </p>
+            </dd>
+          </div>
           <div className="rounded-2xl bg-white/80 p-4 shadow-sm">
             <dt className="text-xs font-semibold uppercase tracking-wide text-orange-600">
               Thème du terrain

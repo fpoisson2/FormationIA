@@ -28,6 +28,7 @@ from .admin_store import (
     AdminAuthError,
     AdminStore,
     AdminStoreError,
+    InvitationCode,
     LocalUser,
     LtiUserStat,
     create_admin_token,
@@ -70,6 +71,9 @@ DEFAULT_PLAN_MODEL = "gpt-5-mini"
 DEFAULT_PLAN_VERBOSITY = "medium"
 DEFAULT_PLAN_THINKING = "medium"
 MAX_ACTIVITY_GENERATION_ITERATIONS = 12
+DEFAULT_SIMULATION_CHAT_MODEL = "gpt-5-nano"
+DEFAULT_SIMULATION_CHAT_VERBOSITY = "medium"
+DEFAULT_SIMULATION_CHAT_THINKING = "medium"
 
 DEFAULT_ACTIVITY_GENERATION_SYSTEM_MESSAGE = " ".join(
     [
@@ -784,6 +788,53 @@ class AdminLoginRequest(BaseModel):
     remember: bool = False
 
 
+class CreatorSignupRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=8, max_length=256)
+    invitation_code: str | None = Field(
+        default=None,
+        alias="invitationCode",
+        min_length=1,
+        max_length=128,
+    )
+
+    @model_validator(mode="after")
+    def _normalize_invitation(self) -> "CreatorSignupRequest":
+        if self.invitation_code is None:
+            return self
+        trimmed = self.invitation_code.strip()
+        object.__setattr__(self, "invitation_code", trimmed or None)
+        return self
+
+
+class StudentSignupRequest(CreatorSignupRequest):
+    @model_validator(mode="after")
+    def _require_invitation(self) -> "StudentSignupRequest":
+        if not self.invitation_code:
+            raise ValueError("Un code d'invitation est requis pour l'inscription étudiante.")
+        return self
+
+
+class InvitationCodeCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: str = Field(..., min_length=1, max_length=32)
+    code: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "InvitationCodeCreateRequest":
+        normalized_role = self.role.strip().lower()
+        object.__setattr__(self, "role", normalized_role)
+        if normalized_role not in {"creator", "student"}:
+            raise ValueError("role doit valoir 'creator' ou 'student'.")
+        if self.code is not None:
+            trimmed = self.code.strip()
+            object.__setattr__(self, "code", trimmed or None)
+        return self
+
+
 class LocalUserCreateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -911,6 +962,7 @@ def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
         "steps": [],
         "quarterDesignerSteps": None,
         "quarters": [],
+        "experienceMode": "guided",
     }
 
     if isinstance(config, Mapping):
@@ -932,6 +984,12 @@ def _normalize_explorateur_world_config(step: dict[str, Any]) -> None:
             normalized_config["quarters"] = deepcopy(raw_quarters)
         elif isinstance(raw_quarters, tuple):
             normalized_config["quarters"] = [deepcopy(item) for item in raw_quarters]
+
+        experience_mode = config.get("experienceMode")
+        if experience_mode is None:
+            normalized_config["experienceMode"] = "guided"
+        else:
+            normalized_config["experienceMode"] = deepcopy(experience_mode)
 
         for key, value in config.items():
             if key in normalized_config:
@@ -1313,6 +1371,63 @@ def _extract_plan_from_response(response: Any) -> PlanModel | None:
     return None
 
 
+def _extract_simulation_chat_response(response: Any) -> SimulationChatResponsePayload | None:
+    if response is None:
+        return None
+
+    direct_parsed = getattr(response, "parsed", None)
+    if direct_parsed:
+        try:
+            if isinstance(direct_parsed, SimulationChatResponsePayload):
+                return direct_parsed
+            if isinstance(direct_parsed, dict):
+                return SimulationChatResponsePayload.model_validate(direct_parsed)
+        except ValidationError:
+            return None
+
+    output_items = getattr(response, "output", None)
+    if output_items is None and isinstance(response, dict):
+        output_items = response.get("output")
+    if not output_items:
+        return None
+
+    for item in output_items:
+        content = getattr(item, "content", None)
+        if content is None and isinstance(item, dict):
+            content = item.get("content")
+        if not content:
+            continue
+        for part in content:
+            parsed = getattr(part, "parsed", None)
+            if parsed:
+                try:
+                    if isinstance(parsed, SimulationChatResponsePayload):
+                        return parsed
+                    if isinstance(parsed, dict):
+                        return SimulationChatResponsePayload.model_validate(parsed)
+                except ValidationError:
+                    continue
+            if isinstance(part, dict) and "parsed" in part:
+                try:
+                    return SimulationChatResponsePayload.model_validate(part["parsed"])
+                except ValidationError:
+                    continue
+            text = getattr(part, "text", None)
+            if text is None and isinstance(part, dict):
+                text = part.get("text")
+            if not text:
+                continue
+            try:
+                parsed_text = json.loads(text)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            try:
+                return SimulationChatResponsePayload.model_validate(parsed_text)
+            except ValidationError:
+                continue
+    return None
+
+
 def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> PlanModel:
     last_error: PlanGenerationError | None = None
     for attempt in range(2):
@@ -1451,6 +1566,17 @@ def _sse_headers() -> dict[str, str]:
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
+
+
+def _yield_text_chunks(text: str, chunk_size: int = 160) -> Generator[str, None, None]:
+    if not text:
+        return
+    length = len(text)
+    start = 0
+    while start < length:
+        end = min(length, start + chunk_size)
+        yield text[start:end]
+        start = end
 
 
 def _extract_text_from_response(response) -> str:
@@ -1999,6 +2125,28 @@ class SubmissionRequest(BaseModel):
     run_id: str | None = Field(default=None, alias="runId")
 
 
+class SimulationChatMessage(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: Literal["user", "ai", "assistant"]
+    content: str = Field(..., min_length=1, max_length=6000)
+
+
+class SimulationChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
+
+    system_message: str = Field(..., alias="systemMessage", min_length=1, max_length=6000)
+    messages: list[SimulationChatMessage] = Field(default_factory=list)
+    model: str | None = None
+    verbosity: Literal["low", "medium", "high"] | None = None
+    thinking: Literal["minimal", "medium", "high"] | None = None
+
+
+class SimulationChatResponsePayload(BaseModel):
+    reply: str = Field(..., min_length=1, max_length=8000)
+    should_end: bool = Field(..., alias="shouldEnd")
+
+
 class ActivityProgressRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
 
@@ -2349,6 +2497,7 @@ class LTIContextResponse(BaseModel):
 
 
 app = FastAPI(title="FormationIA Backend", version="1.0.0")
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 admin_auth_router = APIRouter(prefix="/api/admin/auth", tags=["admin-auth"])
 admin_users_router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
@@ -3036,6 +3185,17 @@ def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
         "createdAt": user.created_at,
         "updatedAt": user.updated_at,
         "fromEnv": user.from_env,
+        "invitationCode": user.invitation_code,
+    }
+
+
+def _serialize_invitation_code(invitation: InvitationCode) -> dict[str, Any]:
+    return {
+        "code": invitation.code,
+        "role": invitation.role,
+        "createdAt": invitation.created_at,
+        "consumedAt": invitation.consumed_at,
+        "consumedBy": invitation.consumed_by,
     }
 
 
@@ -3280,6 +3440,72 @@ def admin_login(
     }
 
 
+@auth_router.post("/signup", status_code=status.HTTP_201_CREATED)
+def creator_signup(
+    payload: CreatorSignupRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    try:
+        user = store.create_user_with_role(
+            payload.username,
+            payload.password,
+            "creator",
+            invitation_code=payload.invitation_code,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, expires_at = create_admin_token(
+        user.username,
+        _ADMIN_AUTH_SECRET,
+        expires_in=_ADMIN_SESSION_TTL,
+    )
+    _set_admin_cookie(response, token, _ADMIN_SESSION_TTL)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": _serialize_local_user(user),
+    }
+
+
+@auth_router.post("/signup/student", status_code=status.HTTP_201_CREATED)
+def student_signup(
+    payload: StudentSignupRequest,
+    response: Response,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not _ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    try:
+        user = store.create_user_with_role(
+            payload.username,
+            payload.password,
+            "student",
+            invitation_code=payload.invitation_code,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    token, expires_at = create_admin_token(
+        user.username,
+        _ADMIN_AUTH_SECRET,
+        expires_in=_ADMIN_SESSION_TTL,
+    )
+    _set_admin_cookie(response, token, _ADMIN_SESSION_TTL)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "expiresAt": expires_at,
+        "user": _serialize_local_user(user),
+    }
+
+
 @admin_auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def admin_logout(response: Response) -> Response:
     _clear_admin_cookie(response)
@@ -3370,6 +3596,29 @@ def admin_update_local_user(
     except AdminStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"user": _serialize_local_user(updated)}
+
+
+@admin_router.get("/invitations")
+def admin_list_invitations(
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    items = [_serialize_invitation_code(code) for code in store.list_invitation_codes()]
+    items.sort(key=lambda entry: entry.get("createdAt") or "", reverse=True)
+    return {"invitations": items}
+
+
+@admin_router.post("/invitations", status_code=status.HTTP_201_CREATED)
+def admin_create_invitation(
+    payload: InvitationCodeCreateRequest,
+    _: LocalUser = Depends(_require_admin_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    try:
+        invitation = store.generate_invitation_code(payload.role, code=payload.code)
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"invitation": _serialize_invitation_code(invitation)}
 
 
 @admin_router.get("/lti-platforms")
@@ -4629,6 +4878,7 @@ def admin_get_activity_generation_job(
     return _serialize_activity_generation_job(job)
 
 
+app.include_router(auth_router)
 app.include_router(admin_auth_router)
 app.include_router(admin_users_router)
 app.include_router(admin_router)
@@ -4741,6 +4991,77 @@ def _handle_prompt_evaluation(payload: PromptEvaluationRequest) -> PromptEvaluat
     return PromptEvaluationResponseModel(evaluation=evaluation, raw=raw)
 
 
+def _handle_simulation_chat(payload: SimulationChatRequest) -> StreamingResponse:
+    client = _ensure_client()
+    model_name = payload.model or DEFAULT_SIMULATION_CHAT_MODEL
+    model = _validate_model(model_name)
+    selected_verbosity = payload.verbosity or DEFAULT_SIMULATION_CHAT_VERBOSITY
+    selected_thinking = payload.thinking or DEFAULT_SIMULATION_CHAT_THINKING
+
+    system_message = payload.system_message.strip()
+    if not system_message:
+        raise HTTPException(status_code=400, detail="systemMessage ne peut pas être vide.")
+
+    prepared_messages: list[dict[str, str]] = []
+    for message in payload.messages:
+        normalized_role = (message.role or "").lower()
+        role = "assistant" if normalized_role in {"ai", "assistant"} else "user"
+        content = message.content.strip()
+        if not content:
+            continue
+        prepared_messages.append({"role": role, "content": content})
+
+    if not prepared_messages:
+        raise HTTPException(status_code=400, detail="Le message utilisateur est requis.")
+    if prepared_messages[-1]["role"] != "user":
+        raise HTTPException(
+            status_code=400,
+            detail="Le dernier message doit provenir de l'utilisateur.",
+        )
+
+    def stream_response() -> Generator[str, None, None]:
+        yield _sse_comment("simulation-chat")
+        try:
+            with client.responses.stream(
+                model=model,
+                input=[{"role": "system", "content": system_message}, *prepared_messages],
+                text_format=SimulationChatResponsePayload,
+                text={"verbosity": selected_verbosity},
+                reasoning={"effort": selected_thinking, "summary": "auto"},
+            ) as stream:
+                for event in stream:
+                    if event.type == "response.error":
+                        error_message = "Erreur du service de génération"
+                        details = getattr(event, "error", None)
+                        if isinstance(details, dict):
+                            error_message = details.get("message", error_message)
+                        raise HTTPException(status_code=500, detail=error_message)
+                final_response = stream.get_final_response()
+        except HTTPException as exc:
+            yield _sse_event("error", {"message": exc.detail})
+            return
+        except Exception as exc:  # pragma: no cover - defensive catch
+            yield _sse_event("error", {"message": str(exc)})
+            return
+
+        parsed = _extract_simulation_chat_response(final_response)
+        if parsed is None:
+            yield _sse_event("error", {"message": "Réponse du modèle invalide."})
+            return
+
+        reply_text = parsed.reply.strip()
+        if reply_text:
+            for chunk in _yield_text_chunks(reply_text):
+                yield _sse_event("delta", {"text": chunk})
+        yield _sse_event("done", {"shouldEnd": parsed.should_end})
+
+    return StreamingResponse(
+        stream_response(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
+
+
 @app.post("/api/summary")
 def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
@@ -4749,6 +5070,13 @@ def fetch_summary(payload: SummaryRequest, _: None = Depends(_require_api_key)) 
 @app.post("/summary")
 def fetch_summary_legacy(payload: SummaryRequest, _: None = Depends(_require_api_key)) -> StreamingResponse:
     return _handle_summary(payload)
+
+
+@app.post("/api/simulation-chat")
+def stream_simulation_chat(
+    payload: SimulationChatRequest, _: None = Depends(_require_api_key)
+) -> StreamingResponse:
+    return _handle_simulation_chat(payload)
 
 
 @app.post("/api/prompt-evaluation", response_model=PromptEvaluationResponseModel)

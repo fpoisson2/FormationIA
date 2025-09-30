@@ -16,9 +16,15 @@ import {
   type AdminMeResponse,
   type AdminSession,
   type AdminUser,
+  type CreatorSignupPayload,
+  type StudentSignupPayload,
 } from "../api";
 
 type AdminAuthStatus = "loading" | "authenticated" | "unauthenticated";
+
+type AuthAttemptResult =
+  | { ok: true; user: AdminUser }
+  | { ok: false; error: string };
 
 interface StoredSession {
   token: string;
@@ -43,9 +49,9 @@ interface AdminAuthContextValue {
   isProcessing: boolean;
   isEditMode: boolean;
   isTestMode: boolean;
-  login: (
-    payload: AdminLoginPayload
-  ) => Promise<{ ok: true; user: AdminUser } | { ok: false; error: string }>;
+  login: (payload: AdminLoginPayload) => Promise<AuthAttemptResult>;
+  signupCreator: (payload: CreatorSignupPayload) => Promise<AuthAttemptResult>;
+  signupStudent: (payload: StudentSignupPayload) => Promise<AuthAttemptResult>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   applySession: (session: AdminSession) => void;
@@ -262,7 +268,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
   }, [applySession, stored?.token, storedTestSession]);
 
   const login = useCallback(
-    async (payload: AdminLoginPayload) => {
+    async (payload: AdminLoginPayload): Promise<AuthAttemptResult> => {
       setIsProcessing(true);
       setError(null);
       try {
@@ -296,6 +302,108 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
         setStatus("unauthenticated");
         setError(message);
         persistSession(null);
+        return { ok: false, error: message } as const;
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [applySession]
+  );
+
+  const signupCreator = useCallback(
+    async (payload: CreatorSignupPayload): Promise<AuthAttemptResult> => {
+      setIsProcessing(true);
+      setError(null);
+      try {
+        if (isAdminTestMode) {
+          const session: AdminSession = {
+            ...TEST_SESSION_BLUEPRINT,
+            token: TEST_SESSION_BLUEPRINT.token,
+            user: {
+              ...TEST_SESSION_BLUEPRINT.user,
+              username:
+                payload.username.trim() || TEST_SESSION_BLUEPRINT.user.username,
+              roles: ["creator"],
+              fromEnv: false,
+              isActive: true,
+            },
+          };
+          applySession(session);
+          return { ok: true, user: session.user } as const;
+        }
+
+        const response: AdminAuthResponse = await admin.auth.signupCreator(payload);
+        const session: AdminSession = {
+          token: response.token,
+          expiresAt: response.expiresAt ?? null,
+          user: response.user,
+        };
+        applySession(session);
+        return { ok: true, user: response.user } as const;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Impossible de créer le compte.";
+        setUser(null);
+        setToken(null);
+        setExpiresAt(null);
+        setStatus("unauthenticated");
+        setError(message);
+        persistSession(null);
+        if (isAdminTestMode) {
+          persistTestSession(null);
+        }
+        return { ok: false, error: message } as const;
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [applySession]
+  );
+
+  const signupStudent = useCallback(
+    async (payload: StudentSignupPayload): Promise<AuthAttemptResult> => {
+      setIsProcessing(true);
+      setError(null);
+      try {
+        if (isAdminTestMode) {
+          const session: AdminSession = {
+            ...TEST_SESSION_BLUEPRINT,
+            token: TEST_SESSION_BLUEPRINT.token,
+            user: {
+              ...TEST_SESSION_BLUEPRINT.user,
+              username:
+                payload.username.trim() || TEST_SESSION_BLUEPRINT.user.username,
+              roles: ["student"],
+              fromEnv: false,
+              isActive: true,
+            },
+          };
+          applySession(session);
+          return { ok: true, user: session.user } as const;
+        }
+
+        const response: AdminAuthResponse = await admin.auth.signupStudent(payload);
+        const session: AdminSession = {
+          token: response.token,
+          expiresAt: response.expiresAt ?? null,
+          user: response.user,
+        };
+        applySession(session);
+        return { ok: true, user: response.user } as const;
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Impossible de créer le compte étudiant.";
+        setUser(null);
+        setToken(null);
+        setExpiresAt(null);
+        setStatus("unauthenticated");
+        setError(message);
+        persistSession(null);
+        if (isAdminTestMode) {
+          persistTestSession(null);
+        }
         return { ok: false, error: message } as const;
       } finally {
         setIsProcessing(false);
@@ -387,6 +495,8 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       isEditMode,
       isTestMode: isAdminTestMode,
       login,
+      signupCreator,
+      signupStudent,
       logout,
       refresh,
       applySession,
@@ -402,6 +512,8 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       isProcessing,
       isEditMode,
       login,
+      signupCreator,
+      signupStudent,
       logout,
       refresh,
       applySession,

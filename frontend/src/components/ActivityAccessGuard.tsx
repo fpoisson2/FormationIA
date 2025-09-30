@@ -8,7 +8,18 @@ interface ActivityAccessGuardProps {
   children: ReactNode;
 }
 
-const USER_ROLES = ["usager", "user", "participant", "learner", "etudiant", "étudiant"];
+const USER_ROLES = [
+  "usager",
+  "user",
+  "participant",
+  "learner",
+  "etudiant",
+  "étudiant",
+  "student",
+  "creator",
+  "creatrice",
+  "créatrice",
+];
 const ADMIN_ROLES = ["admin", "superadmin", "administrator"];
 
 const normaliseRoles = (roles: string[] | undefined | null): string[] =>
