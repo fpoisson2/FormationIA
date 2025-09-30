@@ -6,3 +6,4 @@ frontend/node_modules/
 dist/
 frontend/dist/
 /storage
+*.swp

@@ -5,13 +5,17 @@ import html
 import json
 import logging
 import os
+import re
 import secrets
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
-import re
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
@@ -57,6 +61,7 @@ from .step_sequence_components import (
     StepDefinition,
     normalize_tool_arguments,
 )
+from .conversation_store import Conversation, ConversationMessage, get_conversation_store
 
 SUPPORTED_MODELS = (
     "gpt-5",
@@ -1679,41 +1684,27 @@ def _extract_step_highlight(step: Mapping[str, Any]) -> str | None:
 def _build_activity_generation_prompt(
     details: ActivityGenerationDetails, existing_ids: Sequence[str]
 ) -> str:
-    sections: list[str] = [
-        "Conçois une activité pédagogique StepSequence en français pour la plateforme Formation IA.",
-    ]
+    sections: list[str] = []
     provided_context = False
 
     if details.theme:
-        sections.append(f"Thématique principale : {details.theme}.")
+        sections.append(details.theme)
         provided_context = True
     if details.audience:
-        sections.append(f"Public cible : {details.audience}.")
+        sections.append(f"Public cible : {details.audience}")
         provided_context = True
     if details.objectives:
-        sections.append(
-            f"Objectifs pédagogiques prioritaires : {details.objectives}."
-        )
+        sections.append(f"Objectifs : {details.objectives}")
         provided_context = True
     if details.deliverable:
-        sections.append(
-            f"Livrable ou production attendue : {details.deliverable}."
-        )
+        sections.append(f"Livrable : {details.deliverable}")
         provided_context = True
     if details.constraints:
-        sections.append(f"Contraintes ou ressources à intégrer : {details.constraints}.")
+        sections.append(f"Contraintes : {details.constraints}")
     if not provided_context:
         sections.append(
-            "Aucune information spécifique n'a été fournie : propose un scénario d'initiation cohérent pour des professionnels en formation continue."
+            "Propose un scénario d'initiation pour des professionnels en formation continue."
         )
-    if existing_ids:
-        ordered = ", ".join(sorted(existing_ids))
-        sections.append(
-            "Identifiants d'activité déjà utilisés (ne pas les réemployer) : " + ordered
-        )
-    sections.append(
-        "Réponds uniquement via l'appel à la fonction build_step_sequence_activity, sans texte libre supplémentaire."
-    )
     return "\n".join(sections)
 
 
@@ -1929,7 +1920,7 @@ class ActivityGenerationFeedbackRequest(BaseModel):
 
 
 class ActivityGenerationJobStatus(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, by_alias=True)
 
     job_id: str = Field(alias="jobId")
     status: Literal["pending", "running", "complete", "error"]
@@ -1943,12 +1934,421 @@ class ActivityGenerationJobStatus(BaseModel):
     pending_tool_call: dict[str, Any] | None = Field(
         default=None, alias="pendingToolCall"
     )
+    expecting_plan: bool = Field(default=False, alias="expectingPlan")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
 
 _ACTIVITY_GENERATION_JOBS: dict[str, _ActivityGenerationJobState] = {}
 _ACTIVITY_GENERATION_LOCK = Lock()
+
+
+def _activity_generation_jobs_storage_path() -> Path:
+    storage_dir = get_admin_storage_directory()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    return storage_dir / "activity_generation_jobs.json"
+
+
+def _serialize_activity_generation_job_state(job: _ActivityGenerationJobState) -> dict[str, Any]:
+    payload_dict: dict[str, Any] | None = None
+    if isinstance(job.payload, ActivityGenerationRequest):
+        payload_dict = job.payload.model_dump(mode="json", by_alias=True)
+
+    def _make_json_safe(value: Any, _seen: set | None = None) -> Any:
+        """Recursively convert any value to a JSON-serializable format."""
+        # Prevent infinite recursion
+        if _seen is None:
+            _seen = set()
+
+        # Handle basic JSON types
+        if isinstance(value, (str, int, float, bool, type(None))):
+            return value
+
+        # Check for circular references
+        obj_id = id(value)
+        if obj_id in _seen:
+            return str(value)
+        _seen.add(obj_id)
+
+        try:
+            # Handle sequences
+            if isinstance(value, (list, tuple)):
+                return [_make_json_safe(v, _seen) for v in value]
+
+            # Handle dicts and mappings
+            if isinstance(value, dict):
+                return {str(k): _make_json_safe(v, _seen) for k, v in value.items()}
+            if isinstance(value, Mapping):
+                return {str(k): _make_json_safe(v, _seen) for k, v in value.items()}
+
+            # Try to convert objects to dicts
+            if hasattr(value, "model_dump"):
+                try:
+                    return _make_json_safe(value.model_dump(), _seen)
+                except Exception:
+                    pass
+
+            if hasattr(value, "dict"):
+                try:
+                    return _make_json_safe(value.dict(), _seen)
+                except Exception:
+                    pass
+
+            if hasattr(value, "__dict__"):
+                try:
+                    obj_dict = {k: v for k, v in value.__dict__.items() if not k.startswith('_')}
+                    return {str(k): _make_json_safe(v, _seen) for k, v in obj_dict.items()}
+                except Exception:
+                    pass
+
+            # Fallback to string representation
+            return str(value)
+        except Exception:
+            return str(value)
+        finally:
+            _seen.discard(obj_id)
+
+    def _clone(mapping_or_sequence: Any) -> Any:
+        # Convert to JSON-safe format first, which also clones the data
+        return _make_json_safe(mapping_or_sequence)
+
+    cached_steps: dict[str, Any] = {
+        str(key): _clone(value) for key, value in job.cached_steps.items()
+    }
+
+    return {
+        "id": job.id,
+        "status": job.status,
+        "message": job.message,
+        "reasoning_summary": job.reasoning_summary,
+        "activity_id": job.activity_id,
+        "activity_title": job.activity_title,
+        "activity_payload": _clone(job.activity_payload) if job.activity_payload is not None else None,
+        "error": job.error,
+        "model_name": job.model_name,
+        "verbosity": job.verbosity,
+        "thinking": job.thinking,
+        "payload": payload_dict,
+        "conversation": _clone(job.conversation),
+        "conversation_id": job.conversation_id,
+        "conversation_cursor": job.conversation_cursor,
+        "cached_steps": cached_steps,
+        "awaiting_user_action": job.awaiting_user_action,
+        "pending_tool_call": _clone(job.pending_tool_call) if job.pending_tool_call is not None else None,
+        "expecting_plan": job.expecting_plan,
+        "iteration": job.iteration,
+        "created_at": _isoformat_utc(job.created_at),
+        "updated_at": _isoformat_utc(job.updated_at),
+    }
+
+
+def _parse_datetime_value(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value)
+        except (OverflowError, OSError, ValueError):
+            return datetime.utcnow()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return datetime.utcnow()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return datetime.utcnow()
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    return datetime.utcnow()
+
+
+def _isoformat_utc(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+_TEXT_FIELD_PATTERN = re.compile(r"text=(?P<quote>['\"])(?P<content>.*?)(?<!\\)\1", re.DOTALL)
+
+
+def _decode_escaped_text(value: str) -> str:
+    try:
+        return bytes(value, "utf-8").decode("unicode_escape")
+    except Exception:  # pragma: no cover - defensive
+        return value.replace("\\n", "\n").replace("\\t", "\t")
+
+
+def _strip_model_wrapper(text: str) -> str:
+    match = _TEXT_FIELD_PATTERN.search(text)
+    if not match:
+        return text
+    raw = match.group("content")
+    return _decode_escaped_text(raw)
+
+
+def _normalize_plain_text(text: str | None) -> str | None:
+    if text is None:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+    stripped = _strip_model_wrapper(stripped)
+    stripped = stripped.replace("\r\n", "\n")
+    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+    return stripped.strip()
+
+
+def _deserialize_activity_generation_job(
+    data: Mapping[str, Any]
+) -> _ActivityGenerationJobState | None:
+    try:
+        job_id = str(data.get("id") or data.get("job_id") or "").strip()
+        if not job_id:
+            return None
+
+        payload_data = data.get("payload")
+        payload_model: ActivityGenerationRequest | None = None
+        if isinstance(payload_data, Mapping):
+            try:
+                payload_model = ActivityGenerationRequest.model_validate(payload_data)
+            except ValidationError:
+                payload_model = None
+
+        conversation_source = data.get("conversation")
+        if isinstance(conversation_source, Sequence):
+            conversation = [
+                deepcopy(item)
+                for item in conversation_source
+                if isinstance(item, Mapping)
+            ]
+        else:
+            conversation = []
+
+        cached_steps_source = data.get("cached_steps", {})
+        cached_steps: dict[str, StepDefinition] = {}
+        if isinstance(cached_steps_source, Mapping):
+            for key, value in cached_steps_source.items():
+                if isinstance(value, Mapping):
+                    cached_steps[str(key)] = deepcopy(value)  # type: ignore[assignment]
+
+        pending_tool_call = data.get("pending_tool_call")
+        if isinstance(pending_tool_call, Mapping):
+            pending_tool_call = deepcopy(pending_tool_call)
+        else:
+            pending_tool_call = None
+
+        activity_payload = data.get("activity_payload")
+        if isinstance(activity_payload, Mapping):
+            activity_payload = deepcopy(activity_payload)
+        else:
+            activity_payload = None
+
+        job = _ActivityGenerationJobState(
+            id=job_id,
+            status=str(data.get("status") or "pending"),
+            message=data.get("message"),
+            reasoning_summary=data.get("reasoning_summary"),
+            activity_id=data.get("activity_id"),
+            activity_title=data.get("activity_title"),
+            activity_payload=activity_payload,
+            error=data.get("error"),
+            model_name=str(data.get("model_name") or "gpt-5-mini"),
+            verbosity=str(data.get("verbosity") or "medium"),
+            thinking=str(data.get("thinking") or "medium"),
+            payload=payload_model,
+            conversation=conversation,
+            conversation_id=data.get("conversation_id"),
+            conversation_cursor=int(data.get("conversation_cursor") or 0),
+            cached_steps=cached_steps,
+            awaiting_user_action=bool(data.get("awaiting_user_action", False)),
+            pending_tool_call=pending_tool_call,
+            expecting_plan=bool(
+                data.get("expecting_plan", data.get("expectingPlan", True))
+            ),
+            iteration=int(data.get("iteration") or 0),
+            created_at=_parse_datetime_value(data.get("created_at")),
+            updated_at=_parse_datetime_value(data.get("updated_at")),
+        )
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Impossible de désérialiser un job de génération.")
+        return None
+
+    return job
+
+
+def _persist_activity_generation_jobs_locked() -> None:
+    path = _activity_generation_jobs_storage_path()
+    snapshot = {
+        job_id: _serialize_activity_generation_job_state(job)
+        for job_id, job in _ACTIVITY_GENERATION_JOBS.items()
+    }
+    payload = {"jobs": snapshot}
+
+    # Test if payload is JSON-serializable, if not, force conversion
+    try:
+        json.dumps(payload, ensure_ascii=False)
+    except (TypeError, ValueError):
+        # Payload contains non-serializable objects, force deep conversion
+        def _force_json_safe(obj: Any) -> Any:
+            """Force any object to be JSON-safe by converting to JSON and back."""
+            try:
+                return json.loads(json.dumps(obj, default=str))
+            except Exception:
+                return str(obj)
+        payload = _force_json_safe(payload)
+
+    temp_path = path.with_suffix(".tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True, ensure_ascii=False)
+    temp_path.replace(path)
+
+
+def _persist_activity_generation_jobs() -> None:
+    with _ACTIVITY_GENERATION_LOCK:
+        _persist_activity_generation_jobs_locked()
+
+
+def _load_activity_generation_jobs() -> None:
+    path = _activity_generation_jobs_storage_path()
+    if not path.exists():
+        return
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except json.JSONDecodeError:
+        logger.exception("Fichier de jobs de génération corrompu, réinitialisation.")
+        _persist_activity_generation_jobs()
+        return
+
+    jobs_payload = raw.get("jobs", {}) if isinstance(raw, Mapping) else {}
+
+    with _ACTIVITY_GENERATION_LOCK:
+        _ACTIVITY_GENERATION_JOBS.clear()
+        for item in jobs_payload.values():
+            if not isinstance(item, Mapping):
+                continue
+            job = _deserialize_activity_generation_job(item)
+            if job is None:
+                continue
+            if job.status == "running":
+                # Only mark as error if NOT awaiting user action
+                if not job.awaiting_user_action:
+                    job.status = "error"
+                    job.message = (
+                        "La génération a été interrompue suite au redémarrage du service."
+                        " Relancez la tâche pour reprendre la création."
+                    )
+                    job.pending_tool_call = None
+                    job.updated_at = datetime.utcnow()
+                # If awaiting user action, keep the job as-is so user can continue
+            _ACTIVITY_GENERATION_JOBS[job.id] = job
+
+        _persist_activity_generation_jobs_locked()
+
+
+_load_activity_generation_jobs()
+
+
+def _openai_base_url() -> str:
+    base = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
+    if not base:
+        return "https://api.openai.com/v1"
+    return base.rstrip("/")
+
+
+def _fetch_remote_conversation_items(conversation_id: str) -> list[dict[str, Any]]:
+    if not conversation_id:
+        return []
+    if not _api_key:
+        return []
+
+    base_url = _openai_base_url()
+    collected: list[dict[str, Any]] = []
+    after: str | None = None
+
+    try:
+        while True:
+            params: dict[str, str] = {"limit": "100", "order": "asc"}
+            if after:
+                params["after"] = after
+            query = urllib.parse.urlencode(params)
+            url = f"{base_url}/conversations/{conversation_id}/items"
+            if query:
+                url = f"{url}?{query}"
+
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": f"Bearer {_api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="GET",
+            )
+
+            with urllib.request.urlopen(request, timeout=15) as response:  # nosec: B310 - trusted endpoint
+                payload = json.load(response)
+
+            items = payload.get("data", [])
+            if not isinstance(items, list):
+                break
+
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                normalized = _normalize_response_item(item)
+
+                created_at = item.get("created_at") or item.get("createdAt")
+                timestamp = normalized.get("timestamp")
+                if timestamp is not None:
+                    dt = _parse_datetime_value(timestamp)
+                    normalized["timestamp"] = _isoformat_utc(dt)
+                else:
+                    if created_at is not None:
+                        dt = _parse_datetime_value(created_at)
+                    else:
+                        dt = datetime.utcnow()
+                    normalized["timestamp"] = _isoformat_utc(dt)
+
+                collected.append(normalized)
+
+            has_more = bool(payload.get("has_more"))
+            if not has_more:
+                break
+            after_value = payload.get("last_id") or payload.get("lastId")
+            if isinstance(after_value, str) and after_value:
+                after = after_value
+            else:
+                break
+
+    except urllib.error.HTTPError as exc:  # pragma: no cover - network
+        logger.warning(
+            "HTTP %s lors de la récupération de la conversation distante %s",
+            exc.code,
+            conversation_id,
+        )
+        return []
+    except urllib.error.URLError as exc:  # pragma: no cover - network
+        logger.warning(
+            "Erreur réseau lors de la récupération de la conversation distante %s: %s",
+            conversation_id,
+            exc.reason,
+        )
+        return []
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception(
+            "Erreur inattendue lors de la récupération de la conversation %s",
+            conversation_id,
+            exc_info=exc,
+        )
+        return []
+
+    return collected
 
 
 def _create_activity_generation_job(
@@ -1974,6 +2374,7 @@ def _create_activity_generation_job(
                 thinking=payload.thinking,
             )
             _ACTIVITY_GENERATION_JOBS[candidate] = job
+            _persist_activity_generation_jobs_locked()
             return deepcopy(job)
 
 
@@ -2045,12 +2446,25 @@ def _update_activity_generation_job(
             )
 
         job.updated_at = datetime.utcnow()
+        _persist_activity_generation_jobs_locked()
         return deepcopy(job)
 
 
 def _serialize_activity_generation_job(
     job: _ActivityGenerationJobState,
 ) -> ActivityGenerationJobStatus:
+    def _safe_copy(value: Any) -> Any:
+        """Safe copy that ensures JSON serialization."""
+        if value is None:
+            return None
+        try:
+            # Test if it's already JSON-safe
+            json.dumps(value)
+            return deepcopy(value)
+        except (TypeError, ValueError):
+            # Force JSON-safe conversion
+            return json.loads(json.dumps(value, default=str))
+
     return ActivityGenerationJobStatus(
         jobId=job.id,
         status=job.status,
@@ -2058,12 +2472,11 @@ def _serialize_activity_generation_job(
         reasoningSummary=job.reasoning_summary,
         activityId=job.activity_id,
         activityTitle=job.activity_title,
-        activity=deepcopy(job.activity_payload) if job.activity_payload is not None else None,
+        activity=_safe_copy(job.activity_payload),
         error=job.error,
         awaitingUserAction=job.awaiting_user_action,
-        pendingToolCall=deepcopy(job.pending_tool_call)
-        if job.pending_tool_call is not None
-        else None,
+        pendingToolCall=_safe_copy(job.pending_tool_call),
+        expectingPlan=job.expecting_plan,
         createdAt=job.created_at,
         updatedAt=job.updated_at,
     )
@@ -4002,8 +4415,56 @@ def _normalize_tool_call_identifier(
 
 
 def _normalize_response_item(item: Any) -> dict[str, Any]:
+    def _make_serializable(value: Any, _seen: set | None = None) -> Any:
+        """Convert any value to a JSON-serializable format."""
+        if _seen is None:
+            _seen = set()
+
+        if isinstance(value, (str, int, float, bool, type(None))):
+            return value
+
+        obj_id = id(value)
+        if obj_id in _seen:
+            return str(value)
+        _seen.add(obj_id)
+
+        try:
+            if isinstance(value, (list, tuple)):
+                return [_make_serializable(v, _seen) for v in value]
+
+            if isinstance(value, dict):
+                return {str(k): _make_serializable(v, _seen) for k, v in value.items()}
+            if isinstance(value, Mapping):
+                return {str(k): _make_serializable(v, _seen) for k, v in value.items()}
+
+            if hasattr(value, "model_dump"):
+                try:
+                    return _make_serializable(value.model_dump(), _seen)
+                except Exception:
+                    pass
+
+            if hasattr(value, "dict"):
+                try:
+                    return _make_serializable(value.dict(), _seen)
+                except Exception:
+                    pass
+
+            if hasattr(value, "__dict__"):
+                try:
+                    obj_dict = {k: v for k, v in value.__dict__.items() if not k.startswith('_')}
+                    return {str(k): _make_serializable(v, _seen) for k, v in obj_dict.items()}
+                except Exception:
+                    pass
+
+            return str(value)
+        except Exception:
+            return str(value)
+        finally:
+            _seen.discard(obj_id)
+
     if isinstance(item, Mapping):
-        return deepcopy(item)
+        return {str(k): _make_serializable(v) for k, v in item.items()}
+
     normalized: dict[str, Any] = {}
     for key in (
         "type",
@@ -4016,10 +4477,11 @@ def _normalize_response_item(item: Any) -> dict[str, Any]:
         "text",
         "output",
         "status",
+        "summary",
     ):
         value = getattr(item, key, None)
         if value is not None:
-            normalized[key] = value
+            normalized[key] = _make_serializable(value)
     return normalized
 
 
@@ -4317,7 +4779,44 @@ def _run_activity_generation_job(job_id: str) -> None:
         if not serialized_input:
             raise RuntimeError("Conversation vide à transmettre au modèle")
 
-        response = client.responses.create(
+        stream_update_interval = 0.4
+        last_stream_update = 0.0
+        streaming_assistant_placeholder: dict[str, Any] | None = None
+        streaming_reasoning_placeholder: dict[str, Any] | None = None
+        streaming_function_placeholders: dict[str, dict[str, Any]] = {}
+
+        def _coerce_string(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                normalized = _normalize_plain_text(value)
+                return normalized or value
+            if isinstance(value, Mapping):
+                text_value = value.get("text")
+                if isinstance(text_value, str):
+                    normalized = _normalize_plain_text(text_value)
+                    return normalized or text_value
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except TypeError:
+                return str(value)
+
+        def _maybe_emit_stream_update(force: bool = False, status: str = "Réponse en cours...") -> None:
+            nonlocal last_stream_update
+            now = time.time()
+            if not force and (now - last_stream_update) < stream_update_interval:
+                return
+            _update_activity_generation_job(
+                job_id,
+                message=status,
+                conversation=conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+                conversation_cursor=len(conversation),
+            )
+            last_stream_update = now
+
+        with client.responses.stream(
             model=model_name,
             input=serialized_input,
             conversation=conversation_id,
@@ -4325,7 +4824,99 @@ def _run_activity_generation_job(job_id: str) -> None:
             parallel_tool_calls=False,
             text={"verbosity": verbosity},
             reasoning={"effort": thinking, "summary": "auto"},
-        )
+        ) as stream:
+            for event in stream:
+                event_type = getattr(event, "type", None)
+
+                if event_type == "response.output_text.delta":
+                    delta = getattr(event, "delta", None)
+                    text_segment = _coerce_string(delta)
+                    if not text_segment:
+                        continue
+                    if streaming_assistant_placeholder is None:
+                        streaming_assistant_placeholder = {
+                            "type": "output_text",
+                            "role": "assistant",
+                            "content": "",
+                        }
+                        conversation.append(streaming_assistant_placeholder)
+                    streaming_assistant_placeholder["content"] = (
+                        streaming_assistant_placeholder.get("content") or ""
+                    ) + text_segment
+                    _maybe_emit_stream_update()
+                    continue
+
+                if event_type and "function_call" in event_type:
+                    item = getattr(event, "item", None)
+                    call_id = getattr(event, "call_id", None)
+                    if call_id is None and isinstance(item, Mapping):
+                        call_id = item.get("call_id") or item.get("id")
+                    call_id_str = str(call_id) if call_id is not None else None
+
+                    raw_name = getattr(event, "name", None)
+                    if raw_name is None and isinstance(item, Mapping):
+                        raw_name = item.get("name")
+
+                    placeholder_key = (
+                        call_id_str
+                        or getattr(event, "id", None)
+                        or getattr(event, "event_id", None)
+                        or (raw_name if isinstance(raw_name, str) and raw_name else None)
+                        or "function_call"
+                    )
+
+                    placeholder = streaming_function_placeholders.get(placeholder_key)
+                    if placeholder is None:
+                        placeholder = {
+                            "type": "function_call",
+                            "role": "assistant",
+                            "name": raw_name or "unknown_function",
+                            "arguments": "",
+                        }
+                        if call_id_str is not None:
+                            placeholder["call_id"] = call_id_str
+                        streaming_function_placeholders[placeholder_key] = placeholder
+                        conversation.append(placeholder)
+                    else:
+                        if call_id_str is not None:
+                            placeholder["call_id"] = call_id_str
+                        if raw_name and raw_name != placeholder.get("name"):
+                            placeholder["name"] = raw_name
+                    delta = getattr(event, "delta", None)
+                    arguments_segment = ""
+                    if isinstance(delta, Mapping):
+                        arguments_segment = _coerce_string(delta.get("arguments"))
+                    else:
+                        arguments_segment = _coerce_string(delta)
+                    if arguments_segment:
+                        placeholder["arguments"] = (
+                            placeholder.get("arguments") or ""
+                        ) + arguments_segment
+                    _maybe_emit_stream_update()
+                    continue
+
+                if event_type and "reasoning" in event_type:
+                    delta = getattr(event, "delta", None)
+                    text_segment = _coerce_string(delta)
+                    if not text_segment:
+                        continue
+                    if streaming_reasoning_placeholder is None:
+                        streaming_reasoning_placeholder = {
+                            "type": "reasoning",
+                            "role": "assistant",
+                            "summary": [],
+                            "content": "",
+                        }
+                        conversation.append(streaming_reasoning_placeholder)
+                    existing = streaming_reasoning_placeholder.get("content") or ""
+                    streaming_reasoning_placeholder["content"] = (
+                        existing + ("\n" if existing else "") + text_segment
+                    )
+                    _maybe_emit_stream_update()
+                    continue
+
+            response = stream.get_final_response()
+            _maybe_emit_stream_update(force=True)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(
             "Erreur lors de l'appel au modèle de génération", exc_info=exc
@@ -4386,7 +4977,138 @@ def _run_activity_generation_job(job_id: str) -> None:
         _launch_activity_generation_job(job_id)
         return
 
-    conversation.extend(filtered_items)
+    if reasoning_summary is not None:
+        cleaned_summary = reasoning_summary.strip()
+        if not cleaned_summary:
+            cleaned_summary = "Le modèle n'a pas fourni de résumé de raisonnement."
+        summary_message = f"Résumé du raisonnement\n\n{cleaned_summary}".strip()
+        normalized_summary = _normalize_plain_text(summary_message)
+        if normalized_summary:
+            summary_message = normalized_summary
+        reasoning_item = next(
+            (item for item in filtered_items if item.get("type") in {"reasoning", "reasoning_summary"}),
+            None,
+        )
+        if reasoning_item is None:
+            filtered_items.append(
+                {
+                    "type": "reasoning_summary",
+                    "role": "assistant",
+                    "content": summary_message,
+                }
+            )
+        else:
+            existing_content = ""
+            for key in ("content", "text"):
+                value = reasoning_item.get(key)
+                if isinstance(value, str) and value.strip():
+                    existing_content = value.strip()
+                    break
+            if not existing_content:
+                reasoning_item["content"] = summary_message
+            reasoning_item.setdefault("role", "assistant")
+
+    def _coerce_text_from_content(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return _normalize_plain_text(value)
+        if isinstance(value, Mapping):
+            text_value = value.get("text")
+            if isinstance(text_value, str):
+                return _normalize_plain_text(text_value)
+            return _normalize_plain_text(json.dumps(value, ensure_ascii=False))
+        if isinstance(value, Sequence):
+            collected: list[str] = []
+            for element in value:
+                text = _coerce_text_from_content(element)
+                if text:
+                    collected.append(text)
+            if collected:
+                combined = "\n\n".join(collected)
+                return _normalize_plain_text(combined) or combined
+            return None
+        return None
+
+    def _finalize_placeholder_from_item(item: Mapping[str, Any]) -> bool:
+        item_type = item.get("type")
+
+        if streaming_assistant_placeholder is not None and item_type in {"message", "output_text"}:
+            existing_content = streaming_assistant_placeholder.get("content")
+            existing_text = streaming_assistant_placeholder.get("text")
+            streaming_assistant_placeholder.clear()
+            streaming_assistant_placeholder.update(item)
+
+            content_value = streaming_assistant_placeholder.get("content")
+            text_value = streaming_assistant_placeholder.get("text")
+
+            coerced = _coerce_text_from_content(content_value)
+            if not coerced:
+                coerced = _coerce_text_from_content(text_value)
+            if not coerced:
+                coerced = _coerce_text_from_content(existing_content)
+            if not coerced:
+                coerced = _coerce_text_from_content(existing_text)
+            if coerced:
+                streaming_assistant_placeholder["content"] = coerced
+
+            streaming_assistant_placeholder.setdefault("role", "assistant")
+            return True
+
+        if streaming_reasoning_placeholder is not None and item_type in {"reasoning", "reasoning_summary"}:
+            existing_content = streaming_reasoning_placeholder.get("content")
+            streaming_reasoning_placeholder.clear()
+            streaming_reasoning_placeholder.update(item)
+            summary_payload = streaming_reasoning_placeholder.get("summary")
+            if summary_payload and not streaming_reasoning_placeholder.get("content"):
+                text_segments: list[str] = []
+                if isinstance(summary_payload, Sequence):
+                    for summary in summary_payload:
+                        if isinstance(summary, Mapping):
+                            text_value = summary.get("text")
+                            if isinstance(text_value, str) and text_value.strip():
+                                text_segments.append(text_value.strip())
+                elif isinstance(summary_payload, str):
+                    text_segments.append(summary_payload)
+                if text_segments:
+                    combined = "\n".join(text_segments)
+                    normalized = _normalize_plain_text(combined)
+                    streaming_reasoning_placeholder["content"] = normalized or combined
+            existing_coerced = _coerce_text_from_content(
+                streaming_reasoning_placeholder.get("content")
+            )
+            if not existing_coerced:
+                fallback = _coerce_text_from_content(existing_content)
+                if fallback:
+                    streaming_reasoning_placeholder["content"] = fallback
+            else:
+                streaming_reasoning_placeholder["content"] = existing_coerced
+            streaming_reasoning_placeholder.setdefault("role", "assistant")
+            return True
+
+        if item_type == "function_call":
+            call_id = item.get("call_id") or item.get("id")
+            key = str(call_id) if call_id is not None else None
+            placeholder = None
+            if key is not None:
+                placeholder = streaming_function_placeholders.get(key)
+            if placeholder is None and streaming_function_placeholders:
+                # fallback on first placeholder when ids differ but only one call in flight
+                placeholder = next(iter(streaming_function_placeholders.values()), None)
+            if placeholder is not None:
+                placeholder.clear()
+                placeholder.update(item)
+                if call_id is not None:
+                    placeholder["call_id"] = call_id
+                placeholder.setdefault("role", "assistant")
+                return True
+
+        return False
+
+    for item in filtered_items:
+        if _finalize_placeholder_from_item(item):
+            continue
+        conversation.append(item)
 
     def _remember_step(result: Any) -> None:
         if not isinstance(result, Mapping):
@@ -4401,18 +5123,36 @@ def _run_activity_generation_job(job_id: str) -> None:
         message: dict[str, Any],
         *,
         failure_message: str = "La génération a échoué lors de la transmission d'un résultat d'outil.",
-    ) -> bool:
+    ) -> tuple[bool, list[dict[str, Any]]]:
         conversation.append(message)
+
+        followup_items: list[dict[str, Any]] = []
 
         if conversation_id is not None:
             try:
-                client.responses.create(
+                followup = client.responses.create(
                     model=model_name,
                     input=[_serialize_conversation_entry(message)],
                     conversation=conversation_id,
                     tools=tools,
                     parallel_tool_calls=False,
                 )
+
+                extra_output = getattr(followup, "output", None)
+                if extra_output:
+                    for extra in extra_output:
+                        normalized = _normalize_response_item(extra)
+                        if normalized:
+                            followup_items.append(normalized)
+                extra_reasoning = _extract_reasoning_summary(followup)
+                if extra_reasoning:
+                    followup_items.append(
+                        {
+                            "type": "reasoning_summary",
+                            "role": "assistant",
+                            "content": extra_reasoning,
+                        }
+                    )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.exception(
                     "Erreur lors de l'envoi du résultat d'outil au modèle",
@@ -4428,9 +5168,9 @@ def _run_activity_generation_job(job_id: str) -> None:
                     conversation_id=conversation_id,
                     conversation_cursor=len(conversation),
                 )
-                return False
+                return False, []
 
-        return True
+        return True, followup_items
 
     def _acknowledge_additional_tool_calls(
         remaining_items: Sequence[Mapping[str, Any]],
@@ -4484,8 +5224,13 @@ def _run_activity_generation_job(job_id: str) -> None:
                 "output": output_text,
             }
 
-            if not _submit_tool_output_message(deferral_message):
+            success, extra_messages = _submit_tool_output_message(deferral_message)
+            if not success:
                 return False
+            for extra in extra_messages:
+                if extra.get("type") == "reasoning_summary" and extra.get("content"):
+                    extra.setdefault("role", "assistant")
+                conversation.append(extra)
 
         return True
 
@@ -4597,8 +5342,27 @@ def _run_activity_generation_job(job_id: str) -> None:
             "call_id": call_id,
             "output": serialized_output,
         }
-        if not _submit_tool_output_message(tool_output_message):
+        success, extra_messages = _submit_tool_output_message(tool_output_message)
+        if not success:
             return
+
+        for extra_item in extra_messages:
+            if extra_item.get("type") in {"reasoning", "reasoning_summary"}:
+                extra_item.setdefault("role", "assistant")
+                text_value = extra_item.get("content")
+                if not text_value and isinstance(extra_item.get("summary"), list):
+                    text_chunks: list[str] = []
+                    for summary in extra_item["summary"]:
+                        if isinstance(summary, Mapping):
+                            text = summary.get("text")
+                            if isinstance(text, str) and text.strip():
+                                text_chunks.append(text.strip())
+                    if text_chunks:
+                        extra_item["content"] = "\n".join(text_chunks)
+
+            if _finalize_placeholder_from_item(extra_item):
+                continue
+            conversation.append(extra_item)
 
         if name == "build_step_sequence_activity":
             _update_activity_generation_job(
@@ -4876,6 +5640,235 @@ def admin_get_activity_generation_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
     return _serialize_activity_generation_job(job)
+
+
+# ============================================================================
+# Endpoints pour les conversations de génération d'activités
+# ============================================================================
+
+
+class ConversationListResponse(BaseModel):
+    """Réponse contenant la liste des conversations."""
+    conversations: list[dict[str, Any]]
+
+
+class ConversationDetailResponse(BaseModel):
+    """Réponse contenant les détails d'une conversation."""
+    conversation: dict[str, Any]
+
+
+@admin_router.get("/conversations")
+def admin_list_conversations(
+    user: LocalUser = Depends(_require_admin_user),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> ConversationListResponse:
+    """Liste les conversations de génération d'activités de l'utilisateur."""
+    store = get_conversation_store()
+    conversations = store.list_conversations_by_user(user.username, limit=limit)
+    return ConversationListResponse(
+        conversations=[conv.to_dict() for conv in conversations]
+    )
+
+
+@admin_router.get("/conversations/{conversation_id}")
+def admin_get_conversation(
+    conversation_id: str,
+    _: LocalUser = Depends(_require_admin_user),
+) -> ConversationDetailResponse:
+    """Récupère les détails d'une conversation spécifique."""
+    store = get_conversation_store()
+    conversation = store.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+    return ConversationDetailResponse(conversation=conversation.to_dict())
+
+
+@admin_router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_conversation(
+    conversation_id: str,
+    user: LocalUser = Depends(_require_admin_user),
+) -> Response:
+    """Supprime une conversation de génération."""
+    store = get_conversation_store()
+    conversation = store.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+    if conversation.username != user.username:
+        raise HTTPException(status_code=403, detail="Accès refusé à cette conversation.")
+
+    deleted = store.delete_conversation(conversation_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@admin_router.get("/conversations/job/{job_id}")
+def admin_get_conversation_by_job(
+    job_id: str,
+    user: LocalUser = Depends(_require_admin_user),
+) -> ConversationDetailResponse:
+    """Récupère la conversation associée à un job de génération."""
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de génération introuvable.")
+
+    # Synchronise la conversation depuis le job vers le store
+    _sync_conversation_from_job(job, user.username)
+
+    # Récupère la conversation depuis le store
+    store = get_conversation_store()
+    conversation = store.get_conversation(job_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation introuvable.")
+
+    return ConversationDetailResponse(conversation=conversation.to_dict())
+
+
+def _sync_conversation_from_job(
+    job: _ActivityGenerationJobState, username: str
+) -> None:
+    """Synchronise une conversation depuis un job vers le store."""
+    store = get_conversation_store()
+
+    conversation_entries: list[dict[str, Any]] = [
+        deepcopy(item) if isinstance(item, Mapping) else item  # type: ignore[arg-type]
+        for item in job.conversation
+    ]
+
+    if job.conversation_id:
+        remote_entries = _fetch_remote_conversation_items(job.conversation_id)
+        if remote_entries and (
+            not conversation_entries or len(remote_entries) > len(conversation_entries)
+        ):
+            conversation_entries = remote_entries
+            _update_activity_generation_job(job.id, conversation=conversation_entries)
+
+    # Convertit les messages du job en ConversationMessage
+    messages: list[ConversationMessage] = []
+    for raw_message in conversation_entries:
+        if not isinstance(raw_message, Mapping):
+            messages.append(ConversationMessage(role="assistant"))
+            continue
+
+        msg_type = raw_message.get("type")
+        role = raw_message.get("role") or ("tool" if msg_type == "function_call_output" else "assistant")
+        timestamp = raw_message.get("timestamp")
+        name = raw_message.get("name")
+
+        def _parse_arguments(value: Any) -> Any:
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except json.JSONDecodeError:
+                    return value
+            return value
+
+        def _extract_text(value: Any) -> str | None:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return _normalize_plain_text(value)
+            if isinstance(value, Mapping):
+                text_value = value.get("text")
+                if isinstance(text_value, str):
+                    normalized = _normalize_plain_text(text_value)
+                    if normalized:
+                        return normalized
+                try:
+                    return json.dumps(value, ensure_ascii=False, indent=2)
+                except TypeError:
+                    return str(value)
+            if isinstance(value, Sequence):
+                rendered_parts: list[str] = []
+                for item in value:
+                    text = _extract_text(item)
+                    if text:
+                        rendered_parts.append(text)
+                if rendered_parts:
+                    combined = "\n\n".join(rendered_parts)
+                    return _normalize_plain_text(combined) or combined
+                return None
+            try:
+                return json.dumps(value, ensure_ascii=False, indent=2)
+            except TypeError:
+                return str(value)
+
+        def _normalize_tool_calls(value: Any) -> list[dict[str, Any]] | None:
+            if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+                return None
+            normalized: list[dict[str, Any]] = []
+            for item in value:
+                if not isinstance(item, Mapping):
+                    continue
+                call_name = item.get("name") or name or "tool_call"
+                call_id = item.get("call_id") or item.get("callId") or item.get("id")
+                normalized.append(
+                    {
+                        "name": str(call_name),
+                        "call_id": call_id,
+                        "arguments": _parse_arguments(item.get("arguments")),
+                    }
+                )
+            return normalized or None
+
+        content: str | None = None
+        tool_calls: list[dict[str, Any]] | None = None
+        tool_call_id = raw_message.get("tool_call_id") or raw_message.get("toolCallId")
+
+        if msg_type == "function_call":
+            parsed_call = _normalize_tool_calls([raw_message])
+            tool_calls = parsed_call or None
+            if parsed_call and parsed_call[0].get("call_id") is not None:
+                tool_call_id = parsed_call[0]["call_id"]
+            content = _extract_text(raw_message.get("text"))
+            if not content and tool_calls:
+                display_name = tool_calls[0].get("name")
+                content = f"Appel de la fonction {display_name}" if display_name else "Appel de fonction"
+        elif msg_type == "function_call_output":
+            tool_call_id = tool_call_id or raw_message.get("call_id") or raw_message.get("id")
+            content = _extract_text(
+                raw_message.get("output") or raw_message.get("content") or raw_message.get("text")
+            )
+        elif msg_type in {"reasoning_summary", "reasoning"}:
+            summary_text = (
+                _extract_text(raw_message.get("text"))
+                or _extract_text(raw_message.get("summary"))
+                or _extract_text(raw_message.get("content"))
+            )
+            if summary_text:
+                content = f"Résumé du raisonnement\n\n{summary_text}".strip()
+            else:
+                content = "Résumé du raisonnement"
+        else:
+            content = _extract_text(raw_message.get("content")) or _extract_text(raw_message.get("text"))
+            tool_calls = _normalize_tool_calls(raw_message.get("tool_calls"))
+
+        message_kwargs: dict[str, Any] = {
+            "role": role,
+            "content": content,
+            "tool_calls": tool_calls,
+            "tool_call_id": tool_call_id,
+            "name": name,
+        }
+        if isinstance(timestamp, str) and timestamp:
+            message_kwargs["timestamp"] = timestamp
+
+        messages.append(ConversationMessage(**message_kwargs))
+
+    # Crée ou met à jour la conversation
+    conversation = Conversation(
+        id=job.id,
+        job_id=job.id,
+        username=username,
+        activity_id=job.activity_id,
+        activity_title=job.activity_title,
+        status=job.status,
+        messages=messages,
+        model_name=job.model_name,
+    )
+
+    store.save_conversation(conversation)
 
 
 app.include_router(auth_router)
@@ -5470,4 +6463,3 @@ def logout_lti_session(
         path="/",
     )
     return JSONResponse(content={"ok": True})
-
