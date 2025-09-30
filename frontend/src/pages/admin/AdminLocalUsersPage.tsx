@@ -232,8 +232,8 @@ export function AdminLocalUsersPage(): JSX.Element {
           Aucun compte interne n’a encore été créé.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-3xl border border-white/60 shadow-sm">
-          <table className="min-w-full divide-y divide-[color:var(--brand-charcoal)]/10 text-sm">
+        <div className="w-full overflow-x-auto rounded-3xl border border-white/60 shadow-sm">
+          <table className="w-full min-w-full table-fixed divide-y divide-[color:var(--brand-charcoal)]/10 text-sm">
             <thead className="bg-[color:var(--brand-sand)]/60 text-[color:var(--brand-charcoal)]/80">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold uppercase tracking-wide">Utilisateur</th>
