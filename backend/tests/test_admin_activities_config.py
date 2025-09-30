@@ -1423,19 +1423,16 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
     assert len(captured_requests) == 2
     second_request = captured_requests[1]
     second_input = second_request["input"]
-    assert second_input[3]["role"] == "assistant"
-    assert second_input[3]["content"] == []
-    tool_calls = second_input[3].get("tool_calls")
-    assert isinstance(tool_calls, list) and len(tool_calls) == 1
-    tool_call = tool_calls[0]
-    assert tool_call["type"] == "function"
-    assert tool_call["function"]["name"] == "propose_step_sequence_plan"
-    assert isinstance(tool_call["function"]["arguments"], str)
-    assert second_input[4]["role"] == "tool"
-    assert second_input[4]["tool_call_id"] == tool_call["id"]
-    tool_content = second_input[4]["content"][0]
-    assert tool_content["type"] == "output_text"
-    assert isinstance(tool_content["text"], str) and tool_content["text"]
+    function_call = second_input[3]
+    assert function_call["type"] == "function_call"
+    assert function_call["name"] == "propose_step_sequence_plan"
+    assert isinstance(function_call["arguments"], str)
+    call_id = function_call["call_id"]
+    assert isinstance(call_id, str) and call_id.startswith("msg_")
+    function_output = second_input[4]
+    assert function_output["type"] == "function_call_output"
+    assert function_output["call_id"] == call_id
+    assert isinstance(function_output["output"], str) and function_output["output"]
     assert second_input[5]["role"] == "user"
     assert second_input[5]["content"][0]["type"] == "input_text"
     assert second_input[5]["content"][0]["text"].startswith(

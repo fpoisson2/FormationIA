@@ -3723,7 +3723,18 @@ def _normalize_response_item(item: Any) -> dict[str, Any]:
     if isinstance(item, Mapping):
         return deepcopy(item)
     normalized: dict[str, Any] = {}
-    for key in ("type", "role", "content", "name", "arguments", "call_id", "id", "text"):
+    for key in (
+        "type",
+        "role",
+        "content",
+        "name",
+        "arguments",
+        "call_id",
+        "id",
+        "text",
+        "output",
+        "status",
+    ):
         value = getattr(item, key, None)
         if value is not None:
             normalized[key] = value
@@ -3778,21 +3789,6 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
             return []
         return [_normalize_text_item(role, json.dumps(content, default=str))]
 
-    if "role" in message:
-        role_message: dict[str, Any] = {"role": message["role"]}
-        content = message.get("content")
-        role_message["content"] = _ensure_content_list(content, message.get("role"))
-        if message.get("role") == "tool":
-            tool_call_id = message.get("tool_call_id") or message.get("call_id")
-            if tool_call_id is not None:
-                role_message["tool_call_id"] = _normalize_tool_call_identifier(tool_call_id)
-            if message.get("name"):
-                role_message["name"] = message["name"]
-        for extra_key in ("metadata",):
-            if extra_key in message:
-                role_message[extra_key] = deepcopy(message[extra_key])
-        return _maybe_attach_summary(role_message)
-
     message_type = message.get("type")
 
     if message_type == "function_call":
@@ -3810,21 +3806,21 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
                 arguments_text = json.dumps(arguments)
             except TypeError:
                 arguments_text = json.dumps(arguments, default=str)
-        function_call: dict[str, Any] = {"arguments": arguments_text}
         name_value = message.get("name")
-        if isinstance(name_value, str) and name_value:
-            function_call["name"] = name_value
-        payload = {
-            "role": "assistant",
-            "content": [],
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": function_call,
-                }
-            ],
+        if not isinstance(name_value, str) or not name_value:
+            name_value = "unknown_function"
+        payload: dict[str, Any] = {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": name_value,
+            "arguments": arguments_text,
         }
+        message_id = message.get("id")
+        if isinstance(message_id, str) and message_id:
+            payload["id"] = _normalize_tool_call_identifier(message_id, fallback_seed=fallback_seed)
+        status = message.get("status")
+        if isinstance(status, str) and status:
+            payload["status"] = status
         return _maybe_attach_summary(payload)
 
     if message_type == "function_call_output":
@@ -3836,23 +3832,43 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
                 output_text = json.dumps(output)
             except TypeError:
                 output_text = json.dumps(output, default=str)
-        payload = {
-            "role": "tool",
-            "content": [
-                {
-                    "type": "output_text",
-                    "text": output_text,
-                }
-            ],
-        }
         fallback_seed = (
             f"call_{hashlib.sha1(json.dumps(message, sort_keys=True, default=str).encode()).hexdigest()[:8]}"
         )
         call_id = _normalize_tool_call_identifier(
             message.get("call_id") or message.get("id"), fallback_seed=fallback_seed
         )
-        payload["tool_call_id"] = call_id
+        payload = {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": output_text,
+        }
+        message_id = message.get("id")
+        if isinstance(message_id, str) and message_id:
+            payload["id"] = _normalize_tool_call_identifier(message_id, fallback_seed=fallback_seed)
+        status = message.get("status")
+        if isinstance(status, str) and status:
+            payload["status"] = status
         return _maybe_attach_summary(payload)
+
+    if "role" in message:
+        role_message: dict[str, Any] = {"role": message["role"]}
+        content = message.get("content")
+        role_message["content"] = _ensure_content_list(content, message.get("role"))
+        if message.get("role") == "tool":
+            tool_call_id = message.get("tool_call_id") or message.get("call_id")
+            if tool_call_id is not None:
+                role_message["tool_call_id"] = _normalize_tool_call_identifier(tool_call_id)
+            if message.get("name"):
+                role_message["name"] = message["name"]
+        if message.get("role") == "assistant":
+            call_id = message.get("call_id")
+            if call_id is not None:
+                role_message["call_id"] = _normalize_tool_call_identifier(call_id)
+        for extra_key in ("metadata",):
+            if extra_key in message:
+                role_message[extra_key] = deepcopy(message[extra_key])
+        return _maybe_attach_summary(role_message)
 
     fallback = {
         key: deepcopy(value)
