@@ -476,10 +476,10 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   // Si pas de jobId, afficher la liste des conversations
   if (!jobId) {
     return (
-      <div className="flex h-screen flex-col">
-        <header className="border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+      <div className="flex min-h-screen flex-col">
+        <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
               <button
                 onClick={() => navigate("/activites")}
                 className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
@@ -505,7 +505,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 px-4 py-6 sm:px-6 lg:overflow-y-auto">
           {showNewGenerationForm && (
             <div className="mx-auto mb-6 max-w-4xl space-y-4 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-md">
               <div className="space-y-2">
@@ -535,7 +535,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                   className="w-full rounded-2xl border border-gray-300 bg-white p-4 text-sm text-gray-900 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
                   disabled={isGenerating}
                 />
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-xs text-gray-500">
                     Appuyez sur Cmd+Entrée ou Ctrl+Entrée pour envoyer
                   </p>
@@ -568,7 +568,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                   onClick={() => handleSelectConversation(conv)}
                   className="w-full cursor-pointer rounded-3xl border border-white/60 bg-white/95 p-6 text-left shadow-sm transition hover:shadow-md"
                 >
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1">
                       <h3 className="mb-2 text-lg font-semibold text-[color:var(--brand-black)]">
                         {conv.activityTitle || "Sans titre"}
@@ -583,7 +583,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                         })}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {conv.status === "running" && (
                         <span className="inline-flex items-center rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-800">
                           <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
@@ -635,11 +635,11 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex min-h-screen flex-col">
       {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-4">
+      <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
             <button
               onClick={() => navigate("/admin/activity-generation/conversation")}
               className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
@@ -667,7 +667,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setShowHistory(!showHistory)}
               className="rounded-full border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -685,17 +685,17 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       </header>
 
       {/* Contenu principal */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col lg:flex-row lg:overflow-hidden">
         {/* Zone de conversation */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col bg-white lg:min-h-0 lg:overflow-hidden">
+          <div className="flex-1 lg:overflow-hidden">
             <ConversationView
               messages={conversation.messages}
               isLoading={isPolling && conversation.status === "running"}
             />
           </div>
           {jobId && (
-            <div className="border-t border-gray-100 bg-white/95 px-6 py-4">
+            <div className="border-t border-gray-100 bg-white/95 px-4 py-4 sm:px-6">
               {jobStatus?.awaitingUserAction ? (
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -733,7 +733,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                         {feedbackError}
                       </div>
                     ) : null}
-                    <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-3 sm:justify-between">
                       <button
                         type="button"
                         onClick={() => {
@@ -782,14 +782,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
         {/* Panneau d'historique (sidebar) */}
         {showHistory && (
-          <aside className="w-80 border-l border-gray-200 bg-white">
-            <div className="flex h-full flex-col">
+          <aside className="mt-6 border-t border-gray-200 bg-white shadow-lg lg:mt-0 lg:w-80 lg:border-t-0 lg:border-l lg:shadow-none">
+            <div className="flex flex-col lg:h-full">
               <div className="border-b border-gray-200 px-4 py-3">
                 <h2 className="text-sm font-semibold text-gray-700">
                   Conversations récentes
                 </h2>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="lg:flex-1 lg:overflow-y-auto">
                 {conversations.length === 0 ? (
                   <div className="p-4 text-center text-sm text-gray-400">
                     Aucune conversation
