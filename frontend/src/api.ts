@@ -511,6 +511,40 @@ export interface ActivityGenerationFeedbackPayload {
   message?: string | null;
 }
 
+export interface ConversationMessage {
+  role: string;
+  content?: string | null;
+  toolCalls?: Array<{
+    name: string;
+    callId?: string;
+    arguments: Record<string, unknown>;
+  }> | null;
+  toolCallId?: string | null;
+  name?: string | null;
+  timestamp: string;
+}
+
+export interface Conversation {
+  id: string;
+  jobId: string;
+  username: string;
+  activityId?: string | null;
+  activityTitle?: string | null;
+  status: "running" | "complete" | "error";
+  messages: ConversationMessage[];
+  modelName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationListResponse {
+  conversations: Conversation[];
+}
+
+export interface ConversationDetailResponse {
+  conversation: Conversation;
+}
+
 
 export type ActivityGenerationJobStatus =
   | "pending"
@@ -529,12 +563,132 @@ export interface ActivityGenerationJob {
   error?: string | null;
   awaitingUserAction: boolean;
   pendingToolCall?: ActivityGenerationJobToolCall | null;
+  expectingPlan: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ActivityGenerationJobOptions {
   signal?: AbortSignal;
+}
+
+function normalizeActivityGenerationJobToolCall(
+  raw: unknown
+): ActivityGenerationJobToolCall | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const source = raw as Record<string, unknown>;
+  const nameRaw = source.name;
+  const callIdRaw = source.callId ?? source.call_id;
+  const argumentsRaw = source.arguments;
+  const resultRaw = source.result;
+  const argumentsTextRaw = source.argumentsText ?? source.arguments_text;
+
+  return {
+    name: typeof nameRaw === "string" ? nameRaw : "",
+    callId:
+      typeof callIdRaw === "string"
+        ? callIdRaw
+        : callIdRaw == null
+        ? undefined
+        : String(callIdRaw),
+    arguments:
+      argumentsRaw && typeof argumentsRaw === "object"
+        ? (argumentsRaw as Record<string, unknown>)
+        : {},
+    result: resultRaw,
+    argumentsText:
+      typeof argumentsTextRaw === "string"
+        ? argumentsTextRaw
+        : argumentsTextRaw == null
+        ? undefined
+        : String(argumentsTextRaw),
+  };
+}
+
+function normalizeActivityGenerationJob(
+  raw: ActivityGenerationJob
+): ActivityGenerationJob;
+function normalizeActivityGenerationJob(
+  raw: Record<string, unknown>
+): ActivityGenerationJob;
+function normalizeActivityGenerationJob(
+  raw: Record<string, unknown> | ActivityGenerationJob
+): ActivityGenerationJob {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Invalid activity generation job payload");
+  }
+
+  const source = raw as Record<string, unknown>;
+
+  const createdAtRaw = source.createdAt ?? source.created_at;
+  const updatedAtRaw = source.updatedAt ?? source.updated_at;
+  const messageRaw = source.message;
+  const reasoningRaw = source.reasoningSummary ?? source.reasoning_summary;
+  const activityIdRaw = source.activityId ?? source.activity_id;
+  const activityTitleRaw = source.activityTitle ?? source.activity_title;
+  const activityRaw = source.activity ?? source.activity_payload;
+  const errorRaw = source.error;
+  const awaitingRaw = source.awaitingUserAction ?? source.awaiting_user_action;
+  const pendingRaw = source.pendingToolCall ?? source.pending_tool_call;
+  const expectingRaw = source.expectingPlan ?? source.expecting_plan;
+
+  return {
+    jobId:
+      typeof source.jobId === "string"
+        ? source.jobId
+        : typeof source.job_id === "string"
+        ? (source.job_id as string)
+        : typeof source.id === "string"
+        ? (source.id as string)
+        : "",
+    status:
+      (source.status as ActivityGenerationJobStatus) ??
+      ("pending" as ActivityGenerationJobStatus),
+    message:
+      typeof messageRaw === "string" || messageRaw == null
+        ? (messageRaw as string | null | undefined)
+        : String(messageRaw),
+    reasoningSummary:
+      typeof reasoningRaw === "string" || reasoningRaw == null
+        ? (reasoningRaw as string | null | undefined)
+        : String(reasoningRaw),
+    activityId:
+      typeof activityIdRaw === "string" || activityIdRaw == null
+        ? (activityIdRaw as string | null | undefined)
+        : String(activityIdRaw),
+    activityTitle:
+      typeof activityTitleRaw === "string" || activityTitleRaw == null
+        ? (activityTitleRaw as string | null | undefined)
+        : String(activityTitleRaw),
+    activity:
+      activityRaw && typeof activityRaw === "object"
+        ? (activityRaw as Record<string, unknown>)
+        : null,
+    error:
+      typeof errorRaw === "string" || errorRaw == null
+        ? (errorRaw as string | null | undefined)
+        : String(errorRaw),
+    awaitingUserAction:
+      typeof awaitingRaw === "boolean" ? awaitingRaw : Boolean(awaitingRaw),
+    pendingToolCall: normalizeActivityGenerationJobToolCall(pendingRaw),
+    expectingPlan:
+      typeof expectingRaw === "boolean" ? expectingRaw : Boolean(expectingRaw),
+    createdAt:
+      typeof createdAtRaw === "string"
+        ? createdAtRaw
+        : createdAtRaw instanceof Date
+        ? createdAtRaw.toISOString()
+        : new Date().toISOString(),
+    updatedAt:
+      typeof updatedAtRaw === "string"
+        ? updatedAtRaw
+        : updatedAtRaw instanceof Date
+        ? updatedAtRaw.toISOString()
+        : new Date().toISOString(),
+  };
 }
 
 export const activities = {
@@ -614,7 +768,7 @@ export const admin = {
           },
           token
         )
-      ),
+      ).then(normalizeActivityGenerationJob),
     getGenerationJob: async (
       jobId: string,
       token?: string | null,
@@ -628,7 +782,7 @@ export const admin = {
           },
           token
         )
-      ),
+      ).then(normalizeActivityGenerationJob),
     respondToGenerationJob: async (
       jobId: string,
       payload: ActivityGenerationFeedbackPayload,
@@ -646,6 +800,52 @@ export const admin = {
           },
           token
         )
+      ).then(normalizeActivityGenerationJob),
+  },
+  conversations: {
+    list: async (
+      token?: string | null,
+      limit?: number
+    ): Promise<ConversationListResponse> => {
+      const params = new URLSearchParams();
+      if (limit) params.set("limit", String(limit));
+      const querySuffix = params.toString();
+      const url = querySuffix
+        ? `${API_BASE_URL}/admin/conversations?${querySuffix}`
+        : `${API_BASE_URL}/admin/conversations`;
+      return fetchJson<ConversationListResponse>(
+        url,
+        withAdminCredentials({}, token)
+      );
+    },
+    delete: async (
+      conversationId: string,
+      token?: string | null
+    ): Promise<void> =>
+      fetchJson<void>(
+        `${API_BASE_URL}/admin/conversations/${conversationId}`,
+        withAdminCredentials(
+          {
+            method: "DELETE",
+          },
+          token
+        )
+      ),
+    get: async (
+      conversationId: string,
+      token?: string | null
+    ): Promise<ConversationDetailResponse> =>
+      fetchJson<ConversationDetailResponse>(
+        `${API_BASE_URL}/admin/conversations/${conversationId}`,
+        withAdminCredentials({}, token)
+      ),
+    getByJobId: async (
+      jobId: string,
+      token?: string | null
+    ): Promise<ConversationDetailResponse> =>
+      fetchJson<ConversationDetailResponse>(
+        `${API_BASE_URL}/admin/conversations/job/${jobId}`,
+        withAdminCredentials({}, token)
       ),
   },
   landingPage: {

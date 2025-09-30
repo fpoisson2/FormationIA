@@ -445,13 +445,21 @@ export function AdminActivityGenerationPage(): JSX.Element {
   return (
     <div className="space-y-8">
       <header className="space-y-3">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/60">
-            Génération d'activités
-          </p>
-          <h2 className="text-2xl font-semibold text-[color:var(--brand-black)]">
-            Conception d'activités assistée par IA
-          </h2>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[color:var(--brand-charcoal)]/60">
+              Génération d'activités
+            </p>
+            <h2 className="text-2xl font-semibold text-[color:var(--brand-black)]">
+              Conception d'activités assistée par IA
+            </h2>
+          </div>
+          <a
+            href="/admin/activity-generation/conversation"
+            className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+          >
+            Historique des conversations
+          </a>
         </div>
         <p className="text-sm leading-relaxed text-[color:var(--brand-charcoal)]/80">
           Ajustez les messages envoyés au modèle pour orienter la conception automatique des activités.

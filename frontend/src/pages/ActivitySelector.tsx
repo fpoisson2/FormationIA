@@ -2039,6 +2039,12 @@ function ActivitySelector(): JSX.Element {
         </button>
       )}
       <Link
+        to="/admin/activity-generation/conversation"
+        className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+      >
+        Historique IA
+      </Link>
+      <Link
         to="/admin"
         className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
       >
