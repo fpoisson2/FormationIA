@@ -1607,6 +1607,162 @@ def test_activity_generation_formats_revision_conversation(tmp_path, monkeypatch
     assert plan_output.get("type") == "function_call_output"
 
 
+def test_activity_generation_defers_additional_tool_calls_until_validation(
+    monkeypatch,
+) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    captured_requests: list[dict[str, object]] = []
+
+    class DummyResponse:
+        def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+            self.output = output
+
+    class FakeResponsesClient:
+        def __init__(self) -> None:
+            self._responses = [
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "propose_step_sequence_plan",
+                            "call_id": "call_plan",
+                            "arguments": {
+                                "overview": "Plan global",
+                                "steps": [
+                                    {
+                                        "id": "phase-1",
+                                        "title": "Phase 1",
+                                        "objective": "Introduire l'activité",
+                                    }
+                                ],
+                                "notes": None,
+                            },
+                        },
+                        {
+                            "type": "function_call",
+                            "name": "create_rich_content_step",
+                            "call_id": "call_unexpected_step",
+                            "arguments": {
+                                "step_id": "phase-1",
+                                "title": "Phase 1",
+                                "body": "Contenu préliminaire",
+                            },
+                        },
+                    ]
+                ),
+                DummyResponse(
+                    [
+                        {
+                            "type": "function_call",
+                            "name": "create_rich_content_step",
+                            "call_id": "call_step",
+                            "arguments": {
+                                "step_id": "phase-1",
+                                "title": "Phase 1",
+                                "body": "Contenu préliminaire",
+                            },
+                        }
+                    ]
+                ),
+            ]
+            self._index = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
+            if _is_tool_output_only_request(kwargs):
+                return DummyResponse([])
+            response = self._responses[self._index]
+            self._index += 1
+            return response
+
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+            self.created: list[str] = []
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_test_{self._counter}"
+            self.created.append(conversation_id)
+            return type("Conversation", (), {"id": conversation_id})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
+
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id: main._run_activity_generation_job(job_id),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {"theme": "Organisation"},
+            }
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["awaitingUserAction"] is True
+            assert status_payload["pendingToolCall"]["name"] == "propose_step_sequence_plan"
+
+            tool_only_requests = [
+                request
+                for request in captured_requests
+                if _is_tool_output_only_request(request)
+            ]
+            assert len(tool_only_requests) == 2
+
+            plan_result = json.loads(tool_only_requests[0]["input"][0]["output"])
+            assert plan_result["overview"] == "Plan global"
+
+            deferral_payload = json.loads(tool_only_requests[1]["input"][0]["output"])
+            assert deferral_payload["status"] == "skipped"
+            assert deferral_payload["tool"] == "create_rich_content_step"
+            assert "plan" in deferral_payload["message"].lower()
+
+            feedback_response = client.post(
+                f"/api/admin/activities/generate/{job_id}/respond",
+                json={"action": "approve"},
+            )
+            assert feedback_response.status_code == 200, feedback_response.text
+
+            next_status = client.get(
+                f"/api/admin/activities/generate/{job_id}"
+            )
+            assert next_status.status_code == 200
+            next_payload = next_status.json()
+            assert next_payload["awaitingUserAction"] is True
+            assert next_payload["pendingToolCall"]["name"] == "create_rich_content_step"
+
+    finally:
+        app.dependency_overrides.clear()
+
+    assert len(captured_requests) >= 5
+    tool_only_requests = [
+        request for request in captured_requests if _is_tool_output_only_request(request)
+    ]
+    assert len(tool_only_requests) == 3
+
+    step_payload = json.loads(tool_only_requests[-1]["input"][0]["output"])
+    assert step_payload["component"] == "rich-content"
+
+
 def test_admin_generate_activity_allows_request_developer_message_override(
     tmp_path, monkeypatch
 ) -> None:

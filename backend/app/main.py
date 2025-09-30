@@ -4148,9 +4148,101 @@ def _run_activity_generation_job(job_id: str) -> None:
             return
         cached_steps[str(step_id)] = deepcopy(result)  # type: ignore[arg-type]
 
+    def _submit_tool_output_message(
+        message: dict[str, Any],
+        *,
+        failure_message: str = "La génération a échoué lors de la transmission d'un résultat d'outil.",
+    ) -> bool:
+        conversation.append(message)
+
+        if conversation_id is not None:
+            try:
+                client.responses.create(
+                    model=model_name,
+                    input=[_serialize_conversation_entry(message)],
+                    conversation=conversation_id,
+                    tools=tools,
+                    parallel_tool_calls=False,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Erreur lors de l'envoi du résultat d'outil au modèle",
+                    exc_info=exc,
+                )
+                _update_activity_generation_job(
+                    job_id,
+                    status="error",
+                    message=failure_message,
+                    error=str(exc) or failure_message,
+                    conversation=conversation,
+                    cached_steps=cached_steps,
+                    conversation_id=conversation_id,
+                    conversation_cursor=len(conversation),
+                )
+                return False
+
+        return True
+
+    def _acknowledge_additional_tool_calls(
+        remaining_items: Sequence[Mapping[str, Any]],
+        *,
+        reason: Literal["plan_pending", "pending_validation"],
+    ) -> bool:
+        if not remaining_items:
+            return True
+
+        if reason == "plan_pending":
+            explanation = (
+                "Appel ignoré : le plan doit être validé par l'administrateur avant de poursuivre."
+            )
+        else:
+            explanation = (
+                "Appel ignoré : attends la validation de l'étape en cours avant de continuer."
+            )
+
+        for extra in remaining_items:
+            if extra.get("type") != "function_call":
+                continue
+
+            extra_name_value = extra.get("name")
+            extra_name = extra_name_value if isinstance(extra_name_value, str) else None
+
+            fallback_seed = (
+                f"{(extra_name or 'outil')}_{iteration}_{len(conversation)}"
+            )
+            call_id = _normalize_tool_call_identifier(
+                extra.get("call_id") or extra.get("id"),
+                fallback_seed=fallback_seed,
+                prefix="call",
+            )
+            extra["call_id"] = call_id
+
+            payload: dict[str, Any] = {
+                "status": "skipped",
+                "message": explanation,
+            }
+            if extra_name:
+                payload["tool"] = extra_name
+
+            try:
+                output_text = json.dumps(payload)
+            except TypeError:  # pragma: no cover - defensive
+                output_text = json.dumps(payload, default=str)
+
+            deferral_message = {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output_text,
+            }
+
+            if not _submit_tool_output_message(deferral_message):
+                return False
+
+        return True
+
     handled_tool = False
 
-    for item in filtered_items:
+    for index, item in enumerate(filtered_items):
         if item.get("type") != "function_call":
             continue
 
@@ -4256,33 +4348,8 @@ def _run_activity_generation_job(job_id: str) -> None:
             "call_id": call_id,
             "output": serialized_output,
         }
-        conversation.append(tool_output_message)
-
-        if conversation_id is not None:
-            try:
-                client.responses.create(
-                    model=model_name,
-                    input=[_serialize_conversation_entry(tool_output_message)],
-                    conversation=conversation_id,
-                    tools=tools,
-                    parallel_tool_calls=False,
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.exception(
-                    "Erreur lors de l'envoi du résultat d'outil au modèle",
-                    exc_info=exc,
-                )
-                _update_activity_generation_job(
-                    job_id,
-                    status="error",
-                    message="La génération a échoué lors de la transmission d'un résultat d'outil.",
-                    error=str(exc) or "Erreur lors de la transmission d'un résultat d'outil.",
-                    conversation=conversation,
-                    cached_steps=cached_steps,
-                    conversation_id=conversation_id,
-                    conversation_cursor=len(conversation),
-                )
-                return
+        if not _submit_tool_output_message(tool_output_message):
+            return
 
         if name == "build_step_sequence_activity":
             _update_activity_generation_job(
@@ -4360,6 +4427,15 @@ def _run_activity_generation_job(job_id: str) -> None:
         }
         if arguments_text is not None:
             pending_tool_call["argumentsText"] = arguments_text
+
+        remaining_items = filtered_items[index + 1 :]
+        defer_reason: Literal["plan_pending", "pending_validation"] = (
+            "plan_pending" if expecting_plan else "pending_validation"
+        )
+        if not _acknowledge_additional_tool_calls(
+            remaining_items, reason=defer_reason
+        ):
+            return
 
         message = "Résultat disponible."
         update_kwargs: dict[str, Any] = {}
