@@ -2011,7 +2011,7 @@ function ActivitySelector(): JSX.Element {
 
   const isLogoutDisabled = isLoggingOut || isAdminProcessing;
   const adminActionControls = canShowAdminButton ? (
-    <>
+    <div className="flex flex-wrap items-center gap-2">
       {isEditMode ? (
         <>
           <button
@@ -2039,23 +2039,32 @@ function ActivitySelector(): JSX.Element {
         </button>
       )}
       <Link
-        to="/admin/activity-generation/conversation"
-        className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
-      >
-        Historique IA
-      </Link>
-      <Link
         to="/admin"
         className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
       >
         Administration
       </Link>
-    </>
+    </div>
+  ) : null;
+
+  const generationShortcut = canShowAdminButton ? (
+    <div className="flex flex-col gap-2 rounded-2xl border border-sky-200/70 bg-sky-50/90 px-4 py-3 text-left text-sky-900 shadow-sm">
+      <span className="text-xs font-semibold uppercase tracking-wide text-sky-700/80">
+        Assistant IA
+      </span>
+      <Link
+        to="/admin/activity-generation/conversation"
+        className="inline-flex items-center justify-center rounded-full border border-sky-500/40 bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700"
+      >
+        Générer une activité
+      </Link>
+    </div>
   ) : null;
 
   const headerActions =
-    adminActionControls || canLogout ? (
-      <div className="flex flex-wrap items-center gap-2">
+    generationShortcut || adminActionControls || canLogout ? (
+      <div className="flex flex-wrap items-center gap-3">
+        {generationShortcut}
         {adminActionControls}
         {canLogout ? (
           <button
