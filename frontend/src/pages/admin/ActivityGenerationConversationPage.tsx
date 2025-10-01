@@ -6,6 +6,7 @@ import {
   type ActivityGenerationJob,
   type ActivityGenerationJobToolCall,
   type Conversation,
+  type ConversationStatus,
   type GenerateActivityPayload,
 } from "../../api";
 import { ConversationView } from "../../components/ConversationView";
@@ -59,6 +60,13 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const jobStatusRef = useRef<ActivityGenerationJob | null>(null);
   const STREAM_RETRY_MESSAGE =
     "La connexion temps réel a été interrompue. Nouvelle tentative...";
+
+  const jobProgressStatus: ConversationStatus | null = useMemo(() => {
+    const status = jobStatus?.status ?? conversation?.status;
+    return status ?? null;
+  }, [conversation?.status, jobStatus?.status]);
+
+  const isJobActive = jobProgressStatus === "pending" || jobProgressStatus === "running";
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -932,16 +940,22 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                 {conversation.activityTitle || "Génération d'activité"}
               </h1>
               <p className="text-xs text-gray-500">
-                {conversation.status === "running" && (
+                {jobProgressStatus === "pending" && (
+                  <span className="inline-flex items-center">
+                    <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-green-500" />
+                    En file d'attente...
+                  </span>
+                )}
+                {jobProgressStatus === "running" && (
                   <span className="inline-flex items-center">
                     <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-green-500" />
                     En cours...
                   </span>
                 )}
-                {conversation.status === "complete" && (
+                {jobProgressStatus === "complete" && (
                   <span className="text-green-600">✓ Terminée</span>
                 )}
-                {conversation.status === "error" && (
+                {jobProgressStatus === "error" && (
                   <span className="text-red-600">✗ Erreur</span>
                 )}
               </p>
@@ -979,7 +993,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           <div className="flex-1 lg:overflow-hidden">
             <ConversationView
               messages={conversation.messages}
-              isLoading={isStreaming && conversation.status === "running"}
+              isLoading={isStreaming && isJobActive}
             />
           </div>
           {jobId && (

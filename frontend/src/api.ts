@@ -524,13 +524,15 @@ export interface ConversationMessage {
   timestamp: string;
 }
 
+export type ConversationStatus = "pending" | "running" | "complete" | "error";
+
 export interface Conversation {
   id: string;
   jobId: string;
   username: string;
   activityId?: string | null;
   activityTitle?: string | null;
-  status: "running" | "complete" | "error";
+  status: ConversationStatus;
   messages: ConversationMessage[];
   modelName: string;
   createdAt: string;
