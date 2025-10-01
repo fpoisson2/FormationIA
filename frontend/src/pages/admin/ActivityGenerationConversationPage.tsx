@@ -55,6 +55,10 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   const streamControllerRef = useRef<AbortController | null>(null);
+  const streamRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const jobStatusRef = useRef<ActivityGenerationJob | null>(null);
+  const STREAM_RETRY_MESSAGE =
+    "La connexion temps réel a été interrompue. Nouvelle tentative...";
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -181,6 +185,10 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     void refreshJobStatus();
   }, [jobId, refreshJobStatus]);
 
+  useEffect(() => {
+    jobStatusRef.current = jobStatus;
+  }, [jobStatus]);
+
   // Diffusion temps réel de l'état du job via SSE
   useEffect(() => {
     if (!jobId || !token) {
@@ -188,15 +196,26 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     }
 
     let isCancelled = false;
-    const controller = new AbortController();
+    const startStream = async (attempt = 0): Promise<void> => {
+      if (isCancelled) {
+        return;
+      }
 
-    if (streamControllerRef.current) {
-      streamControllerRef.current.abort();
-    }
-    streamControllerRef.current = controller;
-
-    const startStream = async () => {
+      const controller = new AbortController();
+      if (streamControllerRef.current) {
+        streamControllerRef.current.abort();
+      }
+      streamControllerRef.current = controller;
+      streamRetryTimeoutRef.current &&
+        clearTimeout(streamRetryTimeoutRef.current);
+      streamRetryTimeoutRef.current = null;
+      setError((current) =>
+        current === STREAM_RETRY_MESSAGE ? null : current
+      );
       setIsStreaming(true);
+
+      let shouldRetry = false;
+      let streamClosedUnexpectedly = false;
 
       try {
         const headers: Record<string, string> = {
@@ -219,23 +238,34 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         );
 
         if (!response.ok) {
-          const message = await response.text();
-          throw new Error(
-            message || "Impossible de suivre la génération en temps réel."
-          );
+          const message = (await response.text()).trim();
+          const errorMessage =
+            message ||
+            `Impossible de suivre la génération en temps réel (${response.status}).`;
+          console.error("Flux SSE indisponible:", errorMessage);
+          if (response.status >= 500 && response.status < 600) {
+            shouldRetry = true;
+            setError((current) =>
+              current ?? STREAM_RETRY_MESSAGE
+            );
+          } else {
+            setError(errorMessage);
+          }
+          return;
         }
 
         if (!response.body) {
-          throw new Error("Flux SSE indisponible.");
+          console.error("Flux SSE sans corps de réponse disponible");
+          setError((current) => current ?? STREAM_RETRY_MESSAGE);
+          shouldRetry = true;
+          return;
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
 
-        const handleEvent = (
-          rawEvent: string
-        ): void => {
+        const handleEvent = (rawEvent: string): void => {
           if (isCancelled) {
             return;
           }
@@ -277,6 +307,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             const parsed = JSON.parse(payloadText) as Record<string, unknown>;
 
             if (eventName === "update") {
+              setError((current) =>
+                current === STREAM_RETRY_MESSAGE ? null : current
+              );
               const conversationPayload = parsed.conversation;
               if (
                 conversationPayload &&
@@ -313,6 +346,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         while (!isCancelled) {
           const { value, done } = await reader.read();
           if (done) {
+            streamClosedUnexpectedly = true;
             break;
           }
           buffer += decoder.decode(value, { stream: true });
@@ -345,10 +379,51 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           return;
         }
         console.error("Erreur lors du suivi SSE:", err);
+        shouldRetry = true;
+        setError((current) =>
+          current ?? STREAM_RETRY_MESSAGE
+        );
       } finally {
         if (!isCancelled) {
           setIsStreaming(false);
         }
+        if (streamControllerRef.current === controller) {
+          streamControllerRef.current = null;
+        }
+      }
+
+      if (isCancelled) {
+        return;
+      }
+
+      let latestStatus = jobStatusRef.current;
+      if (!latestStatus) {
+        try {
+          const latestJob = await admin.activities.getGenerationJob(jobId, token);
+          setJobStatus(latestJob);
+          jobStatusRef.current = latestJob;
+          latestStatus = latestJob;
+        } catch (statusError) {
+          console.error(
+            "Erreur lors de la récupération du job après l'arrêt du flux:",
+            statusError
+          );
+        }
+      }
+
+      const needsRetry =
+        (shouldRetry || streamClosedUnexpectedly) &&
+        latestStatus &&
+        latestStatus.status === "running";
+
+      if (needsRetry) {
+        const delay = Math.min(4000, 500 * 2 ** attempt);
+        streamRetryTimeoutRef.current = setTimeout(() => {
+          streamRetryTimeoutRef.current = null;
+          if (!isCancelled) {
+            void startStream(attempt + 1);
+          }
+        }, delay);
       }
     };
 
@@ -356,8 +431,12 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
     return () => {
       isCancelled = true;
-      controller.abort();
-      if (streamControllerRef.current === controller) {
+      if (streamRetryTimeoutRef.current) {
+        clearTimeout(streamRetryTimeoutRef.current);
+        streamRetryTimeoutRef.current = null;
+      }
+      if (streamControllerRef.current) {
+        streamControllerRef.current.abort();
         streamControllerRef.current = null;
       }
       setIsStreaming(false);
