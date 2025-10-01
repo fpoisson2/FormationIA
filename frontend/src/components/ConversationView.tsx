@@ -139,6 +139,9 @@ export function ConversationView({
       if (msg.role === "system" || msg.role === "developer") {
         return false;
       }
+      if (msg.role === "tool") {
+        return false;
+      }
       const content = typeof msg.content === "string" ? msg.content.trim() : "";
       if (
         msg.role === "assistant" &&

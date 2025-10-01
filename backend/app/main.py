@@ -5032,35 +5032,34 @@ def _run_activity_generation_job(job_id: str) -> None:
         return
 
     if reasoning_summary is not None:
-        cleaned_summary = reasoning_summary.strip()
-        if not cleaned_summary:
-            cleaned_summary = "Le modèle n'a pas fourni de résumé de raisonnement."
-        summary_message = f"Résumé du raisonnement\n\n{cleaned_summary}".strip()
-        normalized_summary = _normalize_plain_text(summary_message)
-        if normalized_summary:
-            summary_message = normalized_summary
-        reasoning_item = next(
-            (item for item in filtered_items if item.get("type") in {"reasoning", "reasoning_summary"}),
-            None,
-        )
-        if reasoning_item is None:
-            filtered_items.append(
-                {
-                    "type": "reasoning_summary",
-                    "role": "assistant",
-                    "content": summary_message,
-                }
+        cleaned_summary = _normalize_plain_text(reasoning_summary) or reasoning_summary.strip()
+        if cleaned_summary:
+            summary_message = f"Résumé du raisonnement\n\n{cleaned_summary}".strip()
+            normalized_summary = _normalize_plain_text(summary_message)
+            if normalized_summary:
+                summary_message = normalized_summary
+            reasoning_item = next(
+                (item for item in filtered_items if item.get("type") in {"reasoning", "reasoning_summary"}),
+                None,
             )
-        else:
-            existing_content = ""
-            for key in ("content", "text"):
-                value = reasoning_item.get(key)
-                if isinstance(value, str) and value.strip():
-                    existing_content = value.strip()
-                    break
-            if not existing_content:
-                reasoning_item["content"] = summary_message
-            reasoning_item.setdefault("role", "assistant")
+            if reasoning_item is None:
+                filtered_items.append(
+                    {
+                        "type": "reasoning_summary",
+                        "role": "assistant",
+                        "content": summary_message,
+                    }
+                )
+            else:
+                existing_content = ""
+                for key in ("content", "text"):
+                    value = reasoning_item.get(key)
+                    if isinstance(value, str) and value.strip():
+                        existing_content = value.strip()
+                        break
+                if not existing_content:
+                    reasoning_item["content"] = summary_message
+                reasoning_item.setdefault("role", "assistant")
 
     def _coerce_text_from_content(value: Any) -> str | None:
         if value is None:
@@ -6051,10 +6050,11 @@ def _sync_conversation_from_job(
                 or _extract_text(raw_message.get("summary"))
                 or _extract_text(raw_message.get("content"))
             )
-            if summary_text:
-                content = f"Résumé du raisonnement\n\n{summary_text}".strip()
+            normalized_summary = _normalize_plain_text(summary_text)
+            if normalized_summary:
+                content = f"Résumé du raisonnement\n\n{normalized_summary}".strip()
             else:
-                content = "Résumé du raisonnement"
+                continue
         else:
             content = _extract_text(raw_message.get("content")) or _extract_text(raw_message.get("text"))
             tool_calls = _normalize_tool_calls(raw_message.get("tool_calls"))
