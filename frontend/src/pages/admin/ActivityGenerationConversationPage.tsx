@@ -59,9 +59,56 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
 
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const lastConversationUpdateRef = useRef<number>(0);
+  const hasConversationSnapshotRef = useRef(false);
+
+  const resolveErrorMessage = useCallback(
+    (error: unknown, fallback: string) => {
+      const extract = (value: unknown): string | null => {
+        if (!value) {
+          return null;
+        }
+        if (value instanceof Error) {
+          return extract(value.message) ?? value.message ?? null;
+        }
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return null;
+          }
+          try {
+            const parsed = JSON.parse(trimmed) as { detail?: unknown };
+            if (parsed && typeof parsed.detail === "string") {
+              const detail = parsed.detail.trim();
+              if (detail) {
+                return detail;
+              }
+            }
+          } catch {
+            // ignore json parse errors
+          }
+          return trimmed;
+        }
+        if (typeof value === "object") {
+          const detail = (value as { detail?: unknown }).detail;
+          if (typeof detail === "string" && detail.trim()) {
+            return detail.trim();
+          }
+        }
+        return null;
+      };
+
+      const resolved = extract(error);
+      if (resolved && resolved.trim()) {
+        return resolved.trim();
+      }
+      return fallback;
+    },
+    []
+  );
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -113,10 +160,12 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       setConversation(null);
       setJobStatus(null);
       setError(null);
+      setConnectionWarning(null);
       setPromptText("");
       setFeedbackMessage("");
       setFeedbackError(null);
       lastConversationUpdateRef.current = 0;
+      hasConversationSnapshotRef.current = false;
       if (shouldCloseSidebar) {
         setIsSidebarOpen(false);
       }
@@ -127,6 +176,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const applyConversationUpdate = useCallback(
     (nextConversation: Conversation) => {
       lastConversationUpdateRef.current = Date.now();
+      hasConversationSnapshotRef.current = true;
+      setConnectionWarning(null);
       setConversation((previous) => {
         if (previous && previous.updatedAt === nextConversation.updatedAt) {
           return previous;
@@ -226,6 +277,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         streamAbortControllerRef.current = null;
       }
       setIsStreaming(false);
+      setConnectionWarning(null);
       return;
     }
 
@@ -242,6 +294,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         streamAbortControllerRef.current = null;
       }
       setIsStreaming(false);
+      setConnectionWarning(null);
       return;
     }
 
@@ -252,6 +305,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     const controller = new AbortController();
     streamAbortControllerRef.current = controller;
     setIsStreaming(true);
+    setConnectionWarning(null);
 
     const startStream = async () => {
       try {
@@ -269,17 +323,31 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             });
           },
           onError: (message) => {
-            setError(message);
+            setError(
+              resolveErrorMessage(
+                message,
+                "Erreur lors de la connexion au flux de conversation."
+              )
+            );
           },
         });
       } catch (streamError) {
         if (!controller.signal.aborted) {
           console.error("Erreur de diffusion de la conversation:", streamError);
-          setError(
-            streamError instanceof Error
-              ? streamError.message
-              : "Erreur lors de la connexion au flux de conversation."
+          const resolved = resolveErrorMessage(
+            streamError,
+            "Erreur lors de la connexion au flux de conversation."
           );
+          if (hasConversationSnapshotRef.current) {
+            const warningMessage = resolved.includes(
+              "Impossible d'établir la connexion temps réel"
+            )
+              ? "Connexion temps réel indisponible. Actualisation automatique activée."
+              : resolved;
+            setConnectionWarning(warningMessage);
+          } else {
+            setError(resolved);
+          }
         }
       } finally {
         if (streamAbortControllerRef.current === controller) {
@@ -308,6 +376,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     jobStatus?.pendingToolCall,
     jobStatus?.status,
     isStreaming,
+    resolveErrorMessage,
     refreshJobStatus,
     token,
   ]);
@@ -434,11 +503,29 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         const refreshed = await admin.conversations.getByJobId(jobId, token);
         applyConversationUpdate(refreshed.conversation);
       } catch (err) {
-        setFeedbackError(
-          err instanceof Error
-            ? err.message
-            : "Impossible d'envoyer la réponse au modèle."
+        const message = resolveErrorMessage(
+          err,
+          "Impossible d'envoyer la réponse au modèle."
         );
+        if (message.includes("Aucun retour n'est attendu")) {
+          setFeedbackError(
+            "Aucun retour n'est attendu pour cette tâche actuellement."
+          );
+          void refreshJobStatus();
+          void admin.conversations
+            .getByJobId(jobId, token)
+            .then((response) => {
+              applyConversationUpdate(response.conversation);
+            })
+            .catch((fallbackError) => {
+              console.warn(
+                "Impossible de rafraîchir la conversation après un refus de retour",
+                fallbackError
+              );
+            });
+        } else {
+          setFeedbackError(message);
+        }
       } finally {
         setIsSendingFeedback(false);
       }
@@ -450,6 +537,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       jobId,
       jobStatus?.expectingPlan,
       jobStatus?.pendingToolCall?.name,
+      resolveErrorMessage,
+      refreshJobStatus,
       token,
     ]
   );
@@ -461,6 +550,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         if (conversation && conversation.id === conversationId) {
           setConversation(null);
           setJobStatus(null);
+          hasConversationSnapshotRef.current = false;
+          setConnectionWarning(null);
         }
         if (redirectToHistory) {
           navigate(buildConversationUrl(null), { replace: true });
@@ -922,6 +1013,12 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                 Fermer
               </button>
             </div>
+          </div>
+        ) : null}
+
+        {connectionWarning ? (
+          <div className="border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            {connectionWarning}
           </div>
         ) : null}
 

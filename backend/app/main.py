@@ -3799,6 +3799,8 @@ def _require_authenticated_local_user(
     if not token:
         token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
     if not token:
+        token = request.query_params.get("token")
+    if not token:
         raise HTTPException(status_code=401, detail="Authentification administrateur requise.")
 
     try:

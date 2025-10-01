@@ -703,8 +703,135 @@ async function streamConversationByJob(
   token: string | null | undefined,
   handlers: ConversationStreamHandlers
 ): Promise<void> {
+  const supportsEventSource =
+    typeof window !== "undefined" && typeof window.EventSource === "function";
+
+  const buildStreamUrl = (includeToken: boolean): string => {
+    const params = new URLSearchParams();
+    if (includeToken && token) {
+      params.set("token", token);
+    }
+    const query = params.toString();
+    return query
+      ? `${API_BASE_URL}/admin/conversations/job/${jobId}/stream?${query}`
+      : `${API_BASE_URL}/admin/conversations/job/${jobId}/stream`;
+  };
+
+  const parseEventPayload = (raw: string | null | undefined): unknown => {
+    if (!raw) {
+      return null;
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return null;
+    }
+    try {
+      return JSON.parse(trimmed);
+    } catch (error) {
+      console.warn("Événement SSE conversation invalide", error);
+      return null;
+    }
+  };
+
+  if (supportsEventSource) {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let source: EventSource | null = null;
+
+      const cleanup = (close = true) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (close && source) {
+          try {
+            source.close();
+          } catch (error) {
+            console.warn("Erreur lors de la fermeture du flux SSE", error);
+          }
+        }
+        handlers.signal.removeEventListener("abort", abortListener);
+      };
+
+      const abortListener = () => {
+        cleanup();
+        resolve();
+      };
+
+      if (handlers.signal.aborted) {
+        resolve();
+        return;
+      }
+
+      handlers.signal.addEventListener("abort", abortListener, { once: true });
+
+      try {
+        source = new EventSource(buildStreamUrl(true), { withCredentials: true });
+      } catch (error) {
+        cleanup(false);
+        reject(
+          error instanceof Error
+            ? error
+            : new Error("Impossible d'établir la connexion temps réel avec l'assistant.")
+        );
+        return;
+      }
+
+      const handleConversation = (event: MessageEvent<string>) => {
+        const parsed = parseEventPayload(event.data);
+        if (parsed && typeof parsed === "object") {
+          handlers.onConversation?.(parsed as Conversation);
+        }
+      };
+
+      const handleJob = (event: MessageEvent<string>) => {
+        const parsed = parseEventPayload(event.data);
+        if (parsed && typeof parsed === "object") {
+          handlers.onJob?.(
+            normalizeActivityGenerationJob(parsed as Record<string, unknown>)
+          );
+        }
+      };
+
+      const handleServerError = (event: MessageEvent<string>) => {
+        const parsed = parseEventPayload(event.data);
+        const message =
+          parsed && typeof parsed === "object" && "message" in parsed
+            ? String((parsed as { message?: unknown }).message || "")
+            : "Erreur lors de la diffusion de la conversation.";
+        handlers.onError?.(
+          message || "Erreur lors de la diffusion de la conversation."
+        );
+      };
+
+      const handleClose = () => {
+        cleanup();
+        resolve();
+      };
+
+      source.addEventListener("conversation", handleConversation as EventListener);
+      source.addEventListener("job", handleJob as EventListener);
+      source.addEventListener("close", handleClose as EventListener);
+
+      source.onerror = (event: Event) => {
+        if ("data" in event && typeof (event as MessageEvent<string>).data === "string") {
+          handleServerError(event as MessageEvent<string>);
+          return;
+        }
+        if (source && source.readyState === EventSource.CLOSED) {
+          handleClose();
+          return;
+        }
+        cleanup();
+        reject(
+          new Error("Impossible d'établir la connexion temps réel avec l'assistant.")
+        );
+      };
+    });
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/admin/conversations/job/${jobId}/stream`,
+    buildStreamUrl(false),
     withAdminCredentials(
       {
         headers: {
@@ -750,16 +877,7 @@ async function streamConversationByJob(
       }
     }
 
-    const trimmed = dataPayload.trim();
-    let parsed: unknown = null;
-    if (trimmed) {
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch (error) {
-        console.warn("Événement SSE conversation invalide", error);
-        return;
-      }
-    }
+    const parsed = parseEventPayload(dataPayload);
 
     if (eventName === "conversation" && parsed && typeof parsed === "object") {
       handlers.onConversation?.(parsed as Conversation);
@@ -773,10 +891,12 @@ async function streamConversationByJob(
 
     if (eventName === "error") {
       const message =
-        typeof (parsed as { message?: unknown })?.message === "string"
-          ? (parsed as { message: string }).message
+        parsed && typeof parsed === "object" && "message" in parsed
+          ? String((parsed as { message?: unknown }).message || "")
           : "Erreur lors de la diffusion de la conversation.";
-      handlers.onError?.(message);
+      handlers.onError?.(
+        message || "Erreur lors de la diffusion de la conversation."
+      );
       return;
     }
 
