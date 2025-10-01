@@ -543,10 +543,20 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const showLoadingState = Boolean(jobId && isLoading && !conversation);
   const hasBlockingError = Boolean(jobId && error && !conversation);
   const showGlobalErrorBanner = Boolean(jobId && error && conversation);
+  const lastMessage = conversation?.messages?.[conversation.messages.length - 1];
+  const lastAssistantMessageHasContent = Boolean(
+    lastMessage &&
+      lastMessage.role === "assistant" &&
+      ((typeof lastMessage.content === "string" && lastMessage.content.trim().length > 0) ||
+        (Array.isArray(lastMessage.toolCalls) && lastMessage.toolCalls.length > 0))
+  );
+
   const conversationViewIsLoading = Boolean(
     jobId &&
       conversation?.status === "running" &&
       !jobStatus?.awaitingUserAction &&
+      !jobStatus?.pendingToolCall &&
+      !lastAssistantMessageHasContent &&
       (isPolling || isJobLoading)
   );
 
