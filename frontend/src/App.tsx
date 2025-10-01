@@ -33,6 +33,8 @@ function AdminLoginRedirect(): JSX.Element {
   const stateRedirect =
     typeof locationState?.from === "string" ? locationState.from : null;
 
+  const ADMIN_SAFE_PREFIXES = ["/admin", "/assistant-ia"];
+
   const resolveTarget = (candidate: string | null): string | null => {
     if (typeof candidate !== "string") {
       return null;
@@ -40,7 +42,10 @@ function AdminLoginRedirect(): JSX.Element {
     if (!candidate.startsWith("/")) {
       return null;
     }
-    return candidate.startsWith("/admin") ? candidate : null;
+    if (ADMIN_SAFE_PREFIXES.some((prefix) => candidate.startsWith(prefix))) {
+      return candidate;
+    }
+    return null;
   };
 
   const desiredRedirect =
