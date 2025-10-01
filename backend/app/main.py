@@ -2484,6 +2484,25 @@ def _update_activity_generation_job(
         return deepcopy(job)
 
 
+def _retry_activity_generation_job(job_id: str) -> _ActivityGenerationJobState | None:
+    with _ACTIVITY_GENERATION_LOCK:
+        job = _ACTIVITY_GENERATION_JOBS.get(job_id)
+        if job is None:
+            return None
+
+        job.status = "running"
+        job.message = "Nouvelle tentative de génération en cours..."
+        job.error = None
+        job.awaiting_user_action = False
+        job.pending_tool_call = None
+        job.conversation_cursor = max(
+            0, min(job.conversation_cursor, len(job.conversation))
+        )
+        job.updated_at = datetime.utcnow()
+        _persist_activity_generation_jobs_locked()
+        return deepcopy(job)
+
+
 def _serialize_activity_generation_job(
     job: _ActivityGenerationJobState,
 ) -> ActivityGenerationJobStatus:
@@ -4908,7 +4927,9 @@ def _run_activity_generation_job(job_id: str) -> None:
                 conversation=conversation,
                 cached_steps=cached_steps,
                 conversation_id=conversation_id,
-                conversation_cursor=len(conversation),
+                conversation_cursor=conversation_cursor,
+                awaiting_user_action=False,
+                pending_tool_call=None,
             )
             return
 
@@ -5614,6 +5635,27 @@ def admin_respond_activity_generation(
     _: LocalUser = Depends(_require_admin_user),
 ) -> ActivityGenerationJobStatus:
     return _process_activity_generation_feedback(job_id, payload)
+
+
+@admin_router.post("/activities/generate/{job_id}/retry")
+def admin_retry_activity_generation(
+    job_id: str, _: LocalUser = Depends(_require_admin_user)
+) -> ActivityGenerationJobStatus:
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+    if job.status != "error":
+        raise HTTPException(
+            status_code=409,
+            detail="La tâche n'est pas en erreur et ne peut pas être relancée.",
+        )
+
+    retried = _retry_activity_generation_job(job_id)
+    if retried is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+
+    _launch_activity_generation_job(job_id)
+    return _serialize_activity_generation_job(retried)
 
 
 @admin_router.get("/activities/generate/{job_id}")

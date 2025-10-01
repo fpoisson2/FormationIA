@@ -89,6 +89,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [isRetryingJob, setIsRetryingJob] = useState(false);
   const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
 
   const streamAbortControllerRef = useRef<AbortController | null>(null);
@@ -685,6 +686,50 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     ]
   );
 
+  const handleRetryGeneration = useCallback(async () => {
+    if (!jobId || isRetryingJob) {
+      return;
+    }
+
+    setIsRetryingJob(true);
+    setError(null);
+    setConnectionWarning(null);
+
+    try {
+      const updatedJob = await admin.activities.retryGenerationJob(jobId, token);
+      setJobStatus(updatedJob);
+      const now = Date.now();
+      lastStreamActivityRef.current = now;
+      lastConversationUpdateRef.current = now;
+      void admin.conversations
+        .getByJobId(jobId, token)
+        .then((response) => {
+          applyConversationUpdate(response.conversation);
+        })
+        .catch((conversationError) => {
+          console.warn(
+            "Impossible de rafraîchir la conversation après une relance",
+            conversationError
+          );
+        });
+    } catch (err) {
+      setError(
+        resolveErrorMessage(
+          err,
+          "Impossible de relancer la génération."
+        )
+      );
+    } finally {
+      setIsRetryingJob(false);
+    }
+  }, [
+    applyConversationUpdate,
+    isRetryingJob,
+    jobId,
+    resolveErrorMessage,
+    token,
+  ]);
+
   const deleteConversationById = useCallback(
     async (conversationId: string, redirectToHistory = false) => {
       try {
@@ -1187,15 +1232,31 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
         {showGlobalErrorBanner ? (
           <div className="border-l-4 border-red-400 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <div className="flex items-start justify-between gap-3">
-              <span>{error}</span>
-              <button
-                type="button"
-                onClick={() => setError(null)}
-                className="text-xs font-semibold uppercase tracking-wide text-red-600 transition hover:text-red-700"
-              >
-                Fermer
-              </button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span className="flex-1">{error}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                {jobStatus?.status === "error" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleRetryGeneration();
+                    }}
+                    disabled={isRetryingJob}
+                    className="rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isRetryingJob
+                      ? "Nouvelle tentative..."
+                      : "Réessayer la génération"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  className="text-xs font-semibold uppercase tracking-wide text-red-600 transition hover:text-red-700"
+                >
+                  Fermer
+                </button>
+              </div>
             </div>
           </div>
         ) : null}

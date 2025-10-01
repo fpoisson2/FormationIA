@@ -2061,3 +2061,123 @@ def test_admin_generate_activity_allows_request_system_message_override(
         )
     finally:
         app.dependency_overrides.clear()
+
+
+def test_admin_generate_activity_retry_after_model_error(tmp_path, monkeypatch) -> None:
+    admin_user = LocalUser(username="admin", password_hash="bcrypt$dummy", roles=["admin"])
+    app.dependency_overrides[_require_admin_user] = lambda: admin_user
+
+    config_path = tmp_path / "activities_config.json"
+    monkeypatch.setattr("backend.app.main.ACTIVITIES_CONFIG_PATH", config_path)
+
+    captured_requests: list[dict[str, object]] = []
+
+    class DummyResponse:
+        def __init__(self, output) -> None:  # type: ignore[no-untyped-def]
+            self.output = output
+
+    class FakeResponsesClient:
+        def __init__(self) -> None:
+            self._call_count = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            captured_requests.append(kwargs)
+            self._call_count += 1
+            if self._call_count == 1:
+                raise RuntimeError("Appel au modèle simulant une panne")
+            return DummyResponse(
+                [
+                    {
+                        "type": "function_call",
+                        "name": "propose_step_sequence_plan",
+                        "call_id": "call_retry_plan",
+                        "arguments": {
+                            "overview": "Plan global",
+                            "steps": [
+                                {
+                                    "id": "etape_1",
+                                    "title": "Introduction",
+                                    "objective": "Décrire l'activité",
+                                }
+                            ],
+                            "notes": None,
+                        },
+                    }
+                ]
+            )
+
+    class FakeConversationsClient:
+        def __init__(self) -> None:
+            self._counter = 0
+
+        def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            self._counter += 1
+            conversation_id = f"conv_retry_{self._counter}"
+            return type("Conversation", (), {"id": conversation_id})()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.responses = FakeResponsesClient()
+            self.conversations = FakeConversationsClient()
+
+    fake_client = FakeClient()
+    monkeypatch.setattr("backend.app.main._ensure_client", lambda: fake_client)
+    monkeypatch.setattr(
+        "backend.app.main._launch_activity_generation_job",
+        lambda job_id: main._run_activity_generation_job(job_id),
+    )
+    main._ACTIVITY_GENERATION_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            payload = {
+                "model": "gpt-5-mini",
+                "verbosity": "medium",
+                "thinking": "medium",
+                "details": {
+                    "theme": "Découverte",
+                    "audience": "Formateurs",
+                    "objectives": "Initier une relance",
+                },
+            }
+
+            response = client.post("/api/admin/activities/generate", json=payload)
+            assert response.status_code == 200, response.text
+
+            job_id = response.json().get("jobId")
+            assert isinstance(job_id, str) and job_id
+
+            job_state = main._get_activity_generation_job(job_id)
+            assert job_state is not None
+            assert job_state.status == "error"
+            assert job_state.message == "La génération a échoué lors de l'appel au modèle."
+            assert job_state.conversation_cursor == 0
+
+            status_response = client.get(f"/api/admin/activities/generate/{job_id}")
+            assert status_response.status_code == 200
+            status_payload = status_response.json()
+            assert status_payload["status"] == "error"
+            assert status_payload["message"] == "La génération a échoué lors de l'appel au modèle."
+
+            retry_response = client.post(
+                f"/api/admin/activities/generate/{job_id}/retry"
+            )
+            assert retry_response.status_code == 200, retry_response.text
+            retry_payload = retry_response.json()
+            assert retry_payload["status"] == "running"
+            assert (
+                retry_payload["message"]
+                == "Nouvelle tentative de génération en cours..."
+            )
+
+            refreshed_state = main._get_activity_generation_job(job_id)
+            assert refreshed_state is not None
+            assert refreshed_state.status == "running"
+            assert refreshed_state.awaiting_user_action is True
+            assert refreshed_state.pending_tool_call is not None
+            assert refreshed_state.message.startswith("Plan proposé")
+            assert refreshed_state.conversation_cursor == len(
+                refreshed_state.conversation
+            )
+    finally:
+        app.dependency_overrides.clear()
