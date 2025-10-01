@@ -516,7 +516,6 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     jobStatus?.awaitingUserAction,
     jobStatus?.pendingToolCall,
     jobStatus?.status,
-    isStreaming,
     resolveErrorMessage,
     refreshJobStatus,
     token,
