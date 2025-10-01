@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import json
@@ -19,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
-from typing import Any, Generator, Literal, Mapping, Sequence
+from typing import Any, AsyncGenerator, Generator, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -3798,6 +3799,8 @@ def _require_authenticated_local_user(
     if not token:
         token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
     if not token:
+        token = request.query_params.get("token")
+    if not token:
         raise HTTPException(status_code=401, detail="Authentification administrateur requise.")
 
     try:
@@ -5031,35 +5034,34 @@ def _run_activity_generation_job(job_id: str) -> None:
         return
 
     if reasoning_summary is not None:
-        cleaned_summary = reasoning_summary.strip()
-        if not cleaned_summary:
-            cleaned_summary = "Le modèle n'a pas fourni de résumé de raisonnement."
-        summary_message = f"Résumé du raisonnement\n\n{cleaned_summary}".strip()
-        normalized_summary = _normalize_plain_text(summary_message)
-        if normalized_summary:
-            summary_message = normalized_summary
-        reasoning_item = next(
-            (item for item in filtered_items if item.get("type") in {"reasoning", "reasoning_summary"}),
-            None,
-        )
-        if reasoning_item is None:
-            filtered_items.append(
-                {
-                    "type": "reasoning_summary",
-                    "role": "assistant",
-                    "content": summary_message,
-                }
+        cleaned_summary = _normalize_plain_text(reasoning_summary) or reasoning_summary.strip()
+        if cleaned_summary:
+            summary_message = f"Résumé du raisonnement\n\n{cleaned_summary}".strip()
+            normalized_summary = _normalize_plain_text(summary_message)
+            if normalized_summary:
+                summary_message = normalized_summary
+            reasoning_item = next(
+                (item for item in filtered_items if item.get("type") in {"reasoning", "reasoning_summary"}),
+                None,
             )
-        else:
-            existing_content = ""
-            for key in ("content", "text"):
-                value = reasoning_item.get(key)
-                if isinstance(value, str) and value.strip():
-                    existing_content = value.strip()
-                    break
-            if not existing_content:
-                reasoning_item["content"] = summary_message
-            reasoning_item.setdefault("role", "assistant")
+            if reasoning_item is None:
+                filtered_items.append(
+                    {
+                        "type": "reasoning_summary",
+                        "role": "assistant",
+                        "content": summary_message,
+                    }
+                )
+            else:
+                existing_content = ""
+                for key in ("content", "text"):
+                    value = reasoning_item.get(key)
+                    if isinstance(value, str) and value.strip():
+                        existing_content = value.strip()
+                        break
+                if not existing_content:
+                    reasoning_item["content"] = summary_message
+                reasoning_item.setdefault("role", "assistant")
 
     def _coerce_text_from_content(value: Any) -> str | None:
         if value is None:
@@ -5778,11 +5780,172 @@ def admin_get_conversation_by_job(
     return ConversationDetailResponse(conversation=conversation.to_dict())
 
 
+@admin_router.get("/conversations/job/{job_id}/stream")
+async def admin_stream_conversation_by_job(
+    job_id: str,
+    user: LocalUser = Depends(_require_admin_user),
+) -> StreamingResponse:
+    """Diffuse les mises à jour d'une conversation de génération via SSE."""
+
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de génération introuvable.")
+
+    async def stream() -> AsyncGenerator[str, None]:
+        last_conversation_hash: str | None = None
+        last_job_hash: str | None = None
+        heartbeat_interval = 15.0
+        last_heartbeat = time.monotonic()
+
+        while True:
+            job_state = _get_activity_generation_job(job_id)
+            if job_state is None:
+                yield _sse_event(
+                    "error",
+                    {"message": "Job de génération introuvable ou expiré."},
+                )
+                break
+
+            _sync_conversation_from_job(job_state, user.username)
+
+            store = get_conversation_store()
+            conversation = store.get_conversation(job_id)
+            if conversation is not None:
+                payload = conversation.to_dict()
+                conversation_hash = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+                ).hexdigest()
+                if conversation_hash != last_conversation_hash:
+                    last_conversation_hash = conversation_hash
+                    yield _sse_event("conversation", payload)
+                    last_heartbeat = time.monotonic()
+
+            job_payload = _serialize_activity_generation_job(job_state).model_dump(
+                mode="json", by_alias=True
+            )
+            job_hash = hashlib.sha256(
+                json.dumps(job_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+            ).hexdigest()
+            if job_hash != last_job_hash:
+                last_job_hash = job_hash
+                yield _sse_event("job", job_payload)
+                last_heartbeat = time.monotonic()
+
+            if (
+                job_state.status in {"complete", "error"}
+                and not job_state.awaiting_user_action
+                and not job_state.pending_tool_call
+            ):
+                yield _sse_event("close", {"reason": "job_finished"})
+                break
+
+            now = time.monotonic()
+            if now - last_heartbeat >= heartbeat_interval:
+                yield _sse_comment("heartbeat")
+                last_heartbeat = now
+
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
+
+
 def _sync_conversation_from_job(
     job: _ActivityGenerationJobState, username: str
 ) -> None:
     """Synchronise une conversation depuis un job vers le store."""
     store = get_conversation_store()
+
+    existing_conversation = store.get_conversation(job.id)
+    existing_messages = (
+        list(existing_conversation.messages)
+        if existing_conversation is not None
+        else []
+    )
+
+    def _normalize_string(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    def _normalize_arguments(value: Any) -> str:
+        if value is None:
+            return "null"
+        try:
+            return json.dumps(value, ensure_ascii=True, sort_keys=True)
+        except TypeError:
+            return str(value)
+
+    def _normalize_tool_calls_for_compare(
+        value: Any,
+    ) -> tuple[tuple[str, str, str], ...]:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+            return ()
+
+        normalized: list[tuple[str, str, str]] = []
+        for item in value:
+            if not isinstance(item, Mapping):
+                continue
+            name = _normalize_string(item.get("name"))
+            call_id_source = (
+                item.get("call_id")
+                or item.get("callId")
+                or item.get("id")
+                or ""
+            )
+            call_id = _normalize_string(call_id_source)
+            arguments_repr = _normalize_arguments(item.get("arguments"))
+            normalized.append((name, call_id, arguments_repr))
+        return tuple(normalized)
+
+    def _message_signature_from_parts(
+        role: Any,
+        content: Any,
+        tool_calls: Any,
+        tool_call_id: Any,
+        name: Any,
+    ) -> tuple[str, str, tuple[tuple[str, str, str], ...], str, str]:
+        return (
+            _normalize_string(role),
+            _normalize_string(content),
+            _normalize_tool_calls_for_compare(tool_calls),
+            _normalize_string(tool_call_id),
+            _normalize_string(name),
+        )
+
+    def _message_signature_from_message(
+        message: ConversationMessage,
+    ) -> tuple[str, str, tuple[tuple[str, str, str], ...], str, str]:
+        return _message_signature_from_parts(
+            message.role,
+            message.content,
+            message.tool_calls,
+            message.tool_call_id,
+            message.name,
+        )
+
+    def _conversation_signature(conversation: Conversation) -> tuple[
+        str | None,
+        str | None,
+        str,
+        str,
+        tuple[tuple[str, str, tuple[tuple[str, str, str], ...], str, str], ...],
+    ]:
+        return (
+            conversation.activity_id,
+            conversation.activity_title,
+            conversation.status,
+            conversation.model_name,
+            tuple(
+                _message_signature_from_message(message)
+                for message in conversation.messages
+            ),
+        )
 
     conversation_entries: list[dict[str, Any]] = [
         deepcopy(item) if isinstance(item, Mapping) else item  # type: ignore[arg-type]
@@ -5799,7 +5962,7 @@ def _sync_conversation_from_job(
 
     # Convertit les messages du job en ConversationMessage
     messages: list[ConversationMessage] = []
-    for raw_message in conversation_entries:
+    for index, raw_message in enumerate(conversation_entries):
         if not isinstance(raw_message, Mapping):
             messages.append(ConversationMessage(role="assistant"))
             continue
@@ -5889,10 +6052,11 @@ def _sync_conversation_from_job(
                 or _extract_text(raw_message.get("summary"))
                 or _extract_text(raw_message.get("content"))
             )
-            if summary_text:
-                content = f"Résumé du raisonnement\n\n{summary_text}".strip()
+            normalized_summary = _normalize_plain_text(summary_text)
+            if normalized_summary:
+                content = f"Résumé du raisonnement\n\n{normalized_summary}".strip()
             else:
-                content = "Résumé du raisonnement"
+                continue
         else:
             content = _extract_text(raw_message.get("content")) or _extract_text(raw_message.get("text"))
             tool_calls = _normalize_tool_calls(raw_message.get("tool_calls"))
@@ -5907,6 +6071,19 @@ def _sync_conversation_from_job(
         if isinstance(timestamp, str) and timestamp:
             message_kwargs["timestamp"] = timestamp
 
+        message_signature = _message_signature_from_parts(
+            message_kwargs.get("role"),
+            message_kwargs.get("content"),
+            message_kwargs.get("tool_calls"),
+            message_kwargs.get("tool_call_id"),
+            message_kwargs.get("name"),
+        )
+
+        if 0 <= index < len(existing_messages):
+            existing_message = existing_messages[index]
+            if _message_signature_from_message(existing_message) == message_signature:
+                message_kwargs.setdefault("timestamp", existing_message.timestamp)
+
         messages.append(ConversationMessage(**message_kwargs))
 
     # Crée ou met à jour la conversation
@@ -5920,6 +6097,16 @@ def _sync_conversation_from_job(
         messages=messages,
         model_name=job.model_name,
     )
+
+    if existing_conversation is not None:
+        conversation.created_at = existing_conversation.created_at
+        conversation.updated_at = existing_conversation.updated_at
+
+        if (
+            _conversation_signature(existing_conversation)
+            == _conversation_signature(conversation)
+        ):
+            return
 
     store.save_conversation(conversation)
 

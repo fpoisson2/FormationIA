@@ -33,6 +33,8 @@ function AdminLoginRedirect(): JSX.Element {
   const stateRedirect =
     typeof locationState?.from === "string" ? locationState.from : null;
 
+  const ADMIN_SAFE_PREFIXES = ["/admin", "/assistant-ia"];
+
   const resolveTarget = (candidate: string | null): string | null => {
     if (typeof candidate !== "string") {
       return null;
@@ -40,7 +42,10 @@ function AdminLoginRedirect(): JSX.Element {
     if (!candidate.startsWith("/")) {
       return null;
     }
-    return candidate.startsWith("/admin") ? candidate : null;
+    if (ADMIN_SAFE_PREFIXES.some((prefix) => candidate.startsWith(prefix))) {
+      return candidate;
+    }
+    return null;
   };
 
   const desiredRedirect =
@@ -132,15 +137,15 @@ function App(): JSX.Element {
       <Route path="/inscription/createur" element={<CreatorSignupPage />} />
       <Route path="/inscription/etudiant" element={<StudentSignupPage />} />
       <Route element={<AdminGuard />}>
+        <Route
+          path="/assistant-ia"
+          element={<ActivityGenerationConversationPage />}
+        />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="platforms" replace />} />
           <Route
             path="activity-generation"
             element={<AdminActivityGenerationPage />}
-          />
-          <Route
-            path="activity-generation/conversation"
-            element={<ActivityGenerationConversationPage />}
           />
           <Route path="platforms" element={<AdminPlatformsPage />} />
           <Route path="lti-users" element={<AdminLtiUsersPage />} />

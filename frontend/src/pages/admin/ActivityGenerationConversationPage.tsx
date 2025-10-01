@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import {
   admin,
   type ActivityGenerationJob,
   type ActivityGenerationJobToolCall,
   type Conversation,
+  type ConversationMessage,
+  type ConversationMessageToolCall,
   type GenerateActivityPayload,
 } from "../../api";
 import { ConversationView } from "../../components/ConversationView";
@@ -26,28 +28,118 @@ interface PendingPlanResult {
   notes?: string | null;
 }
 
+type ToolCallLike = Pick<ConversationMessageToolCall, "arguments" | "argumentsText">;
+
+function resolveToolCallArgumentsText(toolCall: ToolCallLike): string {
+  if (typeof toolCall.argumentsText === "string") {
+    if (toolCall.argumentsText.trim()) {
+      return toolCall.argumentsText;
+    }
+  }
+
+  const args = toolCall.arguments;
+  if (typeof args === "string") {
+    return args;
+  }
+
+  if (args == null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch (error) {
+    console.warn(
+      "Impossible de sérialiser les arguments de l'appel d'outil",
+      error
+    );
+    return String(args);
+  }
+}
+
 export function ActivityGenerationConversationPage(): JSX.Element {
   const { token } = useAdminAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get("jobId");
+
+  const basePath = useMemo(() => location.pathname, [location.pathname]);
+
+  const buildConversationUrl = useCallback(
+    (nextJobId?: string | null) => {
+      if (nextJobId && nextJobId.trim().length > 0) {
+        return `${basePath}?jobId=${encodeURIComponent(nextJobId)}`;
+      }
+      return basePath;
+    },
+    [basePath]
+  );
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPolling, setIsPolling] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [promptText, setPromptText] = useState("");
-  const [showNewGenerationForm, setShowNewGenerationForm] = useState(false);
   const [jobStatus, setJobStatus] = useState<ActivityGenerationJob | null>(null);
   const [isJobLoading, setIsJobLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
 
-  const pollIntervalRef = useRef<number | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const lastConversationUpdateRef = useRef<number>(0);
+  const lastStreamActivityRef = useRef<number>(0);
+  const hasConversationSnapshotRef = useRef(false);
+
+  const resolveErrorMessage = useCallback(
+    (error: unknown, fallback: string) => {
+      const extract = (value: unknown): string | null => {
+        if (!value) {
+          return null;
+        }
+        if (value instanceof Error) {
+          return extract(value.message) ?? value.message ?? null;
+        }
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return null;
+          }
+          try {
+            const parsed = JSON.parse(trimmed) as { detail?: unknown };
+            if (parsed && typeof parsed.detail === "string") {
+              const detail = parsed.detail.trim();
+              if (detail) {
+                return detail;
+              }
+            }
+          } catch {
+            // ignore json parse errors
+          }
+          return trimmed;
+        }
+        if (typeof value === "object") {
+          const detail = (value as { detail?: unknown }).detail;
+          if (typeof detail === "string" && detail.trim()) {
+            return detail.trim();
+          }
+        }
+        return null;
+      };
+
+      const resolved = extract(error);
+      if (resolved && resolved.trim()) {
+        return resolved.trim();
+      }
+      return fallback;
+    },
+    []
+  );
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -93,10 +185,152 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     return null;
   }, [generatedActivityId, jobStatus?.activity]);
 
+  const resetToNewConversation = useCallback(
+    (shouldCloseSidebar = false) => {
+      navigate(buildConversationUrl(null));
+      setConversation(null);
+      setJobStatus(null);
+      setError(null);
+      setConnectionWarning(null);
+      setPromptText("");
+      setFeedbackMessage("");
+      setFeedbackError(null);
+      lastConversationUpdateRef.current = 0;
+      lastStreamActivityRef.current = 0;
+      hasConversationSnapshotRef.current = false;
+      if (shouldCloseSidebar) {
+        setIsSidebarOpen(false);
+      }
+    },
+    [buildConversationUrl, navigate]
+  );
+
+  const applyConversationUpdate = useCallback(
+    (incomingConversation: Conversation) => {
+      const now = Date.now();
+      lastConversationUpdateRef.current = now;
+      lastStreamActivityRef.current = now;
+      hasConversationSnapshotRef.current = true;
+      setConnectionWarning(null);
+      setConversation((previousConversation) => {
+        if (
+          previousConversation &&
+          previousConversation.updatedAt === incomingConversation.updatedAt
+        ) {
+          return previousConversation;
+        }
+
+        const incomingMessages = Array.isArray(incomingConversation.messages)
+          ? incomingConversation.messages
+          : [];
+
+        const previousMessages = previousConversation?.messages ?? [];
+
+        let reusedAllMessages = true;
+        let mutatedMessage = false;
+
+        const normalizedMessages = incomingMessages.map((message, index) => {
+          const previousMessage = previousMessages[index];
+
+          const hasToolCalls = Array.isArray(message.toolCalls);
+          let normalizedToolCalls: ConversationMessageToolCall[] | null = null;
+
+          if (hasToolCalls && message.toolCalls) {
+            normalizedToolCalls = message.toolCalls.map((toolCall, toolIndex) => {
+              const argumentsText = resolveToolCallArgumentsText(toolCall);
+              const previousToolCall = previousMessage?.toolCalls?.[toolIndex];
+
+              if (
+                previousToolCall &&
+                previousToolCall.name === toolCall.name &&
+                previousToolCall.callId === toolCall.callId &&
+                previousToolCall.argumentsText === argumentsText
+              ) {
+                return previousToolCall;
+              }
+
+              if (
+                typeof toolCall.argumentsText === "string" &&
+                toolCall.argumentsText === argumentsText
+              ) {
+                return toolCall;
+              }
+
+              mutatedMessage = true;
+              return {
+                ...toolCall,
+                argumentsText,
+              };
+            });
+          }
+
+          if (previousMessage) {
+            const sameCoreProperties =
+              previousMessage.role === message.role &&
+              previousMessage.timestamp === message.timestamp &&
+              previousMessage.content === message.content;
+
+            const previousToolCalls = previousMessage.toolCalls ?? null;
+            const sameToolCalls =
+              (!previousToolCalls && !normalizedToolCalls) ||
+              (!!previousToolCalls &&
+                !!normalizedToolCalls &&
+                previousToolCalls.length === normalizedToolCalls.length &&
+                previousToolCalls.every(
+                  (toolCall, toolIndex) =>
+                    toolCall === normalizedToolCalls?.[toolIndex]
+                ));
+
+            if (sameCoreProperties && sameToolCalls) {
+              return previousMessage;
+            }
+          }
+
+          reusedAllMessages = false;
+
+          if (hasToolCalls && normalizedToolCalls) {
+            const referencesIdentical = message.toolCalls?.every(
+              (toolCall, toolIndex) =>
+                toolCall === normalizedToolCalls?.[toolIndex]
+            );
+
+            if (referencesIdentical) {
+              return message;
+            }
+
+            mutatedMessage = true;
+            return {
+              ...message,
+              toolCalls: normalizedToolCalls,
+            };
+          }
+
+          return message;
+        });
+
+        if (reusedAllMessages && previousConversation) {
+          return previousConversation;
+        }
+
+        if (!mutatedMessage) {
+          return incomingConversation;
+        }
+
+        return {
+          ...incomingConversation,
+          messages: normalizedMessages,
+        };
+      });
+    },
+    []
+  );
+
   // Charge la conversation initiale
   useEffect(() => {
     if (!jobId) {
       setIsLoading(false);
+      lastConversationUpdateRef.current = 0;
+      lastStreamActivityRef.current = 0;
       return;
     }
 
@@ -108,7 +342,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       try {
         const response = await admin.conversations.getByJobId(jobId, token);
         if (!cancelled) {
-          setConversation(response.conversation);
+          applyConversationUpdate(response.conversation);
         }
       } catch (err) {
         if (!cancelled) {
@@ -128,7 +362,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [jobId, token]);
+  }, [applyConversationUpdate, jobId, token]);
 
   // Charge l'historique des conversations
   useEffect(() => {
@@ -174,44 +408,128 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     void refreshJobStatus();
   }, [jobId, refreshJobStatus]);
 
-  // Polling pour les mises à jour de la conversation et du job
+  // Diffusion temps réel de la conversation via SSE
   useEffect(() => {
-    if (!jobId || !conversation) return;
-
-    // Ne poll que si la conversation n'est pas terminée
-    if (conversation.status === "complete" || conversation.status === "error") {
+    if (!jobId) {
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
+      }
+      setIsStreaming(false);
+      setConnectionWarning(null);
       return;
     }
 
-    setIsPolling(true);
+    const shouldStream = Boolean(
+      !jobStatus ||
+        jobStatus.status === "running" ||
+        jobStatus.awaitingUserAction ||
+        jobStatus.pendingToolCall
+    );
 
-    const poll = async () => {
+    if (!shouldStream) {
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
+      }
+      setIsStreaming(false);
+      setConnectionWarning(null);
+      return;
+    }
+
+    if (streamAbortControllerRef.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+    streamAbortControllerRef.current = controller;
+    setIsStreaming(true);
+    setConnectionWarning(null);
+    lastStreamActivityRef.current = Date.now();
+
+    const startStream = async () => {
       try {
-        const response = await admin.conversations.getByJobId(jobId, token);
-        setConversation(response.conversation);
-        await refreshJobStatus();
-      } catch (err) {
-        console.error("Erreur lors du polling:", err);
+        await admin.conversations.streamByJob(jobId, token, {
+          signal: controller.signal,
+          onConversation: (nextConversation) => {
+            applyConversationUpdate(nextConversation);
+          },
+          onJob: (nextJob) => {
+            lastStreamActivityRef.current = Date.now();
+            setJobStatus((previous) => {
+              if (previous && previous.updatedAt === nextJob.updatedAt) {
+                return previous;
+              }
+              return nextJob;
+            });
+          },
+          onError: (message) => {
+            setError(
+              resolveErrorMessage(
+                message,
+                "Erreur lors de la connexion au flux de conversation."
+              )
+            );
+          },
+        });
+      } catch (streamError) {
+        if (!controller.signal.aborted) {
+          console.error("Erreur de diffusion de la conversation:", streamError);
+          const resolved = resolveErrorMessage(
+            streamError,
+            "Erreur lors de la connexion au flux de conversation."
+          );
+          if (hasConversationSnapshotRef.current) {
+            const warningMessage = resolved.includes(
+              "Impossible d'établir la connexion temps réel"
+            )
+              ? "Connexion temps réel indisponible. Actualisation automatique activée."
+              : resolved;
+            setConnectionWarning(warningMessage);
+          } else {
+            setError(resolved);
+          }
+        }
+      } finally {
+        if (streamAbortControllerRef.current === controller) {
+          streamAbortControllerRef.current = null;
+        }
+        setIsStreaming(false);
+        if (!controller.signal.aborted) {
+          void refreshJobStatus();
+        }
       }
     };
 
-    pollIntervalRef.current = window.setInterval(poll, 3000); // Poll toutes les 3 secondes
+    void startStream();
 
     return () => {
-      if (pollIntervalRef.current !== null) {
-        window.clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      controller.abort();
+      if (streamAbortControllerRef.current === controller) {
+        streamAbortControllerRef.current = null;
       }
-      setIsPolling(false);
+      setIsStreaming(false);
     };
-  }, [jobId, conversation, token]);
+  }, [
+    applyConversationUpdate,
+    jobId,
+    jobStatus?.awaitingUserAction,
+    jobStatus?.pendingToolCall,
+    jobStatus?.status,
+    resolveErrorMessage,
+    refreshJobStatus,
+    token,
+  ]);
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
-      navigate(`/admin/activity-generation/conversation?jobId=${conv.jobId}`);
-      setShowHistory(false);
+      navigate(buildConversationUrl(conv.jobId));
+      setIsSidebarOpen(false);
+      setError(null);
+      setFeedbackMessage("");
+      setFeedbackError(null);
     },
-    [navigate]
+    [buildConversationUrl, navigate]
   );
 
   const handleStartNewGeneration = useCallback(async () => {
@@ -235,9 +553,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       const job = await admin.activities.generate(payload, token);
 
       // Rediriger vers la conversation nouvellement créée
-      navigate(`/admin/activity-generation/conversation?jobId=${job.jobId}`);
+      navigate(buildConversationUrl(job.jobId));
       setPromptText("");
-      setShowNewGenerationForm(false);
+      setIsSidebarOpen(false);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Erreur lors du démarrage de la génération"
@@ -245,7 +563,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     } finally {
       setIsGenerating(false);
     }
-  }, [promptText, isGenerating, token, navigate]);
+  }, [buildConversationUrl, promptText, isGenerating, token, navigate]);
 
   const handleSendFeedback = useCallback(
     async (action: "approve" | "revise") => {
@@ -308,7 +626,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           if (!prev) {
             return prev;
           }
-          return {
+          const appended = {
             ...prev,
             messages: [
               ...prev.messages,
@@ -319,20 +637,52 @@ export function ActivityGenerationConversationPage(): JSX.Element {
               },
             ],
           };
+          return appended;
         });
+        const now = Date.now();
+        lastConversationUpdateRef.current = now;
+        lastStreamActivityRef.current = now;
         const refreshed = await admin.conversations.getByJobId(jobId, token);
-        setConversation(refreshed.conversation);
+        applyConversationUpdate(refreshed.conversation);
       } catch (err) {
-        setFeedbackError(
-          err instanceof Error
-            ? err.message
-            : "Impossible d'envoyer la réponse au modèle."
+        const message = resolveErrorMessage(
+          err,
+          "Impossible d'envoyer la réponse au modèle."
         );
+        if (message.includes("Aucun retour n'est attendu")) {
+          setFeedbackError(
+            "Aucun retour n'est attendu pour cette tâche actuellement."
+          );
+          void refreshJobStatus();
+          void admin.conversations
+            .getByJobId(jobId, token)
+            .then((response) => {
+              applyConversationUpdate(response.conversation);
+            })
+            .catch((fallbackError) => {
+              console.warn(
+                "Impossible de rafraîchir la conversation après un refus de retour",
+                fallbackError
+              );
+            });
+        } else {
+          setFeedbackError(message);
+        }
       } finally {
         setIsSendingFeedback(false);
       }
     },
-    [feedbackMessage, isSendingFeedback, jobId, jobStatus?.expectingPlan, jobStatus?.pendingToolCall?.name, token]
+    [
+      applyConversationUpdate,
+      feedbackMessage,
+      isSendingFeedback,
+      jobId,
+      jobStatus?.expectingPlan,
+      jobStatus?.pendingToolCall?.name,
+      resolveErrorMessage,
+      refreshJobStatus,
+      token,
+    ]
   );
 
   const deleteConversationById = useCallback(
@@ -342,9 +692,13 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         if (conversation && conversation.id === conversationId) {
           setConversation(null);
           setJobStatus(null);
+          lastConversationUpdateRef.current = 0;
+          lastStreamActivityRef.current = 0;
+          hasConversationSnapshotRef.current = false;
+          setConnectionWarning(null);
         }
         if (redirectToHistory) {
-          navigate("/admin/activity-generation/conversation", { replace: true });
+          navigate(buildConversationUrl(null), { replace: true });
         }
         const history = await admin.conversations.list(token);
         setConversations(history.conversations);
@@ -361,7 +715,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         return false;
       }
     },
-    [conversation, navigate, refreshJobStatus, token]
+    [buildConversationUrl, conversation, navigate, refreshJobStatus, token]
   );
 
   const handleDeleteConversation = useCallback(async () => {
@@ -474,6 +828,21 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       );
     }
 
+    const fallbackPayload = (() => {
+      if (toolCall.result != null) {
+        if (typeof toolCall.result === "string") {
+          return toolCall.result;
+        }
+        try {
+          return JSON.stringify(toolCall.result, null, 2);
+        } catch (error) {
+          console.warn("Impossible de formater le résultat de l'appel d'outil", error);
+          return String(toolCall.result);
+        }
+      }
+      return resolveToolCallArgumentsText(toolCall);
+    })();
+
     return (
       <div className="space-y-2">
         <h3 className="text-base font-semibold text-sky-900">
@@ -481,272 +850,394 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         </h3>
         <div className="rounded-2xl border border-sky-100 bg-white/95 p-3 text-xs text-sky-900/80">
           <pre className="max-h-64 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-xs">
-            {JSON.stringify(toolCall.result ?? toolCall.arguments ?? {}, null, 2)}
+            {fallbackPayload}
           </pre>
         </div>
       </div>
     );
   }, [jobStatus?.pendingToolCall]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="mb-4 text-lg font-semibold text-[color:var(--brand-charcoal)]">
-            Chargement de la conversation...
+  const onboardingMessages = useMemo<ConversationMessage[]>(() => {
+    const firstTimestamp = new Date().toISOString();
+    const secondTimestamp = new Date(Date.now() + 1000).toISOString();
+    return [
+      {
+        role: "assistant",
+        content:
+          "Bonjour! Décrivons ensemble l’activité que vous souhaitez générer. Dites-moi le thème, le public visé et le format désiré, puis je m’occupe du reste.",
+        timestamp: firstTimestamp,
+      },
+      {
+        role: "assistant",
+        content:
+          "Quand vous êtes prêt·e, rédigez votre consigne dans le champ ci-dessous et appuyez sur Entrée pour lancer la génération.",
+        timestamp: secondTimestamp,
+      },
+    ];
+  }, []);
+
+  const messagesToDisplay = jobId && conversation ? conversation.messages : onboardingMessages;
+  const showLoadingState = Boolean(jobId && isLoading && !conversation);
+  const hasBlockingError = Boolean(jobId && error && !conversation);
+  const showGlobalErrorBanner = Boolean(jobId && error && conversation);
+  const lastAssistantMessage = conversation
+    ? [...conversation.messages].reverse().find((message) => message.role === "assistant")
+    : undefined;
+
+  const lastAssistantMessageHasContent = Boolean(
+    lastAssistantMessage &&
+      ((typeof lastAssistantMessage.content === "string" &&
+        lastAssistantMessage.content.trim().length > 0) ||
+        (Array.isArray(lastAssistantMessage.toolCalls) && lastAssistantMessage.toolCalls.length > 0))
+  );
+
+  const conversationViewIsLoading = Boolean(
+    jobId &&
+      conversation?.status === "running" &&
+      !jobStatus?.awaitingUserAction &&
+      !jobStatus?.pendingToolCall &&
+      !lastAssistantMessageHasContent &&
+      (isStreaming || isJobLoading)
+  );
+
+  useEffect(() => {
+    if (!jobId) {
+      return;
+    }
+
+    const shouldMonitor = Boolean(
+      !jobStatus ||
+        jobStatus.status === "running" ||
+        jobStatus.awaitingUserAction ||
+        jobStatus.pendingToolCall
+    );
+
+    if (!shouldMonitor) {
+      return;
+    }
+
+    let cancelled = false;
+    let isFetching = false;
+
+    const STALE_EVENT_THRESHOLD = 30000;
+    const FORCE_RESTART_THRESHOLD = 90000;
+    const POLL_INTERVAL = 10000;
+
+    const intervalId = window.setInterval(() => {
+      if (cancelled || isFetching) {
+        return;
+      }
+
+      const lastEvent = lastStreamActivityRef.current;
+      if (!lastEvent) {
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceEvent = now - lastEvent;
+
+      if (timeSinceEvent < STALE_EVENT_THRESHOLD) {
+        return;
+      }
+
+      isFetching = true;
+      void admin.conversations
+        .getByJobId(jobId, token)
+        .then((response) => {
+          if (cancelled) {
+            return;
+          }
+          applyConversationUpdate(response.conversation);
+
+          if (timeSinceEvent >= STALE_EVENT_THRESHOLD) {
+            void refreshJobStatus();
+          }
+
+          if (
+            timeSinceEvent >= FORCE_RESTART_THRESHOLD &&
+            streamAbortControllerRef.current &&
+            !streamAbortControllerRef.current.signal.aborted
+          ) {
+            lastStreamActivityRef.current = Date.now();
+            setConnectionWarning(
+              "Connexion temps réel instable. Tentative de reconnexion..."
+            );
+            streamAbortControllerRef.current.abort();
+          }
+        })
+        .catch((fallbackError) => {
+          if (cancelled) {
+            return;
+          }
+          console.warn(
+            "Erreur lors du rafraîchissement de la conversation en secours",
+            fallbackError
+          );
+          const resolved = resolveErrorMessage(
+            fallbackError,
+            "Impossible de rafraîchir la conversation automatiquement."
+          );
+          if (hasConversationSnapshotRef.current) {
+            setConnectionWarning(resolved);
+          } else {
+            setError(resolved);
+          }
+        })
+        .finally(() => {
+          isFetching = false;
+        });
+    }, POLL_INTERVAL);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    applyConversationUpdate,
+    jobId,
+    jobStatus?.awaitingUserAction,
+    jobStatus?.pendingToolCall,
+    jobStatus?.status,
+    refreshJobStatus,
+    resolveErrorMessage,
+    token,
+  ]);
+
+  return (
+    <div className="relative flex min-h-screen bg-gray-50">
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] transition lg:hidden"
+          aria-hidden="true"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex transform flex-col bg-white shadow-xl transition duration-200 ease-in-out lg:relative lg:inset-y-auto lg:h-auto lg:shadow-none ${
+          isSidebarOpen
+            ? "w-72 translate-x-0 border-r border-gray-200 lg:w-80"
+            : "w-72 -translate-x-full border-r border-gray-200 lg:w-0 lg:-translate-x-full lg:border-transparent"
+        }`}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
+            <div>
+              <p className="text-sm font-semibold text-[color:var(--brand-black)]">
+                Conversations
+              </p>
+              <p className="text-xs text-gray-500">Historique des demandes</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
+            >
+              Fermer
+            </button>
+          </div>
+          <div className="border-b border-gray-200 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => {
+                resetToNewConversation(true);
+              }}
+              className="w-full rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
+            >
+              + Nouvelle génération
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {conversations.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-xs text-gray-400">
+                Aucune conversation enregistrée
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {conversations.map((conv) => {
+                  const isActive = conv.jobId === jobId;
+                  return (
+                    <button
+                      key={conv.id}
+                      type="button"
+                      onClick={() => handleSelectConversation(conv)}
+                      className={`flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition hover:bg-gray-50 ${
+                        isActive ? "bg-red-50/60" : ""
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-[color:var(--brand-black)]">
+                          {conv.activityTitle || "Sans titre"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(conv.updatedAt).toLocaleDateString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        {conv.status === "running" && (
+                          <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-[10px] font-medium text-yellow-800">
+                            <span className="mr-1 h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
+                            En cours
+                          </span>
+                        )}
+                        {conv.status === "complete" && (
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-[10px] font-medium text-green-800">
+                            ✓ Terminée
+                          </span>
+                        )}
+                        {conv.status === "error" && (
+                          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-[10px] font-medium text-red-700">
+                            ✗ Erreur
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteConversationFromList(conv.id);
+                          }}
+                          className="text-[10px] font-medium text-red-600 transition hover:text-red-700"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
-      </div>
-    );
-  }
+      </aside>
 
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-center">
-          <div className="mb-2 text-lg font-semibold text-red-800">Erreur</div>
-          <div className="text-sm text-red-600">{error}</div>
-          <button
-            onClick={() => navigate("/admin/activity-generation")}
-            className="mt-4 rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-          >
-            Retour
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Si pas de jobId, afficher la liste des conversations
-  if (!jobId) {
-    return (
-      <div className="flex min-h-screen flex-col">
-        <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
+      <main className="flex flex-1 flex-col">
+        <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/95 px-4 py-4 backdrop-blur-sm shadow-sm sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
+            <div className="flex flex-1 items-center gap-3">
               <button
-                onClick={() => navigate("/activites")}
-                className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
-                title="Retour"
+                type="button"
+                onClick={() => setIsSidebarOpen((prev) => !prev)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-lg text-gray-600 transition hover:bg-gray-50"
+                aria-label={isSidebarOpen ? "Masquer les conversations" : "Afficher les conversations"}
               >
-                ← Retour
+                ☰
               </button>
-              <div>
-                <h1 className="text-xl font-semibold text-[color:var(--brand-black)]">
-                  Historique des conversations
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-xl font-semibold text-[color:var(--brand-black)]">
+                  {conversation?.activityTitle || "Assistant IA"}
                 </h1>
                 <p className="text-xs text-gray-500">
-                  Générations d'activités par IA
+                  {jobId ? (
+                    conversation ? (
+                      conversation.status === "running" ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+                          Génération en cours...
+                        </span>
+                      ) : conversation.status === "complete" ? (
+                        "Génération terminée"
+                      ) : conversation.status === "error" ? (
+                        "La génération a rencontré une erreur"
+                      ) : null
+                    ) : isLoading ? (
+                      "Chargement de la conversation..."
+                    ) : (
+                      "Conversation introuvable"
+                    )
+                  ) : (
+                    "Démarrez une nouvelle génération d’activité en discutant avec l’assistant."
+                  )}
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => setShowNewGenerationForm(!showNewGenerationForm)}
-              className="rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
-            >
-              {showNewGenerationForm ? "Annuler" : "+ Nouvelle génération"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {conversation?.status === "complete" && generatedActivityPath ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(generatedActivityPath)}
+                  className="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700"
+                >
+                  Ouvrir {generatedActivityTitle ?? "l’activité"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => resetToNewConversation()}
+                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+              >
+                Nouvelle conversation
+              </button>
+              {conversation ? (
+                <button
+                  type="button"
+                  onClick={handleDeleteConversation}
+                  className="rounded-full border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                >
+                  Supprimer
+                </button>
+              ) : null}
+            </div>
           </div>
         </header>
 
-        <div className="flex-1 px-4 py-6 sm:px-6 lg:overflow-y-auto">
-          {showNewGenerationForm && (
-            <div className="mx-auto mb-6 max-w-4xl space-y-4 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-md">
-              <div className="space-y-2">
-                <h2 className="text-lg font-semibold text-[color:var(--brand-black)]">
-                  Nouvelle génération d'activité
-                </h2>
-                <p className="text-sm text-gray-600">
-                  Décrivez l'activité que vous souhaitez générer en quelques phrases.
-                </p>
-              </div>
-              {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                  {error}
-                </div>
-              )}
-              <div className="space-y-3">
-                <textarea
-                  value={promptText}
-                  onChange={(e) => setPromptText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      handleStartNewGeneration();
-                    }
-                  }}
-                  placeholder="Ex: Créer une activité sur la photosynthèse pour des étudiants de niveau collégial..."
-                  rows={4}
-                  className="w-full rounded-2xl border border-gray-300 bg-white p-4 text-sm text-gray-900 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
-                  disabled={isGenerating}
-                />
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-gray-500">
-                    Appuyez sur Cmd+Entrée ou Ctrl+Entrée pour envoyer
+        {showGlobalErrorBanner ? (
+          <div className="border-l-4 border-red-400 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="flex items-start justify-between gap-3">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-xs font-semibold uppercase tracking-wide text-red-600 transition hover:text-red-700"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {connectionWarning ? (
+          <div className="border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            {connectionWarning}
+          </div>
+        ) : null}
+
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            {hasBlockingError ? (
+              <div className="flex h-full items-center justify-center px-4">
+                <div className="max-w-sm rounded-3xl border border-red-200 bg-white p-6 text-center shadow-sm">
+                  <p className="text-sm font-medium text-red-700">
+                    {error}
                   </p>
                   <button
-                    onClick={handleStartNewGeneration}
-                    disabled={!promptText.trim() || isGenerating}
-                    className="rounded-full bg-[color:var(--brand-red)] px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-gray-300"
+                    type="button"
+                    onClick={() => resetToNewConversation()}
+                    className="mt-4 rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
                   >
-                    {isGenerating ? "Génération..." : "Générer"}
+                    Revenir à l’accueil de l’assistant
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {conversations.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center text-gray-400">
-                <p className="text-sm">Aucune conversation disponible</p>
-                <p className="mt-2 text-xs">
-                  Cliquez sur "+ Nouvelle génération" pour commencer
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="mx-auto max-w-4xl space-y-4">
-              {conversations.map((conv) => (
-                <div
-                  key={conv.id}
-                  onClick={() => handleSelectConversation(conv)}
-                  className="w-full cursor-pointer rounded-3xl border border-white/60 bg-white/95 p-6 text-left shadow-sm transition hover:shadow-md"
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex-1">
-                      <h3 className="mb-2 text-lg font-semibold text-[color:var(--brand-black)]">
-                        {conv.activityTitle || "Sans titre"}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {new Date(conv.updatedAt).toLocaleDateString("fr-FR", {
-                          day: "numeric",
-                          month: "long",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {conv.status === "running" && (
-                        <span className="inline-flex items-center rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-800">
-                          <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
-                          En cours
-                        </span>
-                      )}
-                      {conv.status === "complete" && (
-                        <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
-                          ✓ Terminée
-                        </span>
-                      )}
-                      {conv.status === "error" && (
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-800">
-                          ✗ Erreur
-                        </span>
-                      )}
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleDeleteConversationFromList(conv.id);
-                        }}
-                        className="rounded-full border border-red-200 px-3 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50"
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-red)]">
-                    Ouvrir la conversation
-                    <span aria-hidden="true">→</span>
-                  </div>
+            ) : showLoadingState ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center text-sm text-gray-500">
+                  Chargement de la conversation...
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (!conversation) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center text-gray-400">
-          <p className="text-sm">Conversation introuvable</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex min-h-screen flex-col">
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
-            <button
-              onClick={() => navigate("/admin/activity-generation/conversation")}
-              className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
-              title="Retour à l'historique"
-            >
-              ← Retour
-            </button>
-            <div>
-              <h1 className="text-xl font-semibold text-[color:var(--brand-black)]">
-                {conversation.activityTitle || "Génération d'activité"}
-              </h1>
-              <p className="text-xs text-gray-500">
-                {conversation.status === "running" && (
-                  <span className="inline-flex items-center">
-                    <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-green-500" />
-                    En cours...
-                  </span>
-                )}
-                {conversation.status === "complete" && (
-                  <span className="text-green-600">✓ Terminée</span>
-                )}
-                {conversation.status === "error" && (
-                  <span className="text-red-600">✗ Erreur</span>
-                )}
-              </p>
-            </div>
+              </div>
+            ) : (
+              <ConversationView
+                messages={messagesToDisplay}
+                isLoading={conversationViewIsLoading}
+              />
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {conversation?.status === "complete" && generatedActivityPath ? (
-              <button
-                onClick={() => navigate(generatedActivityPath)}
-                className="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700"
-              >
-                Ouvrir {generatedActivityTitle ?? "l’activité"}
-              </button>
-            ) : null}
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className="rounded-full border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              {showHistory ? "Masquer" : "Historique"}
-            </button>
-            <button
-              onClick={handleDeleteConversation}
-              className="rounded-full border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-            >
-              Supprimer
-            </button>
-          </div>
-        </div>
-      </header>
 
-      {/* Contenu principal */}
-      <div className="flex flex-1 flex-col lg:flex-row lg:overflow-hidden">
-        {/* Zone de conversation */}
-        <div className="flex flex-1 flex-col bg-white lg:min-h-0 lg:overflow-hidden">
-          <div className="flex-1 lg:overflow-hidden">
-            <ConversationView
-              messages={conversation.messages}
-              isLoading={isPolling && conversation.status === "running"}
-            />
-          </div>
-          {jobId && (
+          {jobId && conversation ? (
             <div className="border-t border-gray-100 bg-white/95 px-4 py-4 sm:px-6">
               {jobStatus?.awaitingUserAction ? (
                 <div className="space-y-4">
@@ -830,12 +1321,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                   {generatedActivityPath ? (
                     <div className="flex flex-wrap items-center gap-3">
                       <button
+                        type="button"
                         onClick={() => navigate(generatedActivityPath)}
                         className="inline-flex items-center justify-center rounded-full bg-green-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700"
                       >
                         Ouvrir l’activité
                       </button>
                       <button
+                        type="button"
                         onClick={() => navigate("/activites")}
                         className="inline-flex items-center justify-center rounded-full border border-green-500 px-4 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100"
                       >
@@ -857,53 +1350,46 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                 </div>
               )}
             </div>
-          )}
-        </div>
-
-        {/* Panneau d'historique (sidebar) */}
-        {showHistory && (
-          <aside className="mt-6 border-t border-gray-200 bg-white shadow-lg lg:mt-0 lg:w-80 lg:border-t-0 lg:border-l lg:shadow-none">
-            <div className="flex flex-col lg:h-full">
-              <div className="border-b border-gray-200 px-4 py-3">
-                <h2 className="text-sm font-semibold text-gray-700">
-                  Conversations récentes
-                </h2>
-              </div>
-              <div className="lg:flex-1 lg:overflow-y-auto">
-                {conversations.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-gray-400">
-                    Aucune conversation
+          ) : (
+            <div className="border-t border-gray-100 bg-white/90 px-4 py-4 sm:px-6">
+              <div className="mx-auto w-full max-w-3xl space-y-3 rounded-3xl border border-gray-200/70 bg-white/95 p-4 shadow-sm">
+                <textarea
+                  value={promptText}
+                  onChange={(event) => setPromptText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault();
+                      handleStartNewGeneration();
+                    }
+                  }}
+                  placeholder="Décrivez l’activité à générer (thème, public, objectifs, contraintes...)."
+                  rows={3}
+                  className="w-full rounded-2xl border border-gray-300 bg-white p-3 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+                  disabled={isGenerating}
+                />
+                {!jobId && error ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {error}
                   </div>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {conversations.map((conv) => (
-                      <button
-                        key={conv.id}
-                        onClick={() => handleSelectConversation(conv)}
-                        className={`w-full px-4 py-3 text-left transition hover:bg-gray-50 ${
-                          conv.id === conversation.id ? "bg-blue-50" : ""
-                        }`}
-                      >
-                        <div className="mb-1 text-sm font-medium text-gray-800">
-                          {conv.activityTitle || "Sans titre"}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(conv.updatedAt).toLocaleDateString("fr-FR", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                ) : null}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-gray-500">
+                    Cmd+Entrée ou Ctrl+Entrée pour envoyer
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleStartNewGeneration}
+                    disabled={!promptText.trim() || isGenerating}
+                    className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+                  >
+                    {isGenerating ? "Génération..." : "Envoyer"}
+                  </button>
+                </div>
               </div>
             </div>
-          </aside>
-        )}
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

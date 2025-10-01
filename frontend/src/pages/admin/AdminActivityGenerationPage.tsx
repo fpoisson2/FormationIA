@@ -455,7 +455,7 @@ export function AdminActivityGenerationPage(): JSX.Element {
             </h2>
           </div>
           <a
-            href="/admin/activity-generation/conversation"
+            href="/assistant-ia"
             className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/30 px-4 py-2 text-sm font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
           >
             Historique des conversations
