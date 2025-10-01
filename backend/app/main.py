@@ -4701,8 +4701,6 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
 
 def _serialize_conversation_for_responses(
     conversation: Sequence[Mapping[str, Any]],
-    *,
-    conversation_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return a list of messages compliant with the Responses API."""
 
@@ -4710,8 +4708,6 @@ def _serialize_conversation_for_responses(
     for message in conversation:
         try:
             entry = _serialize_conversation_entry(message)
-            if conversation_id:
-                entry.setdefault("conversation", conversation_id)
             serialized.append(entry)
         except Exception:  # pragma: no cover - defensive
             serialized.append({"role": "assistant", "content": []})
@@ -4845,9 +4841,7 @@ def _run_activity_generation_job(job_id: str) -> None:
                 job_id, conversation_id=conversation_id
             )
 
-        serialized_input = _serialize_conversation_for_responses(
-            pending_messages, conversation_id=conversation_id
-        )
+        serialized_input = _serialize_conversation_for_responses(pending_messages)
         if not serialized_input:
             raise RuntimeError("Conversation vide à transmettre au modèle")
 
@@ -5135,9 +5129,7 @@ def _run_activity_generation_job(job_id: str) -> None:
             try:
                 followup = client.responses.create(
                     model=model_name,
-                    input=_serialize_conversation_for_responses(
-                        [message], conversation_id=conversation_id
-                    ),
+                    input=_serialize_conversation_for_responses([message]),
                     conversation=conversation_id,
                     tools=tools,
                     parallel_tool_calls=False,
