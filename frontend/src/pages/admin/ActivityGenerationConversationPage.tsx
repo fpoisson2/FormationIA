@@ -317,14 +317,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           }
           buffer += decoder.decode(value, { stream: true });
 
-          let eventBoundary = buffer.indexOf("\n\n");
-          while (eventBoundary !== -1) {
-            const rawEvent = buffer.slice(0, eventBoundary);
-            buffer = buffer.slice(eventBoundary + 2);
+          let delimiterMatch = buffer.match(/\r?\n\r?\n/);
+          while (delimiterMatch && delimiterMatch.index !== undefined) {
+            const rawEvent = buffer.slice(0, delimiterMatch.index);
+            buffer = buffer.slice(delimiterMatch.index + delimiterMatch[0].length);
             if (rawEvent.trim()) {
               handleEvent(rawEvent);
             }
-            eventBoundary = buffer.indexOf("\n\n");
+            delimiterMatch = buffer.match(/\r?\n\r?\n/);
           }
         }
 
