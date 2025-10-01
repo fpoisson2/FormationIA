@@ -121,6 +121,47 @@ def test_create_form_step_accepts_id_alias() -> None:
     assert field["correctAnswers"] is None
 
 
+def test_create_form_step_generates_unique_field_ids() -> None:
+    step = create_form_step(
+        step_id="formulaire",
+        fields=[
+            {
+                "label": "Choix A",
+                "type": "single_choice",
+                "options": [{"value": "a", "label": "Option A"}],
+            },
+            {
+                "id": None,
+                "label": "Choix B",
+                "type": "single_choice",
+                "options": [{"value": "b", "label": "Option B"}],
+            },
+            {
+                "id": " question ",
+                "label": "Choix C",
+                "type": "single_choice",
+                "options": [{"value": "c", "label": "Option C"}],
+            },
+            {
+                "id": "question",
+                "label": "Choix D",
+                "type": "single_choice",
+                "options": [{"value": "d", "label": "Option D"}],
+            },
+        ],
+    )
+
+    field_ids = [field["id"] for field in step["config"]["fields"]]
+
+    assert field_ids == [
+        "formulaire-field-1",
+        "formulaire-field-2",
+        "question",
+        "question-2",
+    ]
+    assert len(field_ids) == len(set(field_ids))
+
+
 def test_merge_step_definition_preserves_full_form_fields() -> None:
     cached = create_form_step(
         step_id="formulaire",

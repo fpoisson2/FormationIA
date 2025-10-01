@@ -492,11 +492,36 @@ def create_form_step(
         raise ValueError("Un identifiant d'étape est requis pour create_form_step.")
 
     normalized_fields: list[dict[str, Any]] = []
+    seen_field_ids: set[str] = set()
+    fallback_prefix = str(resolved_step_id)
+    fallback_counter = 1
     for field in fields:
         if not isinstance(field, Mapping):
             continue
 
         normalized_field = deepcopy(field)
+        raw_field_id = normalized_field.get("id")
+        normalized_id: str | None
+        if isinstance(raw_field_id, str):
+            normalized_id = raw_field_id.strip()
+        elif raw_field_id is not None:
+            normalized_id = str(raw_field_id).strip()
+        else:
+            normalized_id = None
+
+        if not normalized_id:
+            normalized_id = f"{fallback_prefix}-field-{fallback_counter}"
+            fallback_counter += 1
+
+        base_id = normalized_id
+        suffix = 2
+        while normalized_id in seen_field_ids:
+            normalized_id = f"{base_id}-{suffix}"
+            suffix += 1
+
+        normalized_field["id"] = normalized_id
+        seen_field_ids.add(normalized_id)
+
         normalized_field.setdefault("minBullets", None)
         normalized_field.setdefault("maxBullets", None)
         normalized_field.setdefault("maxWordsPerBullet", None)
