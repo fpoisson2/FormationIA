@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   admin,
+  normalizeActivityGenerationJob,
   type ActivityGenerationJob,
   type ActivityGenerationJobToolCall,
   type Conversation,
@@ -9,7 +10,13 @@ import {
 } from "../../api";
 import { ConversationView } from "../../components/ConversationView";
 import { useAdminAuth } from "../../providers/AdminAuthProvider";
-import { MODEL_OPTIONS, VERBOSITY_OPTIONS, THINKING_OPTIONS } from "../../config";
+import {
+  API_AUTH_KEY,
+  API_BASE_URL,
+  MODEL_OPTIONS,
+  THINKING_OPTIONS,
+  VERBOSITY_OPTIONS,
+} from "../../config";
 
 interface PendingPlanStep {
   id?: string;
@@ -35,7 +42,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPolling, setIsPolling] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -47,7 +54,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  const pollIntervalRef = useRef<number | null>(null);
+  const streamControllerRef = useRef<AbortController | null>(null);
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -174,37 +181,188 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     void refreshJobStatus();
   }, [jobId, refreshJobStatus]);
 
-  // Polling pour les mises à jour de la conversation et du job
+  // Diffusion temps réel de l'état du job via SSE
   useEffect(() => {
-    if (!jobId || !conversation) return;
-
-    // Ne poll que si la conversation n'est pas terminée
-    if (conversation.status === "complete" || conversation.status === "error") {
+    if (!jobId || !token) {
       return;
     }
 
-    setIsPolling(true);
+    let isCancelled = false;
+    const controller = new AbortController();
 
-    const poll = async () => {
+    if (streamControllerRef.current) {
+      streamControllerRef.current.abort();
+    }
+    streamControllerRef.current = controller;
+
+    const startStream = async () => {
+      setIsStreaming(true);
+
       try {
-        const response = await admin.conversations.getByJobId(jobId, token);
-        setConversation(response.conversation);
-        await refreshJobStatus();
+        const headers: Record<string, string> = {
+          Accept: "text/event-stream",
+        };
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+        if (API_AUTH_KEY) {
+          headers["x-api-key"] = API_AUTH_KEY;
+        }
+
+        const response = await fetch(
+          `${API_BASE_URL}/admin/activities/generate/${jobId}/stream`,
+          {
+            method: "GET",
+            headers,
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(
+            message || "Impossible de suivre la génération en temps réel."
+          );
+        }
+
+        if (!response.body) {
+          throw new Error("Flux SSE indisponible.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        const handleEvent = (
+          rawEvent: string
+        ): void => {
+          if (isCancelled) {
+            return;
+          }
+
+          const lines = rawEvent.split(/\r?\n/);
+          let eventName = "message";
+          const dataLines: string[] = [];
+
+          for (const line of lines) {
+            if (!line) {
+              continue;
+            }
+            if (line.startsWith(":")) {
+              continue;
+            }
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim() || "message";
+              continue;
+            }
+            if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).trimStart());
+              continue;
+            }
+            if (line.startsWith("retry:") || line.startsWith("id:")) {
+              continue;
+            }
+          }
+
+          if (dataLines.length === 0) {
+            return;
+          }
+
+          const payloadText = dataLines.join("\n");
+          if (!payloadText) {
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(payloadText) as Record<string, unknown>;
+
+            if (eventName === "update") {
+              const conversationPayload = parsed.conversation;
+              if (
+                conversationPayload &&
+                typeof conversationPayload === "object"
+              ) {
+                setConversation(conversationPayload as Conversation);
+              }
+
+              const jobPayload = parsed.job;
+              if (jobPayload && typeof jobPayload === "object") {
+                try {
+                  const normalized = normalizeActivityGenerationJob(
+                    jobPayload as Record<string, unknown>
+                  );
+                  setJobStatus(normalized);
+                } catch (normalizationError) {
+                  console.error(
+                    "Impossible de normaliser le job reçu via SSE:",
+                    normalizationError
+                  );
+                }
+              }
+            } else if (eventName === "error") {
+              const message = parsed.message;
+              if (typeof message === "string" && message.trim()) {
+                setError(message.trim());
+              }
+            }
+          } catch (parseError) {
+            console.error("Erreur de parsing des événements SSE:", parseError);
+          }
+        };
+
+        while (!isCancelled) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+
+          let eventBoundary = buffer.indexOf("\n\n");
+          while (eventBoundary !== -1) {
+            const rawEvent = buffer.slice(0, eventBoundary);
+            buffer = buffer.slice(eventBoundary + 2);
+            if (rawEvent.trim()) {
+              handleEvent(rawEvent);
+            }
+            eventBoundary = buffer.indexOf("\n\n");
+          }
+        }
+
+        if (!isCancelled) {
+          const remainder = decoder.decode();
+          if (remainder) {
+            buffer += remainder;
+          }
+          if (buffer.trim()) {
+            handleEvent(buffer);
+          }
+        }
       } catch (err) {
-        console.error("Erreur lors du polling:", err);
+        if (isCancelled) {
+          return;
+        }
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        console.error("Erreur lors du suivi SSE:", err);
+      } finally {
+        if (!isCancelled) {
+          setIsStreaming(false);
+        }
       }
     };
 
-    pollIntervalRef.current = window.setInterval(poll, 3000); // Poll toutes les 3 secondes
+    void startStream();
 
     return () => {
-      if (pollIntervalRef.current !== null) {
-        window.clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      isCancelled = true;
+      controller.abort();
+      if (streamControllerRef.current === controller) {
+        streamControllerRef.current = null;
       }
-      setIsPolling(false);
+      setIsStreaming(false);
     };
-  }, [jobId, conversation, token]);
+  }, [API_AUTH_KEY, API_BASE_URL, jobId, token]);
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
@@ -743,7 +901,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           <div className="flex-1 lg:overflow-hidden">
             <ConversationView
               messages={conversation.messages}
-              isLoading={isPolling && conversation.status === "running"}
+              isLoading={isStreaming && conversation.status === "running"}
             />
           </div>
           {jobId && (
