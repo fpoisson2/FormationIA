@@ -4648,14 +4648,19 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_conversation_for_responses(
-    conversation: Sequence[Mapping[str, Any]]
+    conversation: Sequence[Mapping[str, Any]],
+    *,
+    conversation_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return a list of messages compliant with the Responses API."""
 
     serialized: list[dict[str, Any]] = []
     for message in conversation:
         try:
-            serialized.append(_serialize_conversation_entry(message))
+            entry = _serialize_conversation_entry(message)
+            if conversation_id:
+                entry.setdefault("conversation", conversation_id)
+            serialized.append(entry)
         except Exception:  # pragma: no cover - defensive
             serialized.append({"role": "assistant", "content": []})
     return serialized
@@ -4788,52 +4793,21 @@ def _run_activity_generation_job(job_id: str) -> None:
                 job_id, conversation_id=conversation_id
             )
 
-        serialized_input = _serialize_conversation_for_responses(pending_messages)
+        serialized_input = _serialize_conversation_for_responses(
+            pending_messages, conversation_id=conversation_id
+        )
         if not serialized_input:
             raise RuntimeError("Conversation vide à transmettre au modèle")
 
-        stream_update_interval = 0.4
-        last_stream_update = 0.0
         streaming_assistant_placeholder: dict[str, Any] | None = None
         streaming_reasoning_placeholder: dict[str, Any] | None = None
         streaming_function_placeholders: dict[str, dict[str, Any]] = {}
-
-        def _coerce_string(value: Any) -> str:
-            if value is None:
-                return ""
-            if isinstance(value, str):
-                normalized = _normalize_plain_text(value)
-                return normalized or value
-            if isinstance(value, Mapping):
-                text_value = value.get("text")
-                if isinstance(text_value, str):
-                    normalized = _normalize_plain_text(text_value)
-                    return normalized or text_value
-            try:
-                return json.dumps(value, ensure_ascii=False)
-            except TypeError:
-                return str(value)
-
-        def _maybe_emit_stream_update(force: bool = False, status: str = "Réponse en cours...") -> None:
-            nonlocal last_stream_update
-            now = time.time()
-            if not force and (now - last_stream_update) < stream_update_interval:
-                return
-            _update_activity_generation_job(
-                job_id,
-                message=status,
-                conversation=conversation,
-                cached_steps=cached_steps,
-                conversation_id=conversation_id,
-                conversation_cursor=len(conversation),
-            )
-            last_stream_update = now
 
         responses_client = getattr(client, "responses", None)
         if responses_client is None:
             raise RuntimeError("Client de génération invalide : attribut responses absent")
 
-        stream_kwargs = {
+        request_kwargs = {
             "model": model_name,
             "input": serialized_input,
             "conversation": conversation_id,
@@ -4843,126 +4817,7 @@ def _run_activity_generation_job(job_id: str) -> None:
             "reasoning": {"effort": thinking, "summary": "auto"},
         }
 
-        stream_method = getattr(responses_client, "stream", None)
-
-        class _LegacyResponsesStream:
-            def __init__(self, final_response: Any) -> None:
-                self._final_response = final_response
-
-            def __enter__(self) -> "_LegacyResponsesStream":
-                return self
-
-            def __exit__(self, exc_type, exc, tb) -> bool:  # type: ignore[no-untyped-def]
-                return False
-
-            def __iter__(self) -> "_LegacyResponsesStream":
-                return self
-
-            def __next__(self) -> Any:
-                raise StopIteration
-
-            def get_final_response(self) -> Any:
-                return self._final_response
-
-        if callable(stream_method):
-            stream_ctx = stream_method(**stream_kwargs)
-        else:
-            legacy_response = responses_client.create(**stream_kwargs)
-            stream_ctx = _LegacyResponsesStream(legacy_response)
-
-        with stream_ctx as stream:
-            for event in stream:
-                event_type = getattr(event, "type", None)
-
-                if event_type == "response.output_text.delta":
-                    delta = getattr(event, "delta", None)
-                    text_segment = _coerce_string(delta)
-                    if not text_segment:
-                        continue
-                    if streaming_assistant_placeholder is None:
-                        streaming_assistant_placeholder = {
-                            "type": "output_text",
-                            "role": "assistant",
-                            "content": "",
-                        }
-                        conversation.append(streaming_assistant_placeholder)
-                    streaming_assistant_placeholder["content"] = (
-                        streaming_assistant_placeholder.get("content") or ""
-                    ) + text_segment
-                    _maybe_emit_stream_update()
-                    continue
-
-                if event_type and "function_call" in event_type:
-                    item = getattr(event, "item", None)
-                    call_id = getattr(event, "call_id", None)
-                    if call_id is None and isinstance(item, Mapping):
-                        call_id = item.get("call_id") or item.get("id")
-                    call_id_str = str(call_id) if call_id is not None else None
-
-                    raw_name = getattr(event, "name", None)
-                    if raw_name is None and isinstance(item, Mapping):
-                        raw_name = item.get("name")
-
-                    placeholder_key = (
-                        call_id_str
-                        or getattr(event, "id", None)
-                        or getattr(event, "event_id", None)
-                        or (raw_name if isinstance(raw_name, str) and raw_name else None)
-                        or "function_call"
-                    )
-
-                    placeholder = streaming_function_placeholders.get(placeholder_key)
-                    if placeholder is None:
-                        placeholder = {
-                            "type": "function_call",
-                            "role": "assistant",
-                            "name": raw_name or "unknown_function",
-                            "arguments": "",
-                        }
-                        if call_id_str is not None:
-                            placeholder["call_id"] = call_id_str
-                        streaming_function_placeholders[placeholder_key] = placeholder
-                        conversation.append(placeholder)
-                    else:
-                        if call_id_str is not None:
-                            placeholder["call_id"] = call_id_str
-                        if raw_name and raw_name != placeholder.get("name"):
-                            placeholder["name"] = raw_name
-                    delta = getattr(event, "delta", None)
-                    arguments_segment = ""
-                    if isinstance(delta, Mapping):
-                        arguments_segment = _coerce_string(delta.get("arguments"))
-                    else:
-                        arguments_segment = _coerce_string(delta)
-                    if arguments_segment:
-                        placeholder["arguments"] = (
-                            placeholder.get("arguments") or ""
-                        ) + arguments_segment
-                    _maybe_emit_stream_update()
-                    continue
-
-                if event_type and "reasoning" in event_type:
-                    delta = getattr(event, "delta", None)
-                    text_segment = _coerce_string(delta)
-                    if not text_segment:
-                        continue
-                    if streaming_reasoning_placeholder is None:
-                        streaming_reasoning_placeholder = {
-                            "type": "reasoning",
-                            "role": "assistant",
-                            "summary": [],
-                            "content": "",
-                        }
-                        conversation.append(streaming_reasoning_placeholder)
-                    existing = streaming_reasoning_placeholder.get("content") or ""
-                    streaming_reasoning_placeholder["content"] = (
-                        existing + ("\n" if existing else "") + text_segment
-                    )
-                    _maybe_emit_stream_update()
-                    continue
-
-            response = stream.get_final_response()
-            _maybe_emit_stream_update(force=True)
+        response = responses_client.create(**request_kwargs)
     except Exception as exc:  # pragma: no cover - defensive
         handled_missing_tool_output = False
         if isinstance(exc, BadRequestError):
@@ -5226,7 +5081,9 @@ def _run_activity_generation_job(job_id: str) -> None:
             try:
                 followup = client.responses.create(
                     model=model_name,
-                    input=[_serialize_conversation_entry(message)],
+                    input=_serialize_conversation_for_responses(
+                        [message], conversation_id=conversation_id
+                    ),
                     conversation=conversation_id,
                     tools=tools,
                     parallel_tool_calls=False,
