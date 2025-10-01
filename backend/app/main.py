@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from threading import Lock, Thread
 from typing import Any, Generator, Literal, Mapping, Sequence
 from urllib.parse import urlparse
@@ -1943,6 +1943,10 @@ _ACTIVITY_GENERATION_JOBS: dict[str, _ActivityGenerationJobState] = {}
 _ACTIVITY_GENERATION_LOCK = Lock()
 
 
+_ACTIVITY_GENERATION_SUBSCRIBERS: dict[str, list[Queue[object]]] = {}
+_ACTIVITY_GENERATION_SUBSCRIBERS_LOCK = Lock()
+
+
 def _activity_generation_jobs_storage_path() -> Path:
     storage_dir = get_admin_storage_directory()
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -2375,13 +2379,54 @@ def _create_activity_generation_job(
             )
             _ACTIVITY_GENERATION_JOBS[candidate] = job
             _persist_activity_generation_jobs_locked()
-            return deepcopy(job)
+    return deepcopy(job)
 
 
 def _get_activity_generation_job(job_id: str) -> _ActivityGenerationJobState | None:
     with _ACTIVITY_GENERATION_LOCK:
         job = _ACTIVITY_GENERATION_JOBS.get(job_id)
         return deepcopy(job) if job is not None else None
+
+
+def _register_activity_generation_subscriber(
+    job_id: str, queue: Queue[object]
+) -> None:
+    with _ACTIVITY_GENERATION_SUBSCRIBERS_LOCK:
+        subscribers = _ACTIVITY_GENERATION_SUBSCRIBERS.setdefault(job_id, [])
+        subscribers.append(queue)
+
+
+def _unregister_activity_generation_subscriber(
+    job_id: str, queue: Queue[object]
+) -> None:
+    with _ACTIVITY_GENERATION_SUBSCRIBERS_LOCK:
+        subscribers = _ACTIVITY_GENERATION_SUBSCRIBERS.get(job_id)
+        if not subscribers:
+            return
+        try:
+            subscribers.remove(queue)
+        except ValueError:
+            return
+        if not subscribers:
+            _ACTIVITY_GENERATION_SUBSCRIBERS.pop(job_id, None)
+
+
+def _notify_activity_generation_subscribers(job_id: str) -> None:
+    with _ACTIVITY_GENERATION_SUBSCRIBERS_LOCK:
+        subscribers = list(_ACTIVITY_GENERATION_SUBSCRIBERS.get(job_id, ()))
+
+    for queue in subscribers:
+        try:
+            queue.put_nowait(object())
+        except Full:
+            try:
+                queue.get_nowait()
+            except Empty:
+                pass
+            try:
+                queue.put_nowait(object())
+            except Full:
+                pass
 
 
 def _update_activity_generation_job(
@@ -2447,7 +2492,10 @@ def _update_activity_generation_job(
 
         job.updated_at = datetime.utcnow()
         _persist_activity_generation_jobs_locked()
-        return deepcopy(job)
+        updated_copy = deepcopy(job)
+
+    _notify_activity_generation_subscribers(job_id)
+    return updated_copy
 
 
 def _serialize_activity_generation_job(
@@ -5705,22 +5753,18 @@ def admin_stream_activity_generation_job(
         raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
 
     def event_stream() -> Generator[str, None, None]:
-        poll_interval = 0.8
         heartbeat_interval = 15.0
         last_signature: tuple[str | None, str | None, int] | None = None
         last_heartbeat = time.time()
+        signal_queue: Queue[object] = Queue(maxsize=32)
+        _register_activity_generation_subscriber(job_id, signal_queue)
 
-        yield _sse_comment("stream-start")
+        def _serialize_state() -> tuple[dict[str, Any] | None, tuple[str | None, str | None, int] | None, _ActivityGenerationJobState | None]:
+            job_state = _get_activity_generation_job(job_id)
+            if job_state is None:
+                return None, None, None
 
-        while True:
-            job = _get_activity_generation_job(job_id)
-            if job is None:
-                yield _format_sse_event(
-                    "error", {"message": "Tâche de génération introuvable."}
-                )
-                break
-
-            _sync_conversation_from_job(job, user.username)
+            _sync_conversation_from_job(job_state, user.username)
 
             store = get_conversation_store()
             conversation = store.get_conversation(job_id)
@@ -5728,7 +5772,7 @@ def admin_stream_activity_generation_job(
                 conversation.to_dict() if conversation is not None else None
             )
 
-            serialized_job = _serialize_activity_generation_job(job).model_dump(
+            serialized_job = _serialize_activity_generation_job(job_state).model_dump(
                 mode="json", by_alias=True
             )
 
@@ -5745,22 +5789,68 @@ def admin_stream_activity_generation_job(
                 message_count,
             )
 
-            if signature != last_signature:
-                payload = {
-                    "job": serialized_job,
-                    "conversation": conversation_payload,
-                }
-                yield _format_sse_event("update", payload)
-                last_signature = signature
-                last_heartbeat = time.time()
-            elif (time.time() - last_heartbeat) >= heartbeat_interval:
-                yield _sse_comment("heartbeat")
-                last_heartbeat = time.time()
+            payload = {
+                "job": serialized_job,
+                "conversation": conversation_payload,
+            }
+            return payload, signature, job_state
 
-            if job.status in {"complete", "error"} and not job.awaiting_user_action:
-                break
+        try:
+            yield _sse_comment("stream-start")
 
-            time.sleep(poll_interval)
+            initial_payload, initial_signature, current_job = _serialize_state()
+            if initial_payload is None:
+                yield _format_sse_event(
+                    "error", {"message": "Tâche de génération introuvable."}
+                )
+                return
+
+            yield _format_sse_event("update", initial_payload)
+            last_signature = initial_signature
+            last_heartbeat = time.time()
+
+            if (
+                current_job is not None
+                and current_job.status in {"complete", "error"}
+                and not current_job.awaiting_user_action
+            ):
+                return
+
+            while True:
+                try:
+                    signal_queue.get(timeout=heartbeat_interval)
+                except Empty:
+                    if (time.time() - last_heartbeat) >= heartbeat_interval:
+                        yield _sse_comment("heartbeat")
+                        last_heartbeat = time.time()
+                    continue
+
+                # Drain any queued signals to coalesce updates
+                while True:
+                    try:
+                        signal_queue.get_nowait()
+                    except Empty:
+                        break
+
+                payload, signature, job_state = _serialize_state()
+                if payload is None or signature is None or job_state is None:
+                    yield _format_sse_event(
+                        "error", {"message": "Tâche de génération introuvable."}
+                    )
+                    return
+
+                if signature != last_signature:
+                    yield _format_sse_event("update", payload)
+                    last_signature = signature
+                    last_heartbeat = time.time()
+
+                if (
+                    job_state.status in {"complete", "error"}
+                    and not job_state.awaiting_user_action
+                ):
+                    return
+        finally:
+            _unregister_activity_generation_subscriber(job_id, signal_queue)
 
     return StreamingResponse(
         event_stream(), media_type="text/event-stream", headers=_sse_headers()
