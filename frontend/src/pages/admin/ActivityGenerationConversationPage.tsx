@@ -793,11 +793,21 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           }
         })
         .catch((fallbackError) => {
-          if (!cancelled) {
-            console.warn(
-              "Erreur lors du rafraîchissement de la conversation en secours",
-              fallbackError
-            );
+          if (cancelled) {
+            return;
+          }
+          console.warn(
+            "Erreur lors du rafraîchissement de la conversation en secours",
+            fallbackError
+          );
+          const resolved = resolveErrorMessage(
+            fallbackError,
+            "Impossible de rafraîchir la conversation automatiquement."
+          );
+          if (hasConversationSnapshotRef.current) {
+            setConnectionWarning(resolved);
+          } else {
+            setError(resolved);
           }
         })
         .finally(() => {
@@ -816,6 +826,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     jobStatus?.pendingToolCall,
     jobStatus?.status,
     refreshJobStatus,
+    resolveErrorMessage,
     token,
   ]);
 

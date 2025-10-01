@@ -734,100 +734,116 @@ async function streamConversationByJob(
   };
 
   if (supportsEventSource) {
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let source: EventSource | null = null;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let source: EventSource | null = null;
 
-      const cleanup = (close = true) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (close && source) {
-          try {
-            source.close();
-          } catch (error) {
-            console.warn("Erreur lors de la fermeture du flux SSE", error);
+        const cleanup = (close = true) => {
+          if (settled) {
+            return;
           }
+          settled = true;
+          if (close && source) {
+            try {
+              source.close();
+            } catch (error) {
+              console.warn("Erreur lors de la fermeture du flux SSE", error);
+            }
+          }
+          handlers.signal.removeEventListener("abort", abortListener);
+        };
+
+        const abortListener = () => {
+          cleanup();
+          resolve();
+        };
+
+        if (handlers.signal.aborted) {
+          resolve();
+          return;
         }
-        handlers.signal.removeEventListener("abort", abortListener);
-      };
 
-      const abortListener = () => {
-        cleanup();
-        resolve();
-      };
+        handlers.signal.addEventListener("abort", abortListener, { once: true });
 
-      if (handlers.signal.aborted) {
-        resolve();
-        return;
-      }
-
-      handlers.signal.addEventListener("abort", abortListener, { once: true });
-
-      try {
-        source = new EventSource(buildStreamUrl(true), { withCredentials: true });
-      } catch (error) {
-        cleanup(false);
-        reject(
-          error instanceof Error
-            ? error
-            : new Error("Impossible d'établir la connexion temps réel avec l'assistant.")
-        );
-        return;
-      }
-
-      const handleConversation = (event: MessageEvent<string>) => {
-        const parsed = parseEventPayload(event.data);
-        if (parsed && typeof parsed === "object") {
-          handlers.onConversation?.(parsed as Conversation);
-        }
-      };
-
-      const handleJob = (event: MessageEvent<string>) => {
-        const parsed = parseEventPayload(event.data);
-        if (parsed && typeof parsed === "object") {
-          handlers.onJob?.(
-            normalizeActivityGenerationJob(parsed as Record<string, unknown>)
+        try {
+          source = new EventSource(buildStreamUrl(true));
+        } catch (error) {
+          cleanup(false);
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(
+                  "Impossible d'établir la connexion temps réel avec l'assistant."
+                )
           );
-        }
-      };
-
-      const handleServerError = (event: MessageEvent<string>) => {
-        const parsed = parseEventPayload(event.data);
-        const message =
-          parsed && typeof parsed === "object" && "message" in parsed
-            ? String((parsed as { message?: unknown }).message || "")
-            : "Erreur lors de la diffusion de la conversation.";
-        handlers.onError?.(
-          message || "Erreur lors de la diffusion de la conversation."
-        );
-      };
-
-      const handleClose = () => {
-        cleanup();
-        resolve();
-      };
-
-      source.addEventListener("conversation", handleConversation as EventListener);
-      source.addEventListener("job", handleJob as EventListener);
-      source.addEventListener("close", handleClose as EventListener);
-
-      source.onerror = (event: Event) => {
-        if ("data" in event && typeof (event as MessageEvent<string>).data === "string") {
-          handleServerError(event as MessageEvent<string>);
           return;
         }
-        if (source && source.readyState === EventSource.CLOSED) {
-          handleClose();
-          return;
-        }
-        cleanup();
-        reject(
-          new Error("Impossible d'établir la connexion temps réel avec l'assistant.")
+
+        const handleConversation = (event: MessageEvent<string>) => {
+          const parsed = parseEventPayload(event.data);
+          if (parsed && typeof parsed === "object") {
+            handlers.onConversation?.(parsed as Conversation);
+          }
+        };
+
+        const handleJob = (event: MessageEvent<string>) => {
+          const parsed = parseEventPayload(event.data);
+          if (parsed && typeof parsed === "object") {
+            handlers.onJob?.(
+              normalizeActivityGenerationJob(parsed as Record<string, unknown>)
+            );
+          }
+        };
+
+        const handleServerError = (event: MessageEvent<string>) => {
+          const parsed = parseEventPayload(event.data);
+          const message =
+            parsed && typeof parsed === "object" && "message" in parsed
+              ? String((parsed as { message?: unknown }).message || "")
+              : "Erreur lors de la diffusion de la conversation.";
+          handlers.onError?.(
+            message || "Erreur lors de la diffusion de la conversation."
+          );
+        };
+
+        const handleClose = () => {
+          cleanup();
+          resolve();
+        };
+
+        source.addEventListener("conversation", handleConversation as EventListener);
+        source.addEventListener("job", handleJob as EventListener);
+        source.addEventListener("close", handleClose as EventListener);
+
+        source.onerror = (event: Event) => {
+          if (
+            "data" in event && typeof (event as MessageEvent<string>).data === "string"
+          ) {
+            handleServerError(event as MessageEvent<string>);
+            return;
+          }
+          if (source && source.readyState === EventSource.CLOSED) {
+            handleClose();
+            return;
+          }
+          cleanup();
+          reject(
+            new Error("Impossible d'établir la connexion temps réel avec l'assistant.")
+          );
+        };
+      });
+      return;
+    } catch (eventSourceError) {
+      if (!handlers.signal.aborted) {
+        console.warn(
+          "Connexion SSE native indisponible, utilisation du repli fetch",
+          eventSourceError
         );
-      };
-    });
+      } else {
+        return;
+      }
+    }
   }
 
   const response = await fetch(
