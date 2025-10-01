@@ -38,7 +38,6 @@ import {
   type VerbosityChoice,
 } from "../config";
 import "../modules/step-sequence/modules";
-import { StepSequenceActivity } from "../modules/step-sequence/StepSequenceActivity";
 import { getStepComponent, STEP_COMPONENT_REGISTRY } from "../modules/step-sequence/registry";
 import {
   StepSequenceContext,
@@ -2676,7 +2675,8 @@ function ActivitySelector(): JSX.Element {
                 </li>
               ) : null}
             </ul>
-            {isEditMode && activity.component === StepSequenceActivity ? (
+            {isEditMode &&
+            activity.componentKey === STEP_SEQUENCE_COMPONENT_KEY ? (
               <button
                 type="button"
                 onClick={() => setStepSequenceEditorActivityId(activity.id)}
