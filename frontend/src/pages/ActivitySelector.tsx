@@ -37,17 +37,16 @@ import {
   type ThinkingChoice,
   type VerbosityChoice,
 } from "../config";
+import "../modules/step-sequence/modules";
+import { StepSequenceActivity } from "../modules/step-sequence/StepSequenceActivity";
+import { getStepComponent, STEP_COMPONENT_REGISTRY } from "../modules/step-sequence/registry";
 import {
-  StepSequenceActivity,
-  getStepComponent,
-  STEP_COMPONENT_REGISTRY,
   StepSequenceContext,
   isCompositeStepDefinition,
   resolveStepComponentKey,
   type CompositeStepConfig,
   type StepDefinition,
-} from "../modules/step-sequence";
-import "../modules/step-sequence/modules";
+} from "../modules/step-sequence/types";
 import { createDefaultExplorateurWorldConfig } from "../modules/step-sequence/modules/explorateur-world";
 import { useLTI } from "../hooks/useLTI";
 import { useAdminAuth } from "../providers/AdminAuthProvider";

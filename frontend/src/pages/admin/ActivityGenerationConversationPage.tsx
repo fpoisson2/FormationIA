@@ -9,10 +9,7 @@ import {
   type ConversationMessageToolCall,
   type GenerateActivityPayload,
 } from "../../api";
-import {
-  resolveStepComponentKey,
-  type StepDefinition,
-} from "../../modules/step-sequence";
+import { resolveStepComponentKey, type StepDefinition } from "../../modules/step-sequence/types";
 import { ConversationView } from "../../components/ConversationView";
 import { useAdminAuth } from "../../providers/AdminAuthProvider";
 import { MODEL_OPTIONS, VERBOSITY_OPTIONS, THINKING_OPTIONS } from "../../config";

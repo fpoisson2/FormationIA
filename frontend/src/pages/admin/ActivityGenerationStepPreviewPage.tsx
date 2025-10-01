@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { admin, type ActivityGenerationJob } from "../../api";
+import "../../modules/step-sequence/modules";
+import { StepSequenceRenderer } from "../../modules/step-sequence/StepSequenceRenderer";
+import { getStepComponent } from "../../modules/step-sequence/registry";
 import {
-  StepSequenceRenderer,
-  getStepComponent,
   resolveStepComponentKey,
   type StepDefinition,
-} from "../../modules/step-sequence";
-import "../../modules/step-sequence/modules";
+} from "../../modules/step-sequence/types";
 import { useAdminAuth } from "../../providers/AdminAuthProvider";
 
 interface RouteParams {
