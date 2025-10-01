@@ -4573,7 +4573,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         message_id = message.get("id")
         if isinstance(message_id, str) and message_id:
             payload["id"] = _normalize_tool_call_identifier(
-                message_id, fallback_seed=fallback_seed, prefix="fc_"
+                message_id, fallback_seed=fallback_seed, prefix="fc_call"
             )
         status = message.get("status")
         if isinstance(status, str) and status:
@@ -4605,7 +4605,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         message_id = message.get("id")
         if isinstance(message_id, str) and message_id:
             payload["id"] = _normalize_tool_call_identifier(
-                message_id, fallback_seed=fallback_seed, prefix="fc_"
+                message_id, fallback_seed=fallback_seed, prefix="fc_output"
             )
         status = message.get("status")
         if isinstance(status, str) and status:
@@ -4829,15 +4829,48 @@ def _run_activity_generation_job(job_id: str) -> None:
             )
             last_stream_update = now
 
-        with client.responses.stream(
-            model=model_name,
-            input=serialized_input,
-            conversation=conversation_id,
-            tools=tools,
-            parallel_tool_calls=False,
-            text={"verbosity": verbosity},
-            reasoning={"effort": thinking, "summary": "auto"},
-        ) as stream:
+        responses_client = getattr(client, "responses", None)
+        if responses_client is None:
+            raise RuntimeError("Client de génération invalide : attribut responses absent")
+
+        stream_kwargs = {
+            "model": model_name,
+            "input": serialized_input,
+            "conversation": conversation_id,
+            "tools": tools,
+            "parallel_tool_calls": False,
+            "text": {"verbosity": verbosity},
+            "reasoning": {"effort": thinking, "summary": "auto"},
+        }
+
+        stream_method = getattr(responses_client, "stream", None)
+
+        class _LegacyResponsesStream:
+            def __init__(self, final_response: Any) -> None:
+                self._final_response = final_response
+
+            def __enter__(self) -> "_LegacyResponsesStream":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:  # type: ignore[no-untyped-def]
+                return False
+
+            def __iter__(self) -> "_LegacyResponsesStream":
+                return self
+
+            def __next__(self) -> Any:
+                raise StopIteration
+
+            def get_final_response(self) -> Any:
+                return self._final_response
+
+        if callable(stream_method):
+            stream_ctx = stream_method(**stream_kwargs)
+        else:
+            legacy_response = responses_client.create(**stream_kwargs)
+            stream_ctx = _LegacyResponsesStream(legacy_response)
+
+        with stream_ctx as stream:
             for event in stream:
                 event_type = getattr(event, "type", None)
 
