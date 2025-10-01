@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { admin, type ActivityGenerationJob } from "../../api";
 import {
-  STEP_COMPONENT_REGISTRY,
   StepSequenceRenderer,
+  getStepComponent,
   resolveStepComponentKey,
   type StepDefinition,
 } from "../../modules/step-sequence";
@@ -134,7 +134,7 @@ export function ActivityGenerationStepPreviewPage(): JSX.Element {
           continue;
         }
 
-        if (!STEP_COMPONENT_REGISTRY[componentKey]) {
+        if (!getStepComponent(componentKey)) {
           skipped += 1;
           continue;
         }
