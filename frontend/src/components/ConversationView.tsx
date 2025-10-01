@@ -130,6 +130,7 @@ export function ConversationView({
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const bottomMarkerRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const previousScrollTopRef = useRef(0);
 
   // Filtre les messages système et développeur pour ne pas les afficher
   const visibleMessages = useMemo(() => {
@@ -174,6 +175,15 @@ export function ConversationView({
     const updateShouldStickToBottom = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      const isScrollingUp = scrollTop < previousScrollTopRef.current;
+
+      previousScrollTopRef.current = scrollTop;
+
+      if (isScrollingUp) {
+        shouldStickToBottomRef.current = false;
+        return;
+      }
+
       shouldStickToBottomRef.current = distanceFromBottom <= 120;
     };
 
