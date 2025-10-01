@@ -136,6 +136,16 @@ export function StepSequenceRenderer({
   }, []);
 
   const stepIdsKey = useMemo(() => steps.map((step) => step.id).join("|"), [steps]);
+  useEffect(() => {
+    const maxIndex = steps.length === 0 ? 0 : steps.length - 1;
+    const normalizedInitial = Number.isFinite(initialIndex)
+      ? Math.max(0, Math.min(initialIndex, maxIndex))
+      : 0;
+
+    setCurrentIndex((previousIndex) =>
+      previousIndex === normalizedInitial ? previousIndex : normalizedInitial
+    );
+  }, [initialIndex, stepIdsKey, steps.length]);
   const stepsSignature = useMemo(() => buildStepsSignature(steps), [steps]);
   const latestStepsRef = useRef(steps);
 

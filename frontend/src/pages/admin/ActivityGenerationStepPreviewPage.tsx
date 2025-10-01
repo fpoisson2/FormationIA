@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { admin, type ActivityGenerationJob } from "../../api";
-import { StepSequenceRenderer } from "../../modules/step-sequence";
-import type { StepDefinition } from "../../modules/step-sequence";
+import {
+  STEP_COMPONENT_REGISTRY,
+  StepSequenceRenderer,
+  resolveStepComponentKey,
+  type StepDefinition,
+} from "../../modules/step-sequence";
 import "../../modules/step-sequence/modules";
 import { useAdminAuth } from "../../providers/AdminAuthProvider";
 
@@ -114,16 +118,48 @@ export function ActivityGenerationStepPreviewPage(): JSX.Element {
     return Object.values(job.cachedSteps) as StepDefinition[];
   }, [job?.cachedSteps]);
 
+  const { availableSteps, unsupportedCount } = useMemo(
+    () => {
+      const nextSteps: StepDefinition[] = [];
+      let skipped = 0;
+
+      for (const step of steps) {
+        if (!step || typeof step !== "object") {
+          continue;
+        }
+
+        const componentKey = resolveStepComponentKey(step) ?? step.component ?? "";
+        if (!componentKey) {
+          skipped += 1;
+          continue;
+        }
+
+        if (!STEP_COMPONENT_REGISTRY[componentKey]) {
+          skipped += 1;
+          continue;
+        }
+
+        nextSteps.push(step);
+      }
+
+      return { availableSteps: nextSteps, unsupportedCount: skipped };
+    },
+    [steps]
+  );
+
   const initialIndex = useMemo(() => {
-    if (!stepId || steps.length === 0) {
+    if (!stepId || availableSteps.length === 0) {
       return 0;
     }
-    const index = steps.findIndex((step) => step.id === stepId);
+    const index = availableSteps.findIndex((step) => step.id === stepId);
     return index >= 0 ? index : 0;
-  }, [stepId, steps]);
+  }, [availableSteps, stepId]);
 
-  const activeStep = steps[initialIndex] ?? null;
+  const activeStep = availableSteps[initialIndex] ?? null;
   const highlight = extractStepHighlight(activeStep);
+  const stepMissing = stepId
+    ? !availableSteps.some((step) => step.id === stepId)
+    : false;
 
   if (!jobId) {
     return (
@@ -187,14 +223,29 @@ export function ActivityGenerationStepPreviewPage(): JSX.Element {
           <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 shadow-sm">
             {error}
           </div>
-        ) : steps.length === 0 ? (
+        ) : availableSteps.length === 0 ? (
           <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800 shadow-sm">
-            Aucune étape générée pour cette tâche pour le moment.
+            {unsupportedCount > 0
+              ? "Aucune étape compatible n’a été trouvée dans cette tâche pour le moment."
+              : "Aucune étape générée pour cette tâche pour le moment."}
           </div>
         ) : (
           <div className="rounded-3xl border border-white/70 bg-white/95 p-6 shadow-sm">
+            {stepMissing ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800">
+                L’identifiant demandé n’est pas disponible dans les étapes compatibles. Affichage de la
+                première étape rendue disponible.
+              </div>
+            ) : null}
+            {unsupportedCount > 0 ? (
+              <div className="mb-4 rounded-2xl border border-sky-100 bg-sky-50 p-4 text-xs text-sky-800">
+                {unsupportedCount === 1
+                  ? "1 étape générée utilise un composant non pris en charge par l’aperçu et a été masquée."
+                  : `${unsupportedCount} étapes générées utilisent des composants non pris en charge par l’aperçu et ont été masquées.`}
+              </div>
+            ) : null}
             <StepSequenceRenderer
-              steps={steps}
+              steps={availableSteps}
               initialIndex={initialIndex}
               isEditMode={false}
             />
