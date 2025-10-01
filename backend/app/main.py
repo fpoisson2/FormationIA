@@ -4494,8 +4494,14 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
     summary = message.get("summary")
 
     def _maybe_attach_summary(payload: dict[str, Any]) -> dict[str, Any]:
-        if summary is not None:
-            payload["summary"] = summary
+        # NOTE:
+        # ``summary`` was previously forwarded to the Responses API as a top-level
+        # message field. The latest client versions now reject unknown parameters
+        # with a ``BadRequestError`` ("Unknown parameter: 'input[0].summary'").
+        # We still want to preserve summaries inside our conversation objects, but
+        # they are only used internally – the API does not consume them. Dropping
+        # the field from the serialized payload keeps backwards compatibility with
+        # stored messages while ensuring requests remain valid.
         return payload
 
     def _resolve_text_type(role: str | None) -> str:
