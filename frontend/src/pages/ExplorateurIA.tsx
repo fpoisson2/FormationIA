@@ -16,13 +16,15 @@ import mapPackAtlasDescription from "../assets/kenney_map-pack/Spritesheet/mapPa
 import { useAdminAuth } from "../providers/AdminAuthProvider";
 import {
   StepSequenceRenderer,
+  type StepSequenceRenderWrapperProps,
+} from "../modules/step-sequence/StepSequenceRenderer";
+import {
   StepSequenceContext,
   type StepComponentProps,
   type StepDefinition,
-  type StepSequenceRenderWrapperProps,
   type StepSequenceActivityContextBridge,
-} from "../modules/step-sequence";
-import { isCompositeStepDefinition } from "../modules/step-sequence/types";
+  isCompositeStepDefinition,
+} from "../modules/step-sequence/types";
 import { createExplorateurExport } from "./explorateurIA/export";
 import { classNames } from "./explorateurIA/utils";
 import {
