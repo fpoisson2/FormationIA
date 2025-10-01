@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import ActivitySelector from "./pages/ActivitySelector";
@@ -20,10 +20,32 @@ import { AdminLtiUsersPage } from "./pages/admin/AdminLtiUsersPage";
 import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
 import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
-import { ActivityGenerationConversationPage } from "./pages/admin/ActivityGenerationConversationPage";
-import { ActivityGenerationStepPreviewPage } from "./pages/admin/ActivityGenerationStepPreviewPage";
 import { AdminInvitationCodesPage } from "./pages/admin/AdminInvitationCodesPage";
 import { activities as activitiesClient } from "./api";
+
+const ActivityGenerationConversationPage = lazy(() =>
+  import("./pages/admin/ActivityGenerationConversationPage").then(
+    (module) => ({ default: module.ActivityGenerationConversationPage })
+  )
+);
+
+const ActivityGenerationStepPreviewPage = lazy(() =>
+  import("./pages/admin/ActivityGenerationStepPreviewPage").then(
+    (module) => ({ default: module.ActivityGenerationStepPreviewPage })
+  )
+);
+
+function AdminAssistantFallback(): JSX.Element {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[color:var(--brand-sand)]/40 px-4">
+      <div className="rounded-3xl bg-white px-6 py-8 text-center shadow-sm">
+        <p className="text-sm font-medium text-[color:var(--brand-charcoal)]">
+          Chargement de l’assistant…
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function AdminLoginRedirect(): JSX.Element {
   const location = useLocation();
@@ -140,11 +162,19 @@ function App(): JSX.Element {
       <Route element={<AdminGuard />}>
         <Route
           path="/assistant-ia"
-          element={<ActivityGenerationConversationPage />}
+          element={
+            <Suspense fallback={<AdminAssistantFallback />}>
+              <ActivityGenerationConversationPage />
+            </Suspense>
+          }
         />
         <Route
           path="/assistant-ia/apercu/:jobId/:stepId"
-          element={<ActivityGenerationStepPreviewPage />}
+          element={
+            <Suspense fallback={<AdminAssistantFallback />}>
+              <ActivityGenerationStepPreviewPage />
+            </Suspense>
+          }
         />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="platforms" replace />} />
