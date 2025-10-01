@@ -61,6 +61,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const lastConversationUpdateRef = useRef<number>(0);
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -115,11 +116,25 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       setPromptText("");
       setFeedbackMessage("");
       setFeedbackError(null);
+      lastConversationUpdateRef.current = 0;
       if (shouldCloseSidebar) {
         setIsSidebarOpen(false);
       }
     },
     [buildConversationUrl, navigate]
+  );
+
+  const applyConversationUpdate = useCallback(
+    (nextConversation: Conversation) => {
+      lastConversationUpdateRef.current = Date.now();
+      setConversation((previous) => {
+        if (previous && previous.updatedAt === nextConversation.updatedAt) {
+          return previous;
+        }
+        return nextConversation;
+      });
+    },
+    []
   );
 
   // Charge la conversation initiale
@@ -137,7 +152,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       try {
         const response = await admin.conversations.getByJobId(jobId, token);
         if (!cancelled) {
-          setConversation(response.conversation);
+          applyConversationUpdate(response.conversation);
         }
       } catch (err) {
         if (!cancelled) {
@@ -157,7 +172,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [jobId, token]);
+  }, [applyConversationUpdate, jobId, token]);
 
   // Charge l'historique des conversations
   useEffect(() => {
@@ -243,12 +258,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         await admin.conversations.streamByJob(jobId, token, {
           signal: controller.signal,
           onConversation: (nextConversation) => {
-            setConversation((previous) => {
-              if (previous && previous.updatedAt === nextConversation.updatedAt) {
-                return previous;
-              }
-              return nextConversation;
-            });
+            applyConversationUpdate(nextConversation);
           },
           onJob: (nextJob) => {
             setJobStatus((previous) => {
@@ -292,6 +302,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       setIsStreaming(false);
     };
   }, [
+    applyConversationUpdate,
     jobId,
     jobStatus?.awaitingUserAction,
     jobStatus?.pendingToolCall,
@@ -406,7 +417,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           if (!prev) {
             return prev;
           }
-          return {
+          const appended = {
             ...prev,
             messages: [
               ...prev.messages,
@@ -417,9 +428,11 @@ export function ActivityGenerationConversationPage(): JSX.Element {
               },
             ],
           };
+          return appended;
         });
+        lastConversationUpdateRef.current = Date.now();
         const refreshed = await admin.conversations.getByJobId(jobId, token);
-        setConversation(refreshed.conversation);
+        applyConversationUpdate(refreshed.conversation);
       } catch (err) {
         setFeedbackError(
           err instanceof Error
@@ -430,7 +443,15 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         setIsSendingFeedback(false);
       }
     },
-    [feedbackMessage, isSendingFeedback, jobId, jobStatus?.expectingPlan, jobStatus?.pendingToolCall?.name, token]
+    [
+      applyConversationUpdate,
+      feedbackMessage,
+      isSendingFeedback,
+      jobId,
+      jobStatus?.expectingPlan,
+      jobStatus?.pendingToolCall?.name,
+      token,
+    ]
   );
 
   const deleteConversationById = useCallback(
@@ -628,6 +649,84 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       !lastAssistantMessageHasContent &&
       (isStreaming || isJobLoading)
   );
+
+  useEffect(() => {
+    if (!jobId) {
+      return;
+    }
+
+    const shouldMonitor = Boolean(
+      !jobStatus ||
+        jobStatus.status === "running" ||
+        jobStatus.awaitingUserAction ||
+        jobStatus.pendingToolCall
+    );
+
+    if (!shouldMonitor) {
+      return;
+    }
+
+    let cancelled = false;
+    let isFetching = false;
+
+    const intervalId = window.setInterval(() => {
+      if (cancelled || isFetching) {
+        return;
+      }
+
+      const lastUpdate = lastConversationUpdateRef.current;
+      const now = Date.now();
+
+      if (lastUpdate && now - lastUpdate <= 4000) {
+        return;
+      }
+
+      isFetching = true;
+      void admin.conversations
+        .getByJobId(jobId, token)
+        .then((response) => {
+          if (cancelled) {
+            return;
+          }
+          applyConversationUpdate(response.conversation);
+          const elapsed = lastUpdate ? now - lastUpdate : now;
+          if (
+            elapsed > 12000 &&
+            streamAbortControllerRef.current &&
+            !streamAbortControllerRef.current.signal.aborted
+          ) {
+            streamAbortControllerRef.current.abort();
+          }
+          if (elapsed > 12000) {
+            void refreshJobStatus();
+          }
+        })
+        .catch((fallbackError) => {
+          if (!cancelled) {
+            console.warn(
+              "Erreur lors du rafraîchissement de la conversation en secours",
+              fallbackError
+            );
+          }
+        })
+        .finally(() => {
+          isFetching = false;
+        });
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    applyConversationUpdate,
+    jobId,
+    jobStatus?.awaitingUserAction,
+    jobStatus?.pendingToolCall,
+    jobStatus?.status,
+    refreshJobStatus,
+    token,
+  ]);
 
   return (
     <div className="relative flex min-h-screen bg-gray-50">
