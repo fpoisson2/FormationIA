@@ -26,7 +26,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from openai import BadRequestError, OpenAI as ResponsesClient
+from openai import BadRequestError, OpenAI as ResponsesClient, omit
+from openai.lib.streaming.responses import ResponseStream
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .admin_store import (
@@ -1434,6 +1435,31 @@ def _extract_simulation_chat_response(response: Any) -> SimulationChatResponsePa
     return None
 
 
+def _responses_create_stream(
+    responses_client: Any,
+    *,
+    text_format: type[Any] | object = omit,
+    starting_after: int | None = None,
+    **request_kwargs: Any,
+) -> ResponseStream[Any]:
+    if "stream" in request_kwargs:
+        raise ValueError(
+            "Le paramètre stream est géré automatiquement par _responses_create_stream"
+        )
+
+    prepared_kwargs = dict(request_kwargs)
+    tools_argument = prepared_kwargs.get("tools", omit)
+
+    raw_stream = responses_client.create(stream=True, **prepared_kwargs)
+
+    return ResponseStream(
+        raw_stream=raw_stream,
+        text_format=text_format,
+        input_tools=tools_argument,
+        starting_after=starting_after,
+    )
+
+
 def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> PlanModel:
     last_error: PlanGenerationError | None = None
     for attempt in range(2):
@@ -1442,7 +1468,14 @@ def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> Pla
         selected_verbosity = payload.verbosity or DEFAULT_PLAN_VERBOSITY
         selected_thinking = payload.thinking or DEFAULT_PLAN_THINKING
         try:
-            with client.responses.stream(
+            responses_resource = getattr(client, "responses", None)
+            if responses_resource is None:
+                raise RuntimeError(
+                    "Client de génération invalide : attribut responses absent"
+                )
+
+            with _responses_create_stream(
+                responses_resource,
                 model=selected_model,
                 input=messages,
                 text_format=PlanModel,
@@ -6027,7 +6060,14 @@ def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: S
         # la connexion en attendant les premiers tokens du modèle.
         yield " "
         try:
-            with client.responses.stream(
+            responses_resource = getattr(client, "responses", None)
+            if responses_resource is None:
+                raise RuntimeError(
+                    "Client de génération invalide : attribut responses absent"
+                )
+
+            with _responses_create_stream(
+                responses_resource,
                 model=model,
                 input=[
                     {
@@ -6151,7 +6191,14 @@ def _handle_simulation_chat(payload: SimulationChatRequest) -> StreamingResponse
     def stream_response() -> Generator[str, None, None]:
         yield _sse_comment("simulation-chat")
         try:
-            with client.responses.stream(
+            responses_resource = getattr(client, "responses", None)
+            if responses_resource is None:
+                raise RuntimeError(
+                    "Client de génération invalide : attribut responses absent"
+                )
+
+            with _responses_create_stream(
+                responses_resource,
                 model=model,
                 input=[{"role": "system", "content": system_message}, *prepared_messages],
                 text_format=SimulationChatResponsePayload,
