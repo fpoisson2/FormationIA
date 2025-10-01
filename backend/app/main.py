@@ -3195,8 +3195,14 @@ def _require_api_key(request: Request) -> None:
         return
 
     header_key = request.headers.get("x-api-key")
-    if header_key != _api_auth_token:
-        raise HTTPException(status_code=401, detail="Clé API invalide ou manquante.")
+    if header_key == _api_auth_token:
+        return
+
+    query_key = request.query_params.get("api_key") or request.query_params.get("apiKey")
+    if query_key == _api_auth_token:
+        return
+
+    raise HTTPException(status_code=401, detail="Clé API invalide ou manquante.")
 
 
 def _resolve_lti_service() -> LTIService:
@@ -3843,6 +3849,12 @@ def _require_authenticated_local_user(
     token: str | None = None
     if auth_header and auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        token = (
+            request.query_params.get("access_token")
+            or request.query_params.get("token")
+            or request.query_params.get("authToken")
+        )
     if not token:
         token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
     if not token:
@@ -5801,7 +5813,7 @@ def admin_stream_activity_generation_job(
             initial_payload, initial_signature, current_job = _serialize_state()
             if initial_payload is None:
                 yield _format_sse_event(
-                    "error", {"message": "Tâche de génération introuvable."}
+                    "job-error", {"message": "Tâche de génération introuvable."}
                 )
                 return
 
@@ -5835,7 +5847,7 @@ def admin_stream_activity_generation_job(
                 payload, signature, job_state = _serialize_state()
                 if payload is None or signature is None or job_state is None:
                     yield _format_sse_event(
-                        "error", {"message": "Tâche de génération introuvable."}
+                        "job-error", {"message": "Tâche de génération introuvable."}
                     )
                     return
 

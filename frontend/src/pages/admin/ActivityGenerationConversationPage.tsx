@@ -55,8 +55,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  const streamControllerRef = useRef<AbortController | null>(null);
-  const streamRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamRef = useRef<EventSource | null>(null);
+  const expectedStreamClosureRef = useRef(false);
   const jobStatusRef = useRef<ActivityGenerationJob | null>(null);
   const STREAM_RETRY_MESSAGE =
     "La connexion temps réel a été interrompue. Nouvelle tentative...";
@@ -177,6 +177,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     try {
       const job = await admin.activities.getGenerationJob(jobId, token);
       setJobStatus(job);
+      jobStatusRef.current = job;
     } catch (err) {
       console.error("Erreur lors de la récupération du job:", err);
     } finally {
@@ -188,6 +189,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   useEffect(() => {
     if (!jobId) {
       setJobStatus(null);
+      jobStatusRef.current = null;
       return;
     }
     void refreshJobStatus();
@@ -200,255 +202,160 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   // Diffusion temps réel de l'état du job via SSE
   useEffect(() => {
     if (!jobId || !token) {
+      if (streamRef.current) {
+        streamRef.current.close();
+        streamRef.current = null;
+      }
+      expectedStreamClosureRef.current = false;
+      setError(null);
+      setIsStreaming(false);
       return;
     }
 
-    let isCancelled = false;
-    const startStream = async (attempt = 0): Promise<void> => {
-      if (isCancelled) {
-        return;
-      }
+    let isUnmounted = false;
+    expectedStreamClosureRef.current = false;
 
-      const controller = new AbortController();
-      if (streamControllerRef.current) {
-        streamControllerRef.current.abort();
-      }
-      streamControllerRef.current = controller;
-      streamRetryTimeoutRef.current &&
-        clearTimeout(streamRetryTimeoutRef.current);
-      streamRetryTimeoutRef.current = null;
+    const baseUrl = API_BASE_URL.endsWith("/")
+      ? API_BASE_URL.slice(0, -1)
+      : API_BASE_URL;
+    const streamUrl = new URL(
+      `${baseUrl}/admin/activities/generate/${encodeURIComponent(jobId)}/stream`
+    );
+    streamUrl.searchParams.set("access_token", token);
+    if (API_AUTH_KEY) {
+      streamUrl.searchParams.set("api_key", API_AUTH_KEY);
+    }
+
+    const resetRetryMessage = () =>
       setError((current) =>
         current === STREAM_RETRY_MESSAGE ? null : current
       );
+
+    const eventSource = new EventSource(streamUrl.toString());
+    streamRef.current = eventSource;
+    setIsStreaming(true);
+
+    eventSource.onopen = () => {
+      if (isUnmounted) {
+        return;
+      }
       setIsStreaming(true);
+      resetRetryMessage();
+    };
 
-      let shouldRetry = false;
-      let streamClosedUnexpectedly = false;
-
+    eventSource.addEventListener("update", (event) => {
+      if (isUnmounted) {
+        return;
+      }
+      const message = event as MessageEvent<string>;
+      if (!message.data) {
+        return;
+      }
       try {
-        const headers: Record<string, string> = {
-          Accept: "text/event-stream",
-        };
-        if (token) {
-          headers.Authorization = `Bearer ${token}`;
-        }
-        if (API_AUTH_KEY) {
-          headers["x-api-key"] = API_AUTH_KEY;
+        const parsed = JSON.parse(message.data) as Record<string, unknown>;
+        const conversationPayload = parsed.conversation;
+        if (
+          conversationPayload &&
+          typeof conversationPayload === "object"
+        ) {
+          setConversation(conversationPayload as Conversation);
         }
 
-        const response = await fetch(
-          `${API_BASE_URL}/admin/activities/generate/${jobId}/stream`,
-          {
-            method: "GET",
-            headers,
-            signal: controller.signal,
-          }
-        );
-
-        if (!response.ok) {
-          const message = (await response.text()).trim();
-          const errorMessage =
-            message ||
-            `Impossible de suivre la génération en temps réel (${response.status}).`;
-          console.error("Flux SSE indisponible:", errorMessage);
-          if (response.status >= 500 && response.status < 600) {
-            shouldRetry = true;
-            streamClosedUnexpectedly = true;
-            setError((current) =>
-              current ?? STREAM_RETRY_MESSAGE
+        const jobPayload = parsed.job;
+        if (jobPayload && typeof jobPayload === "object") {
+          try {
+            const normalized = normalizeActivityGenerationJob(
+              jobPayload as Record<string, unknown>
             );
-          } else {
-            setError(errorMessage);
+            setJobStatus(normalized);
+            jobStatusRef.current = normalized;
+            resetRetryMessage();
+            if (
+              (normalized.status === "complete" ||
+                normalized.status === "error") &&
+              !normalized.awaitingUserAction
+            ) {
+              expectedStreamClosureRef.current = true;
+              setIsStreaming(false);
+              if (streamRef.current === eventSource) {
+                streamRef.current = null;
+              }
+              eventSource.close();
+              return;
+            }
+
+            if (
+              normalized.status === "pending" ||
+              normalized.status === "running"
+            ) {
+              expectedStreamClosureRef.current = false;
+            }
+          } catch (normalizationError) {
+            console.error(
+              "Impossible de normaliser le job reçu via SSE:",
+              normalizationError
+            );
           }
-        } else if (!response.body) {
-          console.error("Flux SSE sans corps de réponse disponible");
-          setError((current) => current ?? STREAM_RETRY_MESSAGE);
-          shouldRetry = true;
-          streamClosedUnexpectedly = true;
-        } else {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder("utf-8");
-          let buffer = "";
+        }
+      } catch (parseError) {
+        console.error("Erreur de parsing des événements SSE:", parseError);
+      }
+    });
 
-          const handleEvent = (rawEvent: string): void => {
-            if (isCancelled) {
-              return;
-            }
-
-            const lines = rawEvent.split(/\r?\n/);
-            let eventName = "message";
-            const dataLines: string[] = [];
-
-            for (const line of lines) {
-              if (!line) {
-                continue;
-              }
-              if (line.startsWith(":")) {
-                continue;
-              }
-              if (line.startsWith("event:")) {
-                eventName = line.slice(6).trim() || "message";
-                continue;
-              }
-              if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trimStart());
-                continue;
-              }
-              if (line.startsWith("retry:") || line.startsWith("id:")) {
-                continue;
-              }
-            }
-
-            if (dataLines.length === 0) {
-              return;
-            }
-
-            const payloadText = dataLines.join("\n");
-            if (!payloadText) {
-              return;
-            }
-
-            try {
-              const parsed = JSON.parse(payloadText) as Record<string, unknown>;
-
-              if (eventName === "update") {
-                setError((current) =>
-                  current === STREAM_RETRY_MESSAGE ? null : current
-                );
-                const conversationPayload = parsed.conversation;
-                if (
-                  conversationPayload &&
-                  typeof conversationPayload === "object"
-                ) {
-                  setConversation(conversationPayload as Conversation);
-                }
-
-              const jobPayload = parsed.job;
-              if (jobPayload && typeof jobPayload === "object") {
-                try {
-                  const normalized = normalizeActivityGenerationJob(
-                    jobPayload as Record<string, unknown>
-                  );
-                  setJobStatus(normalized);
-                } catch (normalizationError) {
-                  console.error(
-                    "Impossible de normaliser le job reçu via SSE:",
-                    normalizationError
-                  );
-                }
-              }
-            } else if (eventName === "error") {
-              const message = parsed.message;
-              if (typeof message === "string" && message.trim()) {
-                setError(message.trim());
-              }
-            }
-          } catch (parseError) {
-            console.error("Erreur de parsing des événements SSE:", parseError);
-          }
+    eventSource.addEventListener("job-error", (event) => {
+      if (isUnmounted) {
+        return;
+      }
+      const message = event as MessageEvent<string>;
+      if (!message.data) {
+        return;
+      }
+      try {
+        const payload = JSON.parse(message.data) as {
+          message?: unknown;
         };
-
-          while (!isCancelled) {
-            const { value, done } = await reader.read();
-            if (done) {
-              streamClosedUnexpectedly = true;
-              break;
-            }
-            buffer += decoder.decode(value, { stream: true });
-
-            let delimiterMatch = buffer.match(/\r?\n\r?\n/);
-            while (delimiterMatch && delimiterMatch.index !== undefined) {
-              const rawEvent = buffer.slice(0, delimiterMatch.index);
-              buffer = buffer.slice(delimiterMatch.index + delimiterMatch[0].length);
-              if (rawEvent.trim()) {
-                handleEvent(rawEvent);
-              }
-              delimiterMatch = buffer.match(/\r?\n\r?\n/);
-            }
-          }
-
-          if (!isCancelled) {
-            const remainder = decoder.decode();
-            if (remainder) {
-              buffer += remainder;
-            }
-            if (buffer.trim()) {
-              handleEvent(buffer);
-            }
-          }
+        const messageText =
+          typeof payload.message === "string" ? payload.message.trim() : "";
+        if (messageText) {
+          setError(messageText);
         }
       } catch (err) {
-        if (isCancelled) {
-          return;
-        }
-        if (err instanceof DOMException && err.name === "AbortError") {
-          return;
-        }
-        console.error("Erreur lors du suivi SSE:", err);
-        shouldRetry = true;
-        streamClosedUnexpectedly = true;
-        setError((current) =>
-          current ?? STREAM_RETRY_MESSAGE
+        console.error(
+          "Erreur lors de la réception d'une erreur SSE:",
+          err
         );
-      } finally {
-        if (!isCancelled) {
-          setIsStreaming(false);
-        }
-        if (streamControllerRef.current === controller) {
-          streamControllerRef.current = null;
-        }
       }
+    });
 
-      if (isCancelled) {
+    eventSource.onerror = () => {
+      if (isUnmounted) {
+        return;
+      }
+      setIsStreaming(false);
+      if (expectedStreamClosureRef.current) {
         return;
       }
 
-      let latestStatus = jobStatusRef.current;
-      if (!latestStatus) {
-        try {
-          const latestJob = await admin.activities.getGenerationJob(jobId, token);
-          setJobStatus(latestJob);
-          jobStatusRef.current = latestJob;
-          latestStatus = latestJob;
-        } catch (statusError) {
-          console.error(
-            "Erreur lors de la récupération du job après l'arrêt du flux:",
-            statusError
-          );
-        }
-      }
+      const latest = jobStatusRef.current;
+      const shouldDisplayRetry =
+        !!latest &&
+        (latest.status === "pending" || latest.status === "running");
 
-      const needsRetry =
-        (shouldRetry || streamClosedUnexpectedly) &&
-        latestStatus &&
-        latestStatus.status === "running";
-
-      if (needsRetry) {
-        const delay = Math.min(4000, 500 * 2 ** attempt);
-        streamRetryTimeoutRef.current = setTimeout(() => {
-          streamRetryTimeoutRef.current = null;
-          if (!isCancelled) {
-            void startStream(attempt + 1);
-          }
-        }, delay);
+      if (shouldDisplayRetry) {
+        setError((current) => current ?? STREAM_RETRY_MESSAGE);
+        void refreshJobStatus();
       }
     };
-
-    void startStream();
 
     return () => {
-      isCancelled = true;
-      if (streamRetryTimeoutRef.current) {
-        clearTimeout(streamRetryTimeoutRef.current);
-        streamRetryTimeoutRef.current = null;
-      }
-      if (streamControllerRef.current) {
-        streamControllerRef.current.abort();
-        streamControllerRef.current = null;
-      }
+      isUnmounted = true;
       setIsStreaming(false);
+      if (streamRef.current === eventSource) {
+        streamRef.current = null;
+      }
+      eventSource.close();
     };
-  }, [API_AUTH_KEY, API_BASE_URL, jobId, token]);
+  }, [API_AUTH_KEY, API_BASE_URL, jobId, refreshJobStatus, token]);
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
