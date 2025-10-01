@@ -71,6 +71,24 @@ const HIDDEN_STEP_COMPONENT_PREFIXES = ["workshop-"];
 
 const NOOP = () => {};
 
+function MagicWandIcon({ className }: { className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className={className}
+      aria-hidden="true"
+    >
+      <path
+        d="m4 20 9-9m0 0 2.5-2.5a2.121 2.121 0 1 0-3-3L10 8m3 3 2 2m4-11-.5 2.5L21 5l-2.5.5L18 8l-.5-2.5L15 5l2.5-1.5L18 1ZM3 5l.5 1.5L5 7l-1.5.5L3 9l-.5-1.5L1 7l1.5-.5L3 5Zm16 14 .5 1.5L21 21l-1.5.5L19 23l-.5-1.5L17 21l1.5-.5L19 19Z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 const createDefaultConfigForComponent = (
   component: string
 ): unknown | undefined => {
@@ -2053,10 +2071,11 @@ function ActivitySelector(): JSX.Element {
         Assistant IA
       </span>
       <Link
-        to="/admin/activity-generation/conversation"
-        className="inline-flex items-center justify-center rounded-full border border-sky-500/40 bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700"
+        to="/assistant-ia"
+        className="inline-flex items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700"
       >
-        Générer une activité
+        <MagicWandIcon className="h-4 w-4" />
+        Assistant IA
       </Link>
     </div>
   ) : null;

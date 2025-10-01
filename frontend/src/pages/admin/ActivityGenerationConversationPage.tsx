@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import {
   admin,
   type ActivityGenerationJob,
@@ -29,8 +29,21 @@ interface PendingPlanResult {
 export function ActivityGenerationConversationPage(): JSX.Element {
   const { token } = useAdminAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get("jobId");
+
+  const basePath = useMemo(() => location.pathname, [location.pathname]);
+
+  const buildConversationUrl = useCallback(
+    (nextJobId?: string | null) => {
+      if (nextJobId && nextJobId.trim().length > 0) {
+        return `${basePath}?jobId=${encodeURIComponent(nextJobId)}`;
+      }
+      return basePath;
+    },
+    [basePath]
+  );
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -208,10 +221,10 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
-      navigate(`/admin/activity-generation/conversation?jobId=${conv.jobId}`);
+      navigate(buildConversationUrl(conv.jobId));
       setShowHistory(false);
     },
-    [navigate]
+    [buildConversationUrl, navigate]
   );
 
   const handleStartNewGeneration = useCallback(async () => {
@@ -235,7 +248,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       const job = await admin.activities.generate(payload, token);
 
       // Rediriger vers la conversation nouvellement créée
-      navigate(`/admin/activity-generation/conversation?jobId=${job.jobId}`);
+      navigate(buildConversationUrl(job.jobId));
       setPromptText("");
       setShowNewGenerationForm(false);
     } catch (err) {
@@ -245,7 +258,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     } finally {
       setIsGenerating(false);
     }
-  }, [promptText, isGenerating, token, navigate]);
+  }, [buildConversationUrl, promptText, isGenerating, token, navigate]);
 
   const handleSendFeedback = useCallback(
     async (action: "approve" | "revise") => {
@@ -344,7 +357,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           setJobStatus(null);
         }
         if (redirectToHistory) {
-          navigate("/admin/activity-generation/conversation", { replace: true });
+          navigate(buildConversationUrl(null), { replace: true });
         }
         const history = await admin.conversations.list(token);
         setConversations(history.conversations);
@@ -361,7 +374,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         return false;
       }
     },
-    [conversation, navigate, refreshJobStatus, token]
+    [buildConversationUrl, conversation, navigate, refreshJobStatus, token]
   );
 
   const handleDeleteConversation = useCallback(async () => {
@@ -685,7 +698,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
             <button
-              onClick={() => navigate("/admin/activity-generation/conversation")}
+              onClick={() => navigate(buildConversationUrl(null))}
               className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
               title="Retour à l'historique"
             >

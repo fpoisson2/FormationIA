@@ -132,15 +132,15 @@ function App(): JSX.Element {
       <Route path="/inscription/createur" element={<CreatorSignupPage />} />
       <Route path="/inscription/etudiant" element={<StudentSignupPage />} />
       <Route element={<AdminGuard />}>
+        <Route
+          path="/assistant-ia"
+          element={<ActivityGenerationConversationPage />}
+        />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="platforms" replace />} />
           <Route
             path="activity-generation"
             element={<AdminActivityGenerationPage />}
-          />
-          <Route
-            path="activity-generation/conversation"
-            element={<ActivityGenerationConversationPage />}
           />
           <Route path="platforms" element={<AdminPlatformsPage />} />
           <Route path="lti-users" element={<AdminLtiUsersPage />} />
