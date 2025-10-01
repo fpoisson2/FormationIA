@@ -5858,6 +5858,94 @@ def _sync_conversation_from_job(
     """Synchronise une conversation depuis un job vers le store."""
     store = get_conversation_store()
 
+    existing_conversation = store.get_conversation(job.id)
+    existing_messages = (
+        list(existing_conversation.messages)
+        if existing_conversation is not None
+        else []
+    )
+
+    def _normalize_string(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    def _normalize_arguments(value: Any) -> str:
+        if value is None:
+            return "null"
+        try:
+            return json.dumps(value, ensure_ascii=True, sort_keys=True)
+        except TypeError:
+            return str(value)
+
+    def _normalize_tool_calls_for_compare(
+        value: Any,
+    ) -> tuple[tuple[str, str, str], ...]:
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+            return ()
+
+        normalized: list[tuple[str, str, str]] = []
+        for item in value:
+            if not isinstance(item, Mapping):
+                continue
+            name = _normalize_string(item.get("name"))
+            call_id_source = (
+                item.get("call_id")
+                or item.get("callId")
+                or item.get("id")
+                or ""
+            )
+            call_id = _normalize_string(call_id_source)
+            arguments_repr = _normalize_arguments(item.get("arguments"))
+            normalized.append((name, call_id, arguments_repr))
+        return tuple(normalized)
+
+    def _message_signature_from_parts(
+        role: Any,
+        content: Any,
+        tool_calls: Any,
+        tool_call_id: Any,
+        name: Any,
+    ) -> tuple[str, str, tuple[tuple[str, str, str], ...], str, str]:
+        return (
+            _normalize_string(role),
+            _normalize_string(content),
+            _normalize_tool_calls_for_compare(tool_calls),
+            _normalize_string(tool_call_id),
+            _normalize_string(name),
+        )
+
+    def _message_signature_from_message(
+        message: ConversationMessage,
+    ) -> tuple[str, str, tuple[tuple[str, str, str], ...], str, str]:
+        return _message_signature_from_parts(
+            message.role,
+            message.content,
+            message.tool_calls,
+            message.tool_call_id,
+            message.name,
+        )
+
+    def _conversation_signature(conversation: Conversation) -> tuple[
+        str | None,
+        str | None,
+        str,
+        str,
+        tuple[tuple[str, str, tuple[tuple[str, str, str], ...], str, str], ...],
+    ]:
+        return (
+            conversation.activity_id,
+            conversation.activity_title,
+            conversation.status,
+            conversation.model_name,
+            tuple(
+                _message_signature_from_message(message)
+                for message in conversation.messages
+            ),
+        )
+
     conversation_entries: list[dict[str, Any]] = [
         deepcopy(item) if isinstance(item, Mapping) else item  # type: ignore[arg-type]
         for item in job.conversation
@@ -5873,7 +5961,7 @@ def _sync_conversation_from_job(
 
     # Convertit les messages du job en ConversationMessage
     messages: list[ConversationMessage] = []
-    for raw_message in conversation_entries:
+    for index, raw_message in enumerate(conversation_entries):
         if not isinstance(raw_message, Mapping):
             messages.append(ConversationMessage(role="assistant"))
             continue
@@ -5981,6 +6069,19 @@ def _sync_conversation_from_job(
         if isinstance(timestamp, str) and timestamp:
             message_kwargs["timestamp"] = timestamp
 
+        message_signature = _message_signature_from_parts(
+            message_kwargs.get("role"),
+            message_kwargs.get("content"),
+            message_kwargs.get("tool_calls"),
+            message_kwargs.get("tool_call_id"),
+            message_kwargs.get("name"),
+        )
+
+        if 0 <= index < len(existing_messages):
+            existing_message = existing_messages[index]
+            if _message_signature_from_message(existing_message) == message_signature:
+                message_kwargs.setdefault("timestamp", existing_message.timestamp)
+
         messages.append(ConversationMessage(**message_kwargs))
 
     # Crée ou met à jour la conversation
@@ -5994,6 +6095,16 @@ def _sync_conversation_from_job(
         messages=messages,
         model_name=job.model_name,
     )
+
+    if existing_conversation is not None:
+        conversation.created_at = existing_conversation.created_at
+        conversation.updated_at = existing_conversation.updated_at
+
+        if (
+            _conversation_signature(existing_conversation)
+            == _conversation_signature(conversation)
+        ):
+            return
 
     store.save_conversation(conversation)
 
