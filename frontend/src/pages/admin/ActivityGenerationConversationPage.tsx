@@ -93,6 +93,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const lastConversationUpdateRef = useRef<number>(0);
+  const lastStreamActivityRef = useRef<number>(0);
   const hasConversationSnapshotRef = useRef(false);
 
   const resolveErrorMessage = useCallback(
@@ -195,6 +196,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       setFeedbackMessage("");
       setFeedbackError(null);
       lastConversationUpdateRef.current = 0;
+      lastStreamActivityRef.current = 0;
       hasConversationSnapshotRef.current = false;
       if (shouldCloseSidebar) {
         setIsSidebarOpen(false);
@@ -205,7 +207,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
   const applyConversationUpdate = useCallback(
     (incomingConversation: Conversation) => {
-      lastConversationUpdateRef.current = Date.now();
+      const now = Date.now();
+      lastConversationUpdateRef.current = now;
+      lastStreamActivityRef.current = now;
       hasConversationSnapshotRef.current = true;
       setConnectionWarning(null);
       setConversation((previousConversation) => {
@@ -325,6 +329,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   useEffect(() => {
     if (!jobId) {
       setIsLoading(false);
+      lastConversationUpdateRef.current = 0;
+      lastStreamActivityRef.current = 0;
       return;
     }
 
@@ -439,6 +445,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     streamAbortControllerRef.current = controller;
     setIsStreaming(true);
     setConnectionWarning(null);
+    lastStreamActivityRef.current = Date.now();
 
     const startStream = async () => {
       try {
@@ -448,6 +455,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             applyConversationUpdate(nextConversation);
           },
           onJob: (nextJob) => {
+            lastStreamActivityRef.current = Date.now();
             setJobStatus((previous) => {
               if (previous && previous.updatedAt === nextJob.updatedAt) {
                 return previous;
@@ -632,7 +640,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           };
           return appended;
         });
-        lastConversationUpdateRef.current = Date.now();
+        const now = Date.now();
+        lastConversationUpdateRef.current = now;
+        lastStreamActivityRef.current = now;
         const refreshed = await admin.conversations.getByJobId(jobId, token);
         applyConversationUpdate(refreshed.conversation);
       } catch (err) {
@@ -683,6 +693,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         if (conversation && conversation.id === conversationId) {
           setConversation(null);
           setJobStatus(null);
+          lastConversationUpdateRef.current = 0;
+          lastStreamActivityRef.current = 0;
           hasConversationSnapshotRef.current = false;
           setConnectionWarning(null);
         }
@@ -908,15 +920,24 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     let cancelled = false;
     let isFetching = false;
 
+    const STALE_EVENT_THRESHOLD = 30000;
+    const FORCE_RESTART_THRESHOLD = 90000;
+    const POLL_INTERVAL = 10000;
+
     const intervalId = window.setInterval(() => {
       if (cancelled || isFetching) {
         return;
       }
 
-      const lastUpdate = lastConversationUpdateRef.current;
-      const now = Date.now();
+      const lastEvent = lastStreamActivityRef.current;
+      if (!lastEvent) {
+        return;
+      }
 
-      if (lastUpdate && now - lastUpdate <= 4000) {
+      const now = Date.now();
+      const timeSinceEvent = now - lastEvent;
+
+      if (timeSinceEvent < STALE_EVENT_THRESHOLD) {
         return;
       }
 
@@ -928,16 +949,21 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             return;
           }
           applyConversationUpdate(response.conversation);
-          const elapsed = lastUpdate ? now - lastUpdate : now;
+
+          if (timeSinceEvent >= STALE_EVENT_THRESHOLD) {
+            void refreshJobStatus();
+          }
+
           if (
-            elapsed > 12000 &&
+            timeSinceEvent >= FORCE_RESTART_THRESHOLD &&
             streamAbortControllerRef.current &&
             !streamAbortControllerRef.current.signal.aborted
           ) {
+            lastStreamActivityRef.current = Date.now();
+            setConnectionWarning(
+              "Connexion temps réel instable. Tentative de reconnexion..."
+            );
             streamAbortControllerRef.current.abort();
-          }
-          if (elapsed > 12000) {
-            void refreshJobStatus();
           }
         })
         .catch((fallbackError) => {
@@ -961,7 +987,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         .finally(() => {
           isFetching = false;
         });
-    }, 5000);
+    }, POLL_INTERVAL);
 
     return () => {
       cancelled = true;
