@@ -544,7 +544,10 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const hasBlockingError = Boolean(jobId && error && !conversation);
   const showGlobalErrorBanner = Boolean(jobId && error && conversation);
   const conversationViewIsLoading = Boolean(
-    jobId && conversation?.status === "running" && (isPolling || isJobLoading)
+    jobId &&
+      conversation?.status === "running" &&
+      !jobStatus?.awaitingUserAction &&
+      (isPolling || isJobLoading)
   );
 
   return (

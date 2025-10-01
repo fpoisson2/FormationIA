@@ -42,9 +42,9 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
   if (isUser) {
     return (
       <div className="mb-6 flex justify-end">
-        <div className="max-w-[720px]">
+        <div className="max-w-full sm:max-w-[720px]">
           <div className="rounded-3xl bg-[color:var(--brand-red)] px-5 py-3 text-white shadow-sm">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{content}</p>
           </div>
           <div className="mt-1 text-right text-xs text-gray-400">
             {formatTimestamp(message.timestamp)}
@@ -58,10 +58,10 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
   if (isAssistant) {
     return (
       <div className="mb-6 flex justify-start">
-        <div className="max-w-[720px]">
+        <div className="max-w-full sm:max-w-[720px]">
           <div className="rounded-3xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
             {content && (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
+              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
                 {content}
               </p>
             )}
@@ -75,7 +75,7 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
                     <div className="font-semibold text-blue-800">
                       🔧 {toolCall.name}
                     </div>
-                    <pre className="mt-2 overflow-x-auto text-xs text-blue-700">
+                    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-blue-700">
                       {JSON.stringify(toolCall.arguments, null, 2)}
                     </pre>
                   </div>
@@ -95,12 +95,12 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
   if (isTool) {
     return (
       <div className="mb-6 flex justify-start">
-        <div className="max-w-[720px]">
+        <div className="max-w-full sm:max-w-[720px]">
           <div className="rounded-2xl border border-green-200 bg-green-50/50 px-4 py-3 shadow-sm">
             <div className="mb-2 text-xs font-semibold text-green-800">
               ✓ Résultat {message.name ? `de ${message.name}` : ""}
             </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-green-700">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs text-green-700">
               {content}
             </pre>
           </div>
