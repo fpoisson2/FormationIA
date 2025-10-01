@@ -1,6 +1,9 @@
 import { API_BASE_URL, API_AUTH_KEY } from "./config";
 import type { ModelChoice, VerbosityChoice, ThinkingChoice } from "./config";
-import type { StepSequenceToolDefinition } from "./modules/step-sequence";
+import type {
+  StepDefinition,
+  StepSequenceToolDefinition,
+} from "./modules/step-sequence";
 
 export type FieldType =
   | "bulleted_list"
@@ -573,6 +576,7 @@ export interface ActivityGenerationJob {
   error?: string | null;
   awaitingUserAction: boolean;
   pendingToolCall?: ActivityGenerationJobToolCall | null;
+  cachedSteps: Record<string, StepDefinition>;
   expectingPlan: boolean;
   createdAt: string;
   updatedAt: string;
@@ -618,6 +622,24 @@ function normalizeActivityGenerationJobToolCall(
   };
 }
 
+function normalizeCachedSteps(raw: unknown): Record<string, StepDefinition> {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+
+  const source = raw as Record<string, unknown>;
+  const normalized: Record<string, StepDefinition> = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (!value || typeof value !== "object") {
+      continue;
+    }
+    normalized[String(key)] = value as StepDefinition;
+  }
+
+  return normalized;
+}
+
 export function normalizeActivityGenerationJob(
   raw: ActivityGenerationJob
 ): ActivityGenerationJob;
@@ -644,6 +666,8 @@ export function normalizeActivityGenerationJob(
   const awaitingRaw = source.awaitingUserAction ?? source.awaiting_user_action;
   const pendingRaw = source.pendingToolCall ?? source.pending_tool_call;
   const expectingRaw = source.expectingPlan ?? source.expecting_plan;
+  const cachedStepsRaw = source.cachedSteps ?? source.cached_steps;
+  const cachedSteps = normalizeCachedSteps(cachedStepsRaw);
 
   return {
     jobId:
@@ -684,6 +708,7 @@ export function normalizeActivityGenerationJob(
     awaitingUserAction:
       typeof awaitingRaw === "boolean" ? awaitingRaw : Boolean(awaitingRaw),
     pendingToolCall: normalizeActivityGenerationJobToolCall(pendingRaw),
+    cachedSteps,
     expectingPlan:
       typeof expectingRaw === "boolean" ? expectingRaw : Boolean(expectingRaw),
     createdAt:

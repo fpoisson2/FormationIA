@@ -1778,6 +1778,91 @@ def _coerce_tool_arguments(raw_arguments: Any) -> tuple[dict[str, Any], str]:
     return arguments_obj, arguments_text
 
 
+def _merge_field_definitions(
+    provided: Any, cached: Any
+) -> list[dict[str, Any]]:
+    """Merge GuidedFields definitions while preserving cached entries."""
+
+    provided_fields: list[Mapping[str, Any]] = []
+    if isinstance(provided, Sequence):
+        provided_fields = [
+            field for field in provided if isinstance(field, Mapping)
+        ]
+
+    cached_fields: list[Mapping[str, Any]] = []
+    if isinstance(cached, Sequence):
+        cached_fields = [field for field in cached if isinstance(field, Mapping)]
+
+    if not cached_fields:
+        return [deepcopy(field) for field in provided_fields]
+
+    merged_fields: list[dict[str, Any]] = []
+
+    provided_by_id: dict[str, Mapping[str, Any]] = {}
+    provided_without_id: list[Mapping[str, Any]] = []
+    for field in provided_fields:
+        field_id = field.get("id")
+        if isinstance(field_id, str):
+            provided_by_id[field_id] = field
+        elif field_id is not None:
+            provided_by_id[str(field_id)] = field
+        else:
+            provided_without_id.append(field)
+
+    seen_ids: set[str] = set()
+    for field in cached_fields:
+        cloned = deepcopy(field)
+        field_id = field.get("id")
+        normalized_id: str | None
+        if isinstance(field_id, str):
+            normalized_id = field_id
+        elif field_id is not None:
+            normalized_id = str(field_id)
+        else:
+            normalized_id = None
+
+        if normalized_id and normalized_id in provided_by_id:
+            override = provided_by_id[normalized_id]
+            merged_fields.append({**cloned, **deepcopy(override)})
+            seen_ids.add(normalized_id)
+        else:
+            merged_fields.append(cloned)
+            if normalized_id:
+                seen_ids.add(normalized_id)
+
+    for field_id, override in provided_by_id.items():
+        if field_id not in seen_ids:
+            merged_fields.append(deepcopy(override))
+            seen_ids.add(field_id)
+
+    merged_fields.extend(deepcopy(field) for field in provided_without_id)
+
+    return merged_fields
+
+
+def _merge_nested_mapping(
+    provided: Any, cached: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Deep merge helper used for config/composite payloads."""
+
+    if not isinstance(provided, Mapping):
+        return deepcopy(provided) if provided is not None else {}
+
+    merged: dict[str, Any]
+    if isinstance(cached, Mapping):
+        merged = deepcopy(cached)
+    else:
+        merged = {}
+
+    for key, value in provided.items():
+        if key == "fields":
+            merged[key] = _merge_field_definitions(value, merged.get(key))
+        else:
+            merged[key] = deepcopy(value)
+
+    return merged
+
+
 def _merge_step_definition(
     provided: Mapping[str, Any] | None, cached: Mapping[str, Any] | None
 ) -> dict[str, Any]:
@@ -1789,6 +1874,10 @@ def _merge_step_definition(
         for key, value in provided.items():
             if value is None and cached is not None and key in {"config", "composite"}:
                 # The model omitted the nested payload, fall back to the cached one.
+                continue
+            if key in {"config", "composite"} and isinstance(value, Mapping):
+                cached_value = cached.get(key) if isinstance(cached, Mapping) else None
+                merged[key] = _merge_nested_mapping(value, cached_value)  # type: ignore[arg-type]
                 continue
             merged[key] = deepcopy(value)
 
@@ -1968,6 +2057,7 @@ class ActivityGenerationJobStatus(BaseModel):
     pending_tool_call: dict[str, Any] | None = Field(
         default=None, alias="pendingToolCall"
     )
+    cached_steps: dict[str, Any] = Field(default_factory=dict, alias="cachedSteps")
     expecting_plan: bool = Field(default=False, alias="expectingPlan")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
@@ -2529,6 +2619,7 @@ def _serialize_activity_generation_job(
         error=job.error,
         awaitingUserAction=job.awaiting_user_action,
         pendingToolCall=_safe_copy(job.pending_tool_call),
+        cachedSteps=_safe_copy(job.cached_steps),
         expectingPlan=job.expecting_plan,
         createdAt=job.created_at,
         updatedAt=job.updated_at,

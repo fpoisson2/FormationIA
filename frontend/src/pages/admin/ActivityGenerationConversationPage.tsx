@@ -9,6 +9,10 @@ import {
   type ConversationMessageToolCall,
   type GenerateActivityPayload,
 } from "../../api";
+import {
+  resolveStepComponentKey,
+  type StepDefinition,
+} from "../../modules/step-sequence";
 import { ConversationView } from "../../components/ConversationView";
 import { useAdminAuth } from "../../providers/AdminAuthProvider";
 import { MODEL_OPTIONS, VERBOSITY_OPTIONS, THINKING_OPTIONS } from "../../config";
@@ -55,6 +59,52 @@ function resolveToolCallArgumentsText(toolCall: ToolCallLike): string {
     );
     return String(args);
   }
+}
+
+function extractStepHighlight(step: StepDefinition | null | undefined): string | null {
+  if (!step) {
+    return null;
+  }
+
+  const primaryKeys: Array<keyof StepDefinition | string> = [
+    "title",
+    "label",
+    "name",
+    "heading",
+  ];
+
+  for (const key of primaryKeys) {
+    const value = (step as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  const config = (step as { config?: unknown }).config;
+  if (config && typeof config === "object") {
+    const configMap = config as Record<string, unknown>;
+    for (const key of primaryKeys) {
+      const value = configMap[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    const fields = configMap.fields;
+    if (Array.isArray(fields)) {
+      for (const field of fields) {
+        if (!field || typeof field !== "object") {
+          continue;
+        }
+        const label = (field as Record<string, unknown>).label;
+        if (typeof label === "string" && label.trim()) {
+          return label.trim();
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export function ActivityGenerationConversationPage(): JSX.Element {
@@ -873,6 +923,76 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       );
     }
 
+    if (toolCall.name.startsWith("create_")) {
+      const rawResult =
+        toolCall.result && typeof toolCall.result === "object"
+          ? (toolCall.result as StepDefinition)
+          : null;
+      const args = toolCall.arguments ?? {};
+      const argumentId = (() => {
+        const directId = args?.id;
+        if (typeof directId === "string" && directId.trim()) {
+          return directId.trim();
+        }
+        const camelId = args?.stepId;
+        if (typeof camelId === "string" && camelId.trim()) {
+          return camelId.trim();
+        }
+        const snakeId = args?.step_id;
+        if (typeof snakeId === "string" && snakeId.trim()) {
+          return snakeId.trim();
+        }
+        return null;
+      })();
+      const stepId =
+        (typeof rawResult?.id === "string" && rawResult.id.trim()) || argumentId;
+      const cachedStep =
+        stepId && jobStatus?.cachedSteps ? jobStatus.cachedSteps[stepId] : null;
+      const previewSource = (cachedStep ?? rawResult) as StepDefinition | null;
+      const componentKey = previewSource
+        ? resolveStepComponentKey(previewSource) ?? previewSource.component ?? ""
+        : "";
+      const highlight = extractStepHighlight(previewSource);
+      const previewUrl =
+        stepId && jobStatus?.jobId
+          ? `/assistant-ia/apercu/${encodeURIComponent(jobStatus.jobId)}/${encodeURIComponent(stepId)}`
+          : null;
+      const jsonSource =
+        previewSource && typeof previewSource.config === "object"
+          ? previewSource.config
+          : previewSource;
+
+      return (
+        <div className="space-y-3">
+          <h3 className="text-base font-semibold text-sky-900">Étape générée</h3>
+          <div className="space-y-1 text-xs text-sky-900/80">
+            {stepId ? (
+              <p>
+                Identifiant :
+                <span className="ml-1 font-semibold text-sky-900">{stepId}</span>
+              </p>
+            ) : null}
+            {componentKey ? <p>Composant : {componentKey}</p> : null}
+            {highlight ? <p className="text-sky-900">{highlight}</p> : null}
+          </div>
+          {previewUrl ? (
+            <button
+              type="button"
+              onClick={() => navigate(previewUrl)}
+              className="inline-flex items-center justify-center rounded-full border border-sky-300 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-50"
+            >
+              Ouvrir dans la séquence StepSequence
+            </button>
+          ) : null}
+          <div className="rounded-2xl border border-sky-100 bg-white/95 p-3 text-xs text-sky-900/80">
+            <pre className="max-h-64 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-xs">
+              {JSON.stringify(jsonSource ?? previewSource ?? null, null, 2)}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+
     const fallbackPayload = (() => {
       if (toolCall.result != null) {
         if (typeof toolCall.result === "string") {
@@ -900,7 +1020,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         </div>
       </div>
     );
-  }, [jobStatus?.pendingToolCall]);
+  }, [jobStatus?.cachedSteps, jobStatus?.jobId, jobStatus?.pendingToolCall, navigate]);
 
   const onboardingMessages = useMemo<ConversationMessage[]>(() => {
     const firstTimestamp = new Date().toISOString();

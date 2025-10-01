@@ -1,6 +1,7 @@
 from __future__ import annotations
 import pytest
 
+from backend.app.main import _merge_step_definition
 from backend.app.step_sequence_components import (
     add_ai_comparison_step,
     add_clarity_map_step,
@@ -118,6 +119,53 @@ def test_create_form_step_accepts_id_alias() -> None:
     assert field["minSelections"] is None
     assert field["correctAnswer"] is None
     assert field["correctAnswers"] is None
+
+
+def test_merge_step_definition_preserves_full_form_fields() -> None:
+    cached = create_form_step(
+        step_id="formulaire",
+        fields=[
+            {"id": "question-1", "label": "Question 1", "type": "textarea_with_counter"},
+            {"id": "question-2", "label": "Question 2", "type": "textarea_with_counter"},
+        ],
+    )
+
+    truncated = {
+        "id": "formulaire",
+        "component": "form",
+        "config": {"fields": [cached["config"]["fields"][0]]},
+    }
+
+    merged = _merge_step_definition(truncated, cached)
+
+    assert len(merged["config"]["fields"]) == 2
+    assert {field["id"] for field in merged["config"]["fields"]} == {
+        "question-1",
+        "question-2",
+    }
+
+
+def test_merge_step_definition_appends_new_form_fields() -> None:
+    cached = create_form_step(
+        step_id="formulaire",
+        fields=[
+            {"id": "question-1", "label": "Question 1", "type": "textarea_with_counter"},
+        ],
+    )
+
+    new_field = {"id": "question-2", "label": "Question 2", "type": "textarea_with_counter"}
+    override = {
+        "id": "formulaire",
+        "component": "form",
+        "config": {"fields": [cached["config"]["fields"][0], new_field]},
+    }
+
+    merged = _merge_step_definition(override, cached)
+
+    merged_field_ids = [field.get("id") for field in merged["config"]["fields"]]
+
+    assert merged_field_ids == ["question-1", "question-2"]
+    assert any(field.get("label") == "Question 2" for field in merged["config"]["fields"])
 
 
 def test_create_video_step_preserves_sources_and_captions() -> None:

@@ -218,6 +218,54 @@ function getStepTypeLabel(key: string): string {
   return STEP_TYPE_LABELS[key] ?? key;
 }
 
+function extractGeneratedStepHighlight(
+  step: StepDefinition | null | undefined
+): string | null {
+  if (!step) {
+    return null;
+  }
+
+  const primaryKeys: Array<keyof StepDefinition | string> = [
+    "title",
+    "label",
+    "name",
+    "heading",
+  ];
+
+  for (const key of primaryKeys) {
+    const value = (step as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  const config = (step as { config?: unknown }).config;
+  if (config && typeof config === "object") {
+    const configMap = config as Record<string, unknown>;
+    for (const key of primaryKeys) {
+      const value = configMap[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    const fields = configMap.fields;
+    if (Array.isArray(fields)) {
+      for (const field of fields) {
+        if (!field || typeof field !== "object") {
+          continue;
+        }
+        const label = (field as Record<string, unknown>).label;
+        if (typeof label === "string" && label.trim()) {
+          return label.trim();
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 function createDefaultStepSequenceTemplate(): StepDefinition[] {
   const introStepId = generateUniqueId("step");
   const formStepId = generateUniqueId("step");
@@ -749,6 +797,8 @@ function ActivitySelector(): JSX.Element {
     useState<string | null>(null);
   const [generationReasoningSummary, setGenerationReasoningSummary] =
     useState<string | null>(null);
+  const [generationCachedSteps, setGenerationCachedSteps] =
+    useState<Record<string, StepDefinition>>({});
   const [pendingGenerationToolCall, setPendingGenerationToolCall] =
     useState<ActivityGenerationJobToolCall | null>(null);
   const [isAwaitingGenerationValidation, setIsAwaitingGenerationValidation] =
@@ -829,19 +879,73 @@ function ActivitySelector(): JSX.Element {
       );
     }
     if (pendingGenerationToolCall.name.startsWith("create_")) {
-      const step = pendingGenerationToolCall.result as StepDefinition | null;
-      const componentKey = step ? resolveStepComponentKey(step) ?? step.component ?? "" : "";
+      const rawResult =
+        pendingGenerationToolCall.result &&
+        typeof pendingGenerationToolCall.result === "object"
+          ? (pendingGenerationToolCall.result as StepDefinition)
+          : null;
+      const args = pendingGenerationToolCall.arguments ?? {};
+      const argumentId = (() => {
+        const directId = args?.id;
+        if (typeof directId === "string" && directId.trim()) {
+          return directId.trim();
+        }
+        const camelId = args?.stepId;
+        if (typeof camelId === "string" && camelId.trim()) {
+          return camelId.trim();
+        }
+        const snakeId = args?.step_id;
+        if (typeof snakeId === "string" && snakeId.trim()) {
+          return snakeId.trim();
+        }
+        return null;
+      })();
+      const stepId =
+        (typeof rawResult?.id === "string" && rawResult.id.trim()) || argumentId;
+      const cachedStep =
+        stepId && generationCachedSteps ? generationCachedSteps[stepId] : null;
+      const previewSource = (cachedStep ?? rawResult) as StepDefinition | null;
+      const componentKey = previewSource
+        ? resolveStepComponentKey(previewSource) ?? previewSource.component ?? ""
+        : "";
+      const highlight = extractGeneratedStepHighlight(previewSource);
+      const previewUrl =
+        stepId && activeGenerationJobId
+          ? `/assistant-ia/apercu/${encodeURIComponent(activeGenerationJobId)}/${encodeURIComponent(stepId)}`
+          : null;
+      const jsonSource =
+        previewSource && typeof previewSource.config === "object"
+          ? previewSource.config
+          : previewSource;
+
       return (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold text-sky-900">Étape générée</h4>
-          {step?.id ? (
-            <p className="text-xs text-sky-900/80">Identifiant : <span className="font-semibold">{step.id}</span></p>
-          ) : null}
-          {componentKey ? (
-            <p className="text-xs text-sky-900/80">Composant : {getStepTypeLabel(componentKey)}</p>
+          <div className="space-y-1 text-xs text-sky-900/80">
+            {stepId ? (
+              <p>
+                Identifiant :
+                <span className="ml-1 font-semibold">{stepId}</span>
+              </p>
+            ) : null}
+            {componentKey ? (
+              <p>Composant : {getStepTypeLabel(componentKey)}</p>
+            ) : null}
+            {highlight ? (
+              <p className="text-sky-900">{highlight}</p>
+            ) : null}
+          </div>
+          {previewUrl ? (
+            <button
+              type="button"
+              onClick={() => navigate(previewUrl)}
+              className="inline-flex items-center justify-center rounded-full border border-sky-300 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-50"
+            >
+              Ouvrir dans la séquence StepSequence
+            </button>
           ) : null}
           <pre className="max-h-56 overflow-auto rounded-lg bg-sky-50/70 p-3 text-xs leading-relaxed text-sky-900">
-            {JSON.stringify(step?.config ?? step, null, 2)}
+            {JSON.stringify(jsonSource ?? previewSource ?? null, null, 2)}
           </pre>
         </div>
       );
@@ -851,7 +955,12 @@ function ActivitySelector(): JSX.Element {
         {JSON.stringify(pendingGenerationToolCall.result, null, 2)}
       </pre>
     );
-  }, [pendingGenerationToolCall]);
+  }, [
+    activeGenerationJobId,
+    generationCachedSteps,
+    navigate,
+    pendingGenerationToolCall,
+  ]);
   const generationControllerRef = useRef<AbortController | null>(null);
   const loadConfigMutexRef = useRef(false);
   const [generationStatusMessage, setGenerationStatusMessage] =
@@ -1211,6 +1320,8 @@ function ActivitySelector(): JSX.Element {
             { signal: controller.signal }
           );
 
+          setGenerationCachedSteps(status.cachedSteps ?? {});
+
           if (status.message) {
             setGenerationStatusMessage(status.message);
           }
@@ -1239,6 +1350,7 @@ function ActivitySelector(): JSX.Element {
             setPendingGenerationToolCall(null);
             setGenerationFeedback("");
             setGenerationFeedbackError(null);
+            setGenerationCachedSteps({});
 
             try {
 
@@ -1289,6 +1401,7 @@ function ActivitySelector(): JSX.Element {
             setPendingGenerationToolCall(null);
             setGenerationFeedback("");
             setGenerationFeedbackError(null);
+            setGenerationCachedSteps({});
             return;
           }
 

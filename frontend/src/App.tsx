@@ -21,6 +21,7 @@ import { AdminPlatformsPage } from "./pages/admin/AdminPlatformsPage";
 import { AdminActivityTrackingPage } from "./pages/admin/AdminActivityTrackingPage";
 import { AdminActivityGenerationPage } from "./pages/admin/AdminActivityGenerationPage";
 import { ActivityGenerationConversationPage } from "./pages/admin/ActivityGenerationConversationPage";
+import { ActivityGenerationStepPreviewPage } from "./pages/admin/ActivityGenerationStepPreviewPage";
 import { AdminInvitationCodesPage } from "./pages/admin/AdminInvitationCodesPage";
 import { activities as activitiesClient } from "./api";
 
@@ -140,6 +141,10 @@ function App(): JSX.Element {
         <Route
           path="/assistant-ia"
           element={<ActivityGenerationConversationPage />}
+        />
+        <Route
+          path="/assistant-ia/apercu/:jobId/:stepId"
+          element={<ActivityGenerationStepPreviewPage />}
         />
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="platforms" replace />} />
