@@ -2066,18 +2066,13 @@ function ActivitySelector(): JSX.Element {
   ) : null;
 
   const generationShortcut = canShowAdminButton ? (
-    <div className="flex flex-col gap-2 rounded-2xl border border-sky-200/70 bg-sky-50/90 px-4 py-3 text-left text-sky-900 shadow-sm">
-      <span className="text-xs font-semibold uppercase tracking-wide text-sky-700/80">
-        Assistant IA
-      </span>
-      <Link
-        to="/assistant-ia"
-        className="inline-flex items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700"
-      >
-        <MagicWandIcon className="h-4 w-4" />
-        Assistant IA
-      </Link>
-    </div>
+    <Link
+      to="/assistant-ia"
+      className="inline-flex items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700"
+    >
+      <MagicWandIcon className="h-4 w-4" />
+      Générer une activité
+    </Link>
   ) : null;
 
   const headerActions =
