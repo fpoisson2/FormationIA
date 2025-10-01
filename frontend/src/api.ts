@@ -545,6 +545,13 @@ export interface ConversationDetailResponse {
   conversation: Conversation;
 }
 
+export interface ConversationStreamHandlers {
+  signal: AbortSignal;
+  onConversation?: (conversation: Conversation) => void;
+  onJob?: (job: ActivityGenerationJob) => void;
+  onError?: (message: string) => void;
+}
+
 
 export type ActivityGenerationJobStatus =
   | "pending"
@@ -608,13 +615,13 @@ function normalizeActivityGenerationJobToolCall(
   };
 }
 
-function normalizeActivityGenerationJob(
+export function normalizeActivityGenerationJob(
   raw: ActivityGenerationJob
 ): ActivityGenerationJob;
-function normalizeActivityGenerationJob(
+export function normalizeActivityGenerationJob(
   raw: Record<string, unknown>
 ): ActivityGenerationJob;
-function normalizeActivityGenerationJob(
+export function normalizeActivityGenerationJob(
   raw: Record<string, unknown> | ActivityGenerationJob
 ): ActivityGenerationJob {
   if (!raw || typeof raw !== "object") {
@@ -689,6 +696,120 @@ function normalizeActivityGenerationJob(
         ? updatedAtRaw.toISOString()
         : new Date().toISOString(),
   };
+}
+
+async function streamConversationByJob(
+  jobId: string,
+  token: string | null | undefined,
+  handlers: ConversationStreamHandlers
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/admin/conversations/job/${jobId}/stream`,
+    withAdminCredentials(
+      {
+        headers: {
+          Accept: "text/event-stream",
+        },
+        signal: handlers.signal,
+      },
+      token
+    )
+  );
+
+  if (!response.ok || !response.body) {
+    const message = await response.text();
+    throw new Error(
+      message || "Impossible d'établir la connexion temps réel avec l'assistant."
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  const processEvent = (rawEvent: string) => {
+    if (!rawEvent.trim()) {
+      return;
+    }
+
+    const lines = rawEvent.split("\n");
+    let eventName = "message";
+    let dataPayload = "";
+
+    for (const line of lines) {
+      if (!line) {
+        continue;
+      }
+      if (line.startsWith(":")) {
+        continue;
+      }
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataPayload += `${line.slice(5)}\n`;
+      }
+    }
+
+    const trimmed = dataPayload.trim();
+    let parsed: unknown = null;
+    if (trimmed) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch (error) {
+        console.warn("Événement SSE conversation invalide", error);
+        return;
+      }
+    }
+
+    if (eventName === "conversation" && parsed && typeof parsed === "object") {
+      handlers.onConversation?.(parsed as Conversation);
+      return;
+    }
+
+    if (eventName === "job" && parsed && typeof parsed === "object") {
+      handlers.onJob?.(normalizeActivityGenerationJob(parsed as Record<string, unknown>));
+      return;
+    }
+
+    if (eventName === "error") {
+      const message =
+        typeof (parsed as { message?: unknown })?.message === "string"
+          ? (parsed as { message: string }).message
+          : "Erreur lors de la diffusion de la conversation.";
+      handlers.onError?.(message);
+      return;
+    }
+
+    if (eventName === "close") {
+      throw new Error("STREAM_CLOSED");
+    }
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        const chunk = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        processEvent(chunk);
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+  } catch (error) {
+    if (handlers.signal.aborted) {
+      return;
+    }
+    if (error instanceof Error && error.message === "STREAM_CLOSED") {
+      return;
+    }
+    throw error;
+  }
 }
 
 export const activities = {
@@ -847,6 +968,12 @@ export const admin = {
         `${API_BASE_URL}/admin/conversations/job/${jobId}`,
         withAdminCredentials({}, token)
       ),
+    streamByJob: async (
+      jobId: string,
+      token: string | null | undefined,
+      handlers: ConversationStreamHandlers
+    ): Promise<void> =>
+      streamConversationByJob(jobId, token, handlers),
   },
   landingPage: {
     get: async (token?: string | null): Promise<LandingPageContent> =>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import json
@@ -19,7 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
-from typing import Any, Generator, Literal, Mapping, Sequence
+from typing import Any, AsyncGenerator, Generator, Literal, Mapping, Sequence
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -5776,6 +5777,79 @@ def admin_get_conversation_by_job(
         raise HTTPException(status_code=404, detail="Conversation introuvable.")
 
     return ConversationDetailResponse(conversation=conversation.to_dict())
+
+
+@admin_router.get("/conversations/job/{job_id}/stream")
+async def admin_stream_conversation_by_job(
+    job_id: str,
+    user: LocalUser = Depends(_require_admin_user),
+) -> StreamingResponse:
+    """Diffuse les mises à jour d'une conversation de génération via SSE."""
+
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de génération introuvable.")
+
+    async def stream() -> AsyncGenerator[str, None]:
+        last_conversation_hash: str | None = None
+        last_job_hash: str | None = None
+        heartbeat_interval = 15.0
+        last_heartbeat = time.monotonic()
+
+        while True:
+            job_state = _get_activity_generation_job(job_id)
+            if job_state is None:
+                yield _sse_event(
+                    "error",
+                    {"message": "Job de génération introuvable ou expiré."},
+                )
+                break
+
+            _sync_conversation_from_job(job_state, user.username)
+
+            store = get_conversation_store()
+            conversation = store.get_conversation(job_id)
+            if conversation is not None:
+                payload = conversation.to_dict()
+                conversation_hash = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+                ).hexdigest()
+                if conversation_hash != last_conversation_hash:
+                    last_conversation_hash = conversation_hash
+                    yield _sse_event("conversation", payload)
+                    last_heartbeat = time.monotonic()
+
+            job_payload = _serialize_activity_generation_job(job_state).model_dump(
+                mode="json", by_alias=True
+            )
+            job_hash = hashlib.sha256(
+                json.dumps(job_payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
+            ).hexdigest()
+            if job_hash != last_job_hash:
+                last_job_hash = job_hash
+                yield _sse_event("job", job_payload)
+                last_heartbeat = time.monotonic()
+
+            if (
+                job_state.status in {"complete", "error"}
+                and not job_state.awaiting_user_action
+                and not job_state.pending_tool_call
+            ):
+                yield _sse_event("close", {"reason": "job_finished"})
+                break
+
+            now = time.monotonic()
+            if now - last_heartbeat >= heartbeat_interval:
+                yield _sse_comment("heartbeat")
+                last_heartbeat = now
+
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
 
 
 def _sync_conversation_from_job(

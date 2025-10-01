@@ -49,7 +49,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPolling, setIsPolling] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -60,7 +60,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
-  const pollIntervalRef = useRef<number | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
 
   const generatedActivityId = useMemo(() => {
     if (jobStatus?.activityId) {
@@ -203,37 +203,103 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     void refreshJobStatus();
   }, [jobId, refreshJobStatus]);
 
-  // Polling pour les mises à jour de la conversation et du job
+  // Diffusion temps réel de la conversation via SSE
   useEffect(() => {
-    if (!jobId || !conversation) return;
-
-    // Ne poll que si la conversation n'est pas terminée
-    if (conversation.status === "complete" || conversation.status === "error") {
+    if (!jobId) {
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
+      }
+      setIsStreaming(false);
       return;
     }
 
-    setIsPolling(true);
+    const shouldStream = Boolean(
+      !jobStatus ||
+        jobStatus.status === "running" ||
+        jobStatus.awaitingUserAction ||
+        jobStatus.pendingToolCall
+    );
 
-    const poll = async () => {
+    if (!shouldStream) {
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
+      }
+      setIsStreaming(false);
+      return;
+    }
+
+    if (streamAbortControllerRef.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+    streamAbortControllerRef.current = controller;
+    setIsStreaming(true);
+
+    const startStream = async () => {
       try {
-        const response = await admin.conversations.getByJobId(jobId, token);
-        setConversation(response.conversation);
-        await refreshJobStatus();
-      } catch (err) {
-        console.error("Erreur lors du polling:", err);
+        await admin.conversations.streamByJob(jobId, token, {
+          signal: controller.signal,
+          onConversation: (nextConversation) => {
+            setConversation((previous) => {
+              if (previous && previous.updatedAt === nextConversation.updatedAt) {
+                return previous;
+              }
+              return nextConversation;
+            });
+          },
+          onJob: (nextJob) => {
+            setJobStatus((previous) => {
+              if (previous && previous.updatedAt === nextJob.updatedAt) {
+                return previous;
+              }
+              return nextJob;
+            });
+          },
+          onError: (message) => {
+            setError(message);
+          },
+        });
+      } catch (streamError) {
+        if (!controller.signal.aborted) {
+          console.error("Erreur de diffusion de la conversation:", streamError);
+          setError(
+            streamError instanceof Error
+              ? streamError.message
+              : "Erreur lors de la connexion au flux de conversation."
+          );
+        }
+      } finally {
+        if (streamAbortControllerRef.current === controller) {
+          streamAbortControllerRef.current = null;
+        }
+        setIsStreaming(false);
+        if (!controller.signal.aborted) {
+          void refreshJobStatus();
+        }
       }
     };
 
-    pollIntervalRef.current = window.setInterval(poll, 3000); // Poll toutes les 3 secondes
+    void startStream();
 
     return () => {
-      if (pollIntervalRef.current !== null) {
-        window.clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+      controller.abort();
+      if (streamAbortControllerRef.current === controller) {
+        streamAbortControllerRef.current = null;
       }
-      setIsPolling(false);
+      setIsStreaming(false);
     };
-  }, [jobId, conversation, token]);
+  }, [
+    jobId,
+    jobStatus?.awaitingUserAction,
+    jobStatus?.pendingToolCall,
+    jobStatus?.status,
+    isStreaming,
+    refreshJobStatus,
+    token,
+  ]);
 
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
@@ -560,7 +626,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       !jobStatus?.awaitingUserAction &&
       !jobStatus?.pendingToolCall &&
       !lastAssistantMessageHasContent &&
-      (isPolling || isJobLoading)
+      (isStreaming || isJobLoading)
   );
 
   return (
