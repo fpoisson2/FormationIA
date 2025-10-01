@@ -511,14 +511,17 @@ export interface ActivityGenerationFeedbackPayload {
   message?: string | null;
 }
 
+export interface ConversationMessageToolCall {
+  name: string;
+  callId?: string;
+  arguments?: unknown;
+  argumentsText?: string | null;
+}
+
 export interface ConversationMessage {
   role: string;
   content?: string | null;
-  toolCalls?: Array<{
-    name: string;
-    callId?: string;
-    arguments: Record<string, unknown>;
-  }> | null;
+  toolCalls?: ConversationMessageToolCall[] | null;
   toolCallId?: string | null;
   name?: string | null;
   timestamp: string;

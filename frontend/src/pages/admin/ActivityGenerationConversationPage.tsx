@@ -6,6 +6,7 @@ import {
   type ActivityGenerationJobToolCall,
   type Conversation,
   type ConversationMessage,
+  type ConversationMessageToolCall,
   type GenerateActivityPayload,
 } from "../../api";
 import { ConversationView } from "../../components/ConversationView";
@@ -25,6 +26,35 @@ interface PendingPlanResult {
   overview?: string;
   steps?: PendingPlanStep[];
   notes?: string | null;
+}
+
+type ToolCallLike = Pick<ConversationMessageToolCall, "arguments" | "argumentsText">;
+
+function resolveToolCallArgumentsText(toolCall: ToolCallLike): string {
+  if (typeof toolCall.argumentsText === "string") {
+    if (toolCall.argumentsText.trim()) {
+      return toolCall.argumentsText;
+    }
+  }
+
+  const args = toolCall.arguments;
+  if (typeof args === "string") {
+    return args;
+  }
+
+  if (args == null) {
+    return "";
+  }
+
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch (error) {
+    console.warn(
+      "Impossible de sérialiser les arguments de l'appel d'outil",
+      error
+    );
+    return String(args);
+  }
 }
 
 export function ActivityGenerationConversationPage(): JSX.Element {
@@ -174,15 +204,118 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   );
 
   const applyConversationUpdate = useCallback(
-    (nextConversation: Conversation) => {
+    (incomingConversation: Conversation) => {
       lastConversationUpdateRef.current = Date.now();
       hasConversationSnapshotRef.current = true;
       setConnectionWarning(null);
-      setConversation((previous) => {
-        if (previous && previous.updatedAt === nextConversation.updatedAt) {
-          return previous;
+      setConversation((previousConversation) => {
+        if (
+          previousConversation &&
+          previousConversation.updatedAt === incomingConversation.updatedAt
+        ) {
+          return previousConversation;
         }
-        return nextConversation;
+
+        const incomingMessages = Array.isArray(incomingConversation.messages)
+          ? incomingConversation.messages
+          : [];
+
+        const previousMessages = previousConversation?.messages ?? [];
+
+        let reusedAllMessages = true;
+        let mutatedMessage = false;
+
+        const normalizedMessages = incomingMessages.map((message, index) => {
+          const previousMessage = previousMessages[index];
+
+          const hasToolCalls = Array.isArray(message.toolCalls);
+          let normalizedToolCalls: ConversationMessageToolCall[] | null = null;
+
+          if (hasToolCalls && message.toolCalls) {
+            normalizedToolCalls = message.toolCalls.map((toolCall, toolIndex) => {
+              const argumentsText = resolveToolCallArgumentsText(toolCall);
+              const previousToolCall = previousMessage?.toolCalls?.[toolIndex];
+
+              if (
+                previousToolCall &&
+                previousToolCall.name === toolCall.name &&
+                previousToolCall.callId === toolCall.callId &&
+                previousToolCall.argumentsText === argumentsText
+              ) {
+                return previousToolCall;
+              }
+
+              if (
+                typeof toolCall.argumentsText === "string" &&
+                toolCall.argumentsText === argumentsText
+              ) {
+                return toolCall;
+              }
+
+              mutatedMessage = true;
+              return {
+                ...toolCall,
+                argumentsText,
+              };
+            });
+          }
+
+          if (previousMessage) {
+            const sameCoreProperties =
+              previousMessage.role === message.role &&
+              previousMessage.timestamp === message.timestamp &&
+              previousMessage.content === message.content;
+
+            const previousToolCalls = previousMessage.toolCalls ?? null;
+            const sameToolCalls =
+              (!previousToolCalls && !normalizedToolCalls) ||
+              (!!previousToolCalls &&
+                !!normalizedToolCalls &&
+                previousToolCalls.length === normalizedToolCalls.length &&
+                previousToolCalls.every(
+                  (toolCall, toolIndex) =>
+                    toolCall === normalizedToolCalls?.[toolIndex]
+                ));
+
+            if (sameCoreProperties && sameToolCalls) {
+              return previousMessage;
+            }
+          }
+
+          reusedAllMessages = false;
+
+          if (hasToolCalls && normalizedToolCalls) {
+            const referencesIdentical = message.toolCalls?.every(
+              (toolCall, toolIndex) =>
+                toolCall === normalizedToolCalls?.[toolIndex]
+            );
+
+            if (referencesIdentical) {
+              return message;
+            }
+
+            mutatedMessage = true;
+            return {
+              ...message,
+              toolCalls: normalizedToolCalls,
+            };
+          }
+
+          return message;
+        });
+
+        if (reusedAllMessages && previousConversation) {
+          return previousConversation;
+        }
+
+        if (!mutatedMessage) {
+          return incomingConversation;
+        }
+
+        return {
+          ...incomingConversation,
+          messages: normalizedMessages,
+        };
       });
     },
     []
@@ -684,6 +817,21 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       );
     }
 
+    const fallbackPayload = (() => {
+      if (toolCall.result != null) {
+        if (typeof toolCall.result === "string") {
+          return toolCall.result;
+        }
+        try {
+          return JSON.stringify(toolCall.result, null, 2);
+        } catch (error) {
+          console.warn("Impossible de formater le résultat de l'appel d'outil", error);
+          return String(toolCall.result);
+        }
+      }
+      return resolveToolCallArgumentsText(toolCall);
+    })();
+
     return (
       <div className="space-y-2">
         <h3 className="text-base font-semibold text-sky-900">
@@ -691,7 +839,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         </h3>
         <div className="rounded-2xl border border-sky-100 bg-white/95 p-3 text-xs text-sky-900/80">
           <pre className="max-h-64 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-xs">
-            {JSON.stringify(toolCall.result ?? toolCall.arguments ?? {}, null, 2)}
+            {fallbackPayload}
           </pre>
         </div>
       </div>

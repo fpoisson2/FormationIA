@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { ConversationMessage } from "../api";
+import type { ConversationMessage, ConversationMessageToolCall } from "../api";
 
 interface ConversationViewProps {
   messages: ConversationMessage[];
@@ -20,6 +20,48 @@ function formatTimestamp(timestamp: string): string {
 
 function MessageBubble({ message }: { message: ConversationMessage }): JSX.Element {
   const { role, content, toolCalls } = message;
+
+  const formattedToolCalls = useMemo(() => {
+    if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+      return [] as Array<{ key: string; label: string; payload: string }>;
+    }
+
+    return toolCalls.map((toolCall: ConversationMessageToolCall, index) => {
+      const key = toolCall.callId || `${toolCall.name}-${index}`;
+
+      const resolvedLabel = toolCall.name || "appel_d_outil";
+
+      if (typeof toolCall.argumentsText === "string") {
+        const trimmed = toolCall.argumentsText.trim();
+        if (trimmed) {
+          return { key, label: resolvedLabel, payload: trimmed };
+        }
+      }
+
+      const args = toolCall.arguments;
+      if (typeof args === "string") {
+        return { key, label: resolvedLabel, payload: args };
+      }
+      if (args == null) {
+        return { key, label: resolvedLabel, payload: "" };
+      }
+
+      try {
+        return {
+          key,
+          label: resolvedLabel,
+          payload: JSON.stringify(args, null, 2),
+        };
+      } catch (error) {
+        console.warn("Impossible de formater les arguments de l'appel d'outil", error);
+        return {
+          key,
+          label: resolvedLabel,
+          payload: String(args),
+        };
+      }
+    });
+  }, [toolCalls]);
 
   // Détermine le style selon le rôle
   const isUser = role === "user";
@@ -65,18 +107,13 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
                 {content}
               </p>
             )}
-            {toolCalls && toolCalls.length > 0 && (
+            {formattedToolCalls.length > 0 && (
               <div className="mt-3 space-y-2">
-                {toolCalls.map((toolCall, index) => (
-                  <div
-                    key={toolCall.callId || index}
-                    className="rounded-2xl bg-blue-50/50 p-3 text-xs"
-                  >
-                    <div className="font-semibold text-blue-800">
-                      🔧 {toolCall.name}
-                    </div>
+                {formattedToolCalls.map(({ key, label, payload }) => (
+                  <div key={key} className="rounded-2xl bg-blue-50/50 p-3 text-xs">
+                    <div className="font-semibold text-blue-800">🔧 {label}</div>
                     <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-blue-700">
-                      {JSON.stringify(toolCall.arguments, null, 2)}
+                      {payload}
                     </pre>
                   </div>
                 ))}
