@@ -1,10 +1,8 @@
 import { useMemo } from "react";
 import type { ComponentType } from "react";
 
-import {
-  registerStepComponent,
-  type StepComponentProps,
-} from "../../../modules/step-sequence";
+import { registerStepComponent } from "../../../modules/step-sequence/registry";
+import type { StepComponentProps } from "../../../modules/step-sequence/types";
 
 export interface ExplorateurIAModuleConfig {
   type: string;

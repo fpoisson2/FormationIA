@@ -8,7 +8,7 @@ import {
   type ModelConfig,
 } from "../../../../config";
 import type { StepComponentProps } from "../../types";
-import { useStepSequence } from "../..";
+import { useStepSequence } from "../../useStepSequence";
 import type { WorkshopContextStepState } from "./WorkshopContextStep";
 import {
   runComparisonRequests,

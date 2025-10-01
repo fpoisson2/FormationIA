@@ -1,5 +1,5 @@
 import { isCompositeStepDefinition } from "../../modules/step-sequence/types";
-import type { StepDefinition } from "../../modules/step-sequence";
+import type { StepDefinition } from "../../modules/step-sequence/types";
 
 import type { QuarterId } from "./types";
 import type { QuarterSteps } from "./worlds/world1/steps";

@@ -1,4 +1,4 @@
-import type { StepDefinition } from "../../modules/step-sequence";
+import type { StepDefinition } from "../../modules/step-sequence/types";
 
 import {
   cloneStepConfig,

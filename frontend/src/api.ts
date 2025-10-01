@@ -1,9 +1,7 @@
 import { API_BASE_URL, API_AUTH_KEY } from "./config";
 import type { ModelChoice, VerbosityChoice, ThinkingChoice } from "./config";
-import type {
-  StepDefinition,
-  StepSequenceToolDefinition,
-} from "./modules/step-sequence";
+import type { StepDefinition } from "./modules/step-sequence/types";
+import type { StepSequenceToolDefinition } from "./modules/step-sequence/tools";
 
 export type FieldType =
   | "bulleted_list"

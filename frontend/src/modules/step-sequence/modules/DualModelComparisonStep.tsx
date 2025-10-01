@@ -7,7 +7,7 @@ import {
   VERBOSITY_OPTIONS,
   type ModelConfig,
 } from "../../../config";
-import { useStepSequence } from "..";
+import { useStepSequence } from "../useStepSequence";
 import type { StepComponentProps } from "../types";
 import {
   runComparisonRequests,

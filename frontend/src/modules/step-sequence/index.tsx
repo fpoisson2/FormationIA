@@ -1,5 +1,3 @@
-import { useContext } from "react";
-
 import { getStepComponent, registerStepComponent, STEP_COMPONENT_REGISTRY } from "./registry";
 import { StepSequenceRenderer } from "./StepSequenceRenderer";
 import type {
@@ -18,9 +16,10 @@ import {
   type StepDefinition,
   type StepRegistry,
   type StepSequenceActivityContextBridge,
-  type StepSequenceContextValue,
   type StepSequenceWrapperPreference,
 } from "./types";
+import type { StepSequenceContextValue } from "./types";
+import { useStepSequence } from "./useStepSequence";
 
 export function StepSequenceContainer(
   props: StepSequenceRendererProps
@@ -32,18 +31,11 @@ export function StepSequenceContainer(
   return <StepSequenceRenderer {...props} />;
 }
 
-export function useStepSequence(): StepSequenceContextValue {
-  const context = useContext(StepSequenceContext);
-  if (!context) {
-    throw new Error("useStepSequence must be used within a StepSequenceRenderer");
-  }
-  return context;
-}
-
 export {
   StepSequenceActivity,
   StepSequenceRenderer,
   StepSequenceContext,
+  useStepSequence,
   STEP_COMPONENT_REGISTRY,
   getStepComponent,
   registerStepComponent,

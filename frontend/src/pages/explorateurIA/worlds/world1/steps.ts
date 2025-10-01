@@ -1,7 +1,7 @@
 import {
   isCompositeStepDefinition,
   type StepDefinition,
-} from "../../../../modules/step-sequence";
+} from "../../../../modules/step-sequence/types";
 
 import {
   DEFAULT_CLARTE_QUIZ_CONFIG,

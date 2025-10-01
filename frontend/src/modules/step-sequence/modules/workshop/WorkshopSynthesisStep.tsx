@@ -9,7 +9,7 @@ import {
 import { useActivityCompletion } from "../../../../hooks/useActivityCompletion";
 import type { Flashcard } from "../../../../types/flashcards";
 import type { StepComponentProps } from "../../types";
-import { useStepSequence } from "../..";
+import { useStepSequence } from "../../useStepSequence";
 import type { WorkshopComparisonStepState } from "./WorkshopComparisonStep";
 import type { WorkshopContextStepState } from "./WorkshopContextStep";
 
