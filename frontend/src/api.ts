@@ -608,13 +608,13 @@ function normalizeActivityGenerationJobToolCall(
   };
 }
 
-function normalizeActivityGenerationJob(
+export function normalizeActivityGenerationJob(
   raw: ActivityGenerationJob
 ): ActivityGenerationJob;
-function normalizeActivityGenerationJob(
+export function normalizeActivityGenerationJob(
   raw: Record<string, unknown>
 ): ActivityGenerationJob;
-function normalizeActivityGenerationJob(
+export function normalizeActivityGenerationJob(
   raw: Record<string, unknown> | ActivityGenerationJob
 ): ActivityGenerationJob {
   if (!raw || typeof raw !== "object") {

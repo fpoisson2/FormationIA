@@ -5695,6 +5695,78 @@ def admin_get_activity_generation_job(
     return _serialize_activity_generation_job(job)
 
 
+@admin_router.get("/activities/generate/{job_id}/stream")
+def admin_stream_activity_generation_job(
+    job_id: str, user: LocalUser = Depends(_require_admin_user)
+) -> StreamingResponse:
+    """Diffuse en temps réel l'état d'un job de génération d'activité."""
+
+    if _get_activity_generation_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+
+    def event_stream() -> Generator[str, None, None]:
+        poll_interval = 0.8
+        heartbeat_interval = 15.0
+        last_signature: tuple[str | None, str | None, int] | None = None
+        last_heartbeat = time.time()
+
+        yield _sse_comment("stream-start")
+
+        while True:
+            job = _get_activity_generation_job(job_id)
+            if job is None:
+                yield _format_sse_event(
+                    "error", {"message": "Tâche de génération introuvable."}
+                )
+                break
+
+            _sync_conversation_from_job(job, user.username)
+
+            store = get_conversation_store()
+            conversation = store.get_conversation(job_id)
+            conversation_payload = (
+                conversation.to_dict() if conversation is not None else None
+            )
+
+            serialized_job = _serialize_activity_generation_job(job).model_dump(
+                mode="json", by_alias=True
+            )
+
+            message_count = (
+                len(conversation_payload.get("messages", []))
+                if isinstance(conversation_payload, Mapping)
+                else 0
+            )
+            signature = (
+                serialized_job.get("updatedAt"),
+                conversation_payload.get("updatedAt")
+                if isinstance(conversation_payload, Mapping)
+                else None,
+                message_count,
+            )
+
+            if signature != last_signature:
+                payload = {
+                    "job": serialized_job,
+                    "conversation": conversation_payload,
+                }
+                yield _format_sse_event("update", payload)
+                last_signature = signature
+                last_heartbeat = time.time()
+            elif (time.time() - last_heartbeat) >= heartbeat_interval:
+                yield _sse_comment("heartbeat")
+                last_heartbeat = time.time()
+
+            if job.status in {"complete", "error"} and not job.awaiting_user_action:
+                break
+
+            time.sleep(poll_interval)
+
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream", headers=_sse_headers()
+    )
+
+
 # ============================================================================
 # Endpoints pour les conversations de génération d'activités
 # ============================================================================
