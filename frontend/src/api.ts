@@ -1061,6 +1061,19 @@ export const admin = {
           token
         )
       ).then(normalizeActivityGenerationJob),
+    retryGenerationJob: async (
+      jobId: string,
+      token?: string | null
+    ): Promise<ActivityGenerationJob> =>
+      fetchJson<ActivityGenerationJob>(
+        `${API_BASE_URL}/admin/activities/generate/${jobId}/retry`,
+        withAdminCredentials(
+          {
+            method: "POST",
+          },
+          token
+        )
+      ).then(normalizeActivityGenerationJob),
   },
   conversations: {
     list: async (

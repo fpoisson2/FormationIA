@@ -26,7 +26,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from openai import BadRequestError, OpenAI as ResponsesClient
+from openai import BadRequestError, OpenAI as ResponsesClient, omit
+from openai.lib.streaming.responses import ResponseStream
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .admin_store import (
@@ -1434,6 +1435,31 @@ def _extract_simulation_chat_response(response: Any) -> SimulationChatResponsePa
     return None
 
 
+def _responses_create_stream(
+    responses_client: Any,
+    *,
+    text_format: type[Any] | object = omit,
+    starting_after: int | None = None,
+    **request_kwargs: Any,
+) -> ResponseStream[Any]:
+    if "stream" in request_kwargs:
+        raise ValueError(
+            "Le paramètre stream est géré automatiquement par _responses_create_stream"
+        )
+
+    prepared_kwargs = dict(request_kwargs)
+    tools_argument = prepared_kwargs.get("tools", omit)
+
+    raw_stream = responses_client.create(stream=True, **prepared_kwargs)
+
+    return ResponseStream(
+        raw_stream=raw_stream,
+        text_format=text_format,
+        input_tools=tools_argument,
+        starting_after=starting_after,
+    )
+
+
 def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> PlanModel:
     last_error: PlanGenerationError | None = None
     for attempt in range(2):
@@ -1442,7 +1468,14 @@ def _request_plan_from_llm(client: ResponsesClient, payload: PlanRequest) -> Pla
         selected_verbosity = payload.verbosity or DEFAULT_PLAN_VERBOSITY
         selected_thinking = payload.thinking or DEFAULT_PLAN_THINKING
         try:
-            with client.responses.stream(
+            responses_resource = getattr(client, "responses", None)
+            if responses_resource is None:
+                raise RuntimeError(
+                    "Client de génération invalide : attribut responses absent"
+                )
+
+            with _responses_create_stream(
+                responses_resource,
                 model=selected_model,
                 input=messages,
                 text_format=PlanModel,
@@ -2446,6 +2479,25 @@ def _update_activity_generation_job(
                 0, min(conversation_cursor, len(job.conversation))
             )
 
+        job.updated_at = datetime.utcnow()
+        _persist_activity_generation_jobs_locked()
+        return deepcopy(job)
+
+
+def _retry_activity_generation_job(job_id: str) -> _ActivityGenerationJobState | None:
+    with _ACTIVITY_GENERATION_LOCK:
+        job = _ACTIVITY_GENERATION_JOBS.get(job_id)
+        if job is None:
+            return None
+
+        job.status = "running"
+        job.message = "Nouvelle tentative de génération en cours..."
+        job.error = None
+        job.awaiting_user_action = False
+        job.pending_tool_call = None
+        job.conversation_cursor = max(
+            0, min(job.conversation_cursor, len(job.conversation))
+        )
         job.updated_at = datetime.utcnow()
         _persist_activity_generation_jobs_locked()
         return deepcopy(job)
@@ -4494,8 +4546,14 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
     summary = message.get("summary")
 
     def _maybe_attach_summary(payload: dict[str, Any]) -> dict[str, Any]:
-        if summary is not None:
-            payload["summary"] = summary
+        # NOTE:
+        # ``summary`` was previously forwarded to the Responses API as a top-level
+        # message field. The latest client versions now reject unknown parameters
+        # with a ``BadRequestError`` ("Unknown parameter: 'input[0].summary'").
+        # We still want to preserve summaries inside our conversation objects, but
+        # they are only used internally – the API does not consume them. Dropping
+        # the field from the serialized payload keeps backwards compatibility with
+        # stored messages while ensuring requests remain valid.
         return payload
 
     def _resolve_text_type(role: str | None) -> str:
@@ -4567,7 +4625,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         message_id = message.get("id")
         if isinstance(message_id, str) and message_id:
             payload["id"] = _normalize_tool_call_identifier(
-                message_id, fallback_seed=fallback_seed, prefix="fc_"
+                message_id, fallback_seed=fallback_seed, prefix="fc_call"
             )
         status = message.get("status")
         if isinstance(status, str) and status:
@@ -4599,7 +4657,7 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         message_id = message.get("id")
         if isinstance(message_id, str) and message_id:
             payload["id"] = _normalize_tool_call_identifier(
-                message_id, fallback_seed=fallback_seed, prefix="fc_"
+                message_id, fallback_seed=fallback_seed, prefix="fc_output"
             )
         status = message.get("status")
         if isinstance(status, str) and status:
@@ -4642,14 +4700,15 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _serialize_conversation_for_responses(
-    conversation: Sequence[Mapping[str, Any]]
+    conversation: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Return a list of messages compliant with the Responses API."""
 
     serialized: list[dict[str, Any]] = []
     for message in conversation:
         try:
-            serialized.append(_serialize_conversation_entry(message))
+            entry = _serialize_conversation_entry(message)
+            serialized.append(entry)
         except Exception:  # pragma: no cover - defensive
             serialized.append({"role": "assistant", "content": []})
     return serialized
@@ -4786,144 +4845,25 @@ def _run_activity_generation_job(job_id: str) -> None:
         if not serialized_input:
             raise RuntimeError("Conversation vide à transmettre au modèle")
 
-        stream_update_interval = 0.4
-        last_stream_update = 0.0
         streaming_assistant_placeholder: dict[str, Any] | None = None
         streaming_reasoning_placeholder: dict[str, Any] | None = None
         streaming_function_placeholders: dict[str, dict[str, Any]] = {}
 
-        def _coerce_string(value: Any) -> str:
-            if value is None:
-                return ""
-            if isinstance(value, str):
-                normalized = _normalize_plain_text(value)
-                return normalized or value
-            if isinstance(value, Mapping):
-                text_value = value.get("text")
-                if isinstance(text_value, str):
-                    normalized = _normalize_plain_text(text_value)
-                    return normalized or text_value
-            try:
-                return json.dumps(value, ensure_ascii=False)
-            except TypeError:
-                return str(value)
+        responses_client = getattr(client, "responses", None)
+        if responses_client is None:
+            raise RuntimeError("Client de génération invalide : attribut responses absent")
 
-        def _maybe_emit_stream_update(force: bool = False, status: str = "Réponse en cours...") -> None:
-            nonlocal last_stream_update
-            now = time.time()
-            if not force and (now - last_stream_update) < stream_update_interval:
-                return
-            _update_activity_generation_job(
-                job_id,
-                message=status,
-                conversation=conversation,
-                cached_steps=cached_steps,
-                conversation_id=conversation_id,
-                conversation_cursor=len(conversation),
-            )
-            last_stream_update = now
+        request_kwargs = {
+            "model": model_name,
+            "input": serialized_input,
+            "conversation": conversation_id,
+            "tools": tools,
+            "parallel_tool_calls": False,
+            "text": {"verbosity": verbosity},
+            "reasoning": {"effort": thinking, "summary": "auto"},
+        }
 
-        with client.responses.stream(
-            model=model_name,
-            input=serialized_input,
-            conversation=conversation_id,
-            tools=tools,
-            parallel_tool_calls=False,
-            text={"verbosity": verbosity},
-            reasoning={"effort": thinking, "summary": "auto"},
-        ) as stream:
-            for event in stream:
-                event_type = getattr(event, "type", None)
-
-                if event_type == "response.output_text.delta":
-                    delta = getattr(event, "delta", None)
-                    text_segment = _coerce_string(delta)
-                    if not text_segment:
-                        continue
-                    if streaming_assistant_placeholder is None:
-                        streaming_assistant_placeholder = {
-                            "type": "output_text",
-                            "role": "assistant",
-                            "content": "",
-                        }
-                        conversation.append(streaming_assistant_placeholder)
-                    streaming_assistant_placeholder["content"] = (
-                        streaming_assistant_placeholder.get("content") or ""
-                    ) + text_segment
-                    _maybe_emit_stream_update()
-                    continue
-
-                if event_type and "function_call" in event_type:
-                    item = getattr(event, "item", None)
-                    call_id = getattr(event, "call_id", None)
-                    if call_id is None and isinstance(item, Mapping):
-                        call_id = item.get("call_id") or item.get("id")
-                    call_id_str = str(call_id) if call_id is not None else None
-
-                    raw_name = getattr(event, "name", None)
-                    if raw_name is None and isinstance(item, Mapping):
-                        raw_name = item.get("name")
-
-                    placeholder_key = (
-                        call_id_str
-                        or getattr(event, "id", None)
-                        or getattr(event, "event_id", None)
-                        or (raw_name if isinstance(raw_name, str) and raw_name else None)
-                        or "function_call"
-                    )
-
-                    placeholder = streaming_function_placeholders.get(placeholder_key)
-                    if placeholder is None:
-                        placeholder = {
-                            "type": "function_call",
-                            "role": "assistant",
-                            "name": raw_name or "unknown_function",
-                            "arguments": "",
-                        }
-                        if call_id_str is not None:
-                            placeholder["call_id"] = call_id_str
-                        streaming_function_placeholders[placeholder_key] = placeholder
-                        conversation.append(placeholder)
-                    else:
-                        if call_id_str is not None:
-                            placeholder["call_id"] = call_id_str
-                        if raw_name and raw_name != placeholder.get("name"):
-                            placeholder["name"] = raw_name
-                    delta = getattr(event, "delta", None)
-                    arguments_segment = ""
-                    if isinstance(delta, Mapping):
-                        arguments_segment = _coerce_string(delta.get("arguments"))
-                    else:
-                        arguments_segment = _coerce_string(delta)
-                    if arguments_segment:
-                        placeholder["arguments"] = (
-                            placeholder.get("arguments") or ""
-                        ) + arguments_segment
-                    _maybe_emit_stream_update()
-                    continue
-
-                if event_type and "reasoning" in event_type:
-                    delta = getattr(event, "delta", None)
-                    text_segment = _coerce_string(delta)
-                    if not text_segment:
-                        continue
-                    if streaming_reasoning_placeholder is None:
-                        streaming_reasoning_placeholder = {
-                            "type": "reasoning",
-                            "role": "assistant",
-                            "summary": [],
-                            "content": "",
-                        }
-                        conversation.append(streaming_reasoning_placeholder)
-                    existing = streaming_reasoning_placeholder.get("content") or ""
-                    streaming_reasoning_placeholder["content"] = (
-                        existing + ("\n" if existing else "") + text_segment
-                    )
-                    _maybe_emit_stream_update()
-                    continue
-
-            response = stream.get_final_response()
-            _maybe_emit_stream_update(force=True)
+        response = responses_client.create(**request_kwargs)
     except Exception as exc:  # pragma: no cover - defensive
         handled_missing_tool_output = False
         if isinstance(exc, BadRequestError):
@@ -4981,7 +4921,9 @@ def _run_activity_generation_job(job_id: str) -> None:
                 conversation=conversation,
                 cached_steps=cached_steps,
                 conversation_id=conversation_id,
-                conversation_cursor=len(conversation),
+                conversation_cursor=conversation_cursor,
+                awaiting_user_action=False,
+                pending_tool_call=None,
             )
             return
 
@@ -5187,7 +5129,7 @@ def _run_activity_generation_job(job_id: str) -> None:
             try:
                 followup = client.responses.create(
                     model=model_name,
-                    input=[_serialize_conversation_entry(message)],
+                    input=_serialize_conversation_for_responses([message]),
                     conversation=conversation_id,
                     tools=tools,
                     parallel_tool_calls=False,
@@ -5687,6 +5629,27 @@ def admin_respond_activity_generation(
     return _process_activity_generation_feedback(job_id, payload)
 
 
+@admin_router.post("/activities/generate/{job_id}/retry")
+def admin_retry_activity_generation(
+    job_id: str, _: LocalUser = Depends(_require_admin_user)
+) -> ActivityGenerationJobStatus:
+    job = _get_activity_generation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+    if job.status != "error":
+        raise HTTPException(
+            status_code=409,
+            detail="La tâche n'est pas en erreur et ne peut pas être relancée.",
+        )
+
+    retried = _retry_activity_generation_job(job_id)
+    if retried is None:
+        raise HTTPException(status_code=404, detail="Tâche de génération introuvable.")
+
+    _launch_activity_generation_job(job_id)
+    return _serialize_activity_generation_job(retried)
+
+
 @admin_router.get("/activities/generate/{job_id}")
 def admin_get_activity_generation_job(
     job_id: str, _: LocalUser = Depends(_require_admin_user)
@@ -6131,7 +6094,14 @@ def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: S
         # la connexion en attendant les premiers tokens du modèle.
         yield " "
         try:
-            with client.responses.stream(
+            responses_resource = getattr(client, "responses", None)
+            if responses_resource is None:
+                raise RuntimeError(
+                    "Client de génération invalide : attribut responses absent"
+                )
+
+            with _responses_create_stream(
+                responses_resource,
                 model=model,
                 input=[
                     {
@@ -6255,7 +6225,14 @@ def _handle_simulation_chat(payload: SimulationChatRequest) -> StreamingResponse
     def stream_response() -> Generator[str, None, None]:
         yield _sse_comment("simulation-chat")
         try:
-            with client.responses.stream(
+            responses_resource = getattr(client, "responses", None)
+            if responses_resource is None:
+                raise RuntimeError(
+                    "Client de génération invalide : attribut responses absent"
+                )
+
+            with _responses_create_stream(
+                responses_resource,
                 model=model,
                 input=[{"role": "system", "content": system_message}, *prepared_messages],
                 text_format=SimulationChatResponsePayload,
