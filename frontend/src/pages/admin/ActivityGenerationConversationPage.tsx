@@ -245,78 +245,75 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           console.error("Flux SSE indisponible:", errorMessage);
           if (response.status >= 500 && response.status < 600) {
             shouldRetry = true;
+            streamClosedUnexpectedly = true;
             setError((current) =>
               current ?? STREAM_RETRY_MESSAGE
             );
           } else {
             setError(errorMessage);
           }
-          return;
-        }
-
-        if (!response.body) {
+        } else if (!response.body) {
           console.error("Flux SSE sans corps de réponse disponible");
           setError((current) => current ?? STREAM_RETRY_MESSAGE);
           shouldRetry = true;
-          return;
-        }
+          streamClosedUnexpectedly = true;
+        } else {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buffer = "";
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-
-        const handleEvent = (rawEvent: string): void => {
-          if (isCancelled) {
-            return;
-          }
-
-          const lines = rawEvent.split(/\r?\n/);
-          let eventName = "message";
-          const dataLines: string[] = [];
-
-          for (const line of lines) {
-            if (!line) {
-              continue;
+          const handleEvent = (rawEvent: string): void => {
+            if (isCancelled) {
+              return;
             }
-            if (line.startsWith(":")) {
-              continue;
-            }
-            if (line.startsWith("event:")) {
-              eventName = line.slice(6).trim() || "message";
-              continue;
-            }
-            if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5).trimStart());
-              continue;
-            }
-            if (line.startsWith("retry:") || line.startsWith("id:")) {
-              continue;
-            }
-          }
 
-          if (dataLines.length === 0) {
-            return;
-          }
+            const lines = rawEvent.split(/\r?\n/);
+            let eventName = "message";
+            const dataLines: string[] = [];
 
-          const payloadText = dataLines.join("\n");
-          if (!payloadText) {
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(payloadText) as Record<string, unknown>;
-
-            if (eventName === "update") {
-              setError((current) =>
-                current === STREAM_RETRY_MESSAGE ? null : current
-              );
-              const conversationPayload = parsed.conversation;
-              if (
-                conversationPayload &&
-                typeof conversationPayload === "object"
-              ) {
-                setConversation(conversationPayload as Conversation);
+            for (const line of lines) {
+              if (!line) {
+                continue;
               }
+              if (line.startsWith(":")) {
+                continue;
+              }
+              if (line.startsWith("event:")) {
+                eventName = line.slice(6).trim() || "message";
+                continue;
+              }
+              if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trimStart());
+                continue;
+              }
+              if (line.startsWith("retry:") || line.startsWith("id:")) {
+                continue;
+              }
+            }
+
+            if (dataLines.length === 0) {
+              return;
+            }
+
+            const payloadText = dataLines.join("\n");
+            if (!payloadText) {
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(payloadText) as Record<string, unknown>;
+
+              if (eventName === "update") {
+                setError((current) =>
+                  current === STREAM_RETRY_MESSAGE ? null : current
+                );
+                const conversationPayload = parsed.conversation;
+                if (
+                  conversationPayload &&
+                  typeof conversationPayload === "object"
+                ) {
+                  setConversation(conversationPayload as Conversation);
+                }
 
               const jobPayload = parsed.job;
               if (jobPayload && typeof jobPayload === "object") {
@@ -343,32 +340,33 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           }
         };
 
-        while (!isCancelled) {
-          const { value, done } = await reader.read();
-          if (done) {
-            streamClosedUnexpectedly = true;
-            break;
-          }
-          buffer += decoder.decode(value, { stream: true });
-
-          let delimiterMatch = buffer.match(/\r?\n\r?\n/);
-          while (delimiterMatch && delimiterMatch.index !== undefined) {
-            const rawEvent = buffer.slice(0, delimiterMatch.index);
-            buffer = buffer.slice(delimiterMatch.index + delimiterMatch[0].length);
-            if (rawEvent.trim()) {
-              handleEvent(rawEvent);
+          while (!isCancelled) {
+            const { value, done } = await reader.read();
+            if (done) {
+              streamClosedUnexpectedly = true;
+              break;
             }
-            delimiterMatch = buffer.match(/\r?\n\r?\n/);
-          }
-        }
+            buffer += decoder.decode(value, { stream: true });
 
-        if (!isCancelled) {
-          const remainder = decoder.decode();
-          if (remainder) {
-            buffer += remainder;
+            let delimiterMatch = buffer.match(/\r?\n\r?\n/);
+            while (delimiterMatch && delimiterMatch.index !== undefined) {
+              const rawEvent = buffer.slice(0, delimiterMatch.index);
+              buffer = buffer.slice(delimiterMatch.index + delimiterMatch[0].length);
+              if (rawEvent.trim()) {
+                handleEvent(rawEvent);
+              }
+              delimiterMatch = buffer.match(/\r?\n\r?\n/);
+            }
           }
-          if (buffer.trim()) {
-            handleEvent(buffer);
+
+          if (!isCancelled) {
+            const remainder = decoder.decode();
+            if (remainder) {
+              buffer += remainder;
+            }
+            if (buffer.trim()) {
+              handleEvent(buffer);
+            }
           }
         }
       } catch (err) {
@@ -380,6 +378,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         }
         console.error("Erreur lors du suivi SSE:", err);
         shouldRetry = true;
+        streamClosedUnexpectedly = true;
         setError((current) =>
           current ?? STREAM_RETRY_MESSAGE
         );
