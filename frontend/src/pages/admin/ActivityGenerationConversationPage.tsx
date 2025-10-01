@@ -663,7 +663,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       </aside>
 
       <main className="flex flex-1 flex-col">
-        <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
+        <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/95 px-4 py-4 backdrop-blur-sm shadow-sm sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-1 items-center gap-3">
               <button
