@@ -5,6 +5,7 @@ import {
   type ActivityGenerationJob,
   type ActivityGenerationJobToolCall,
   type Conversation,
+  type ConversationMessage,
   type GenerateActivityPayload,
 } from "../../api";
 import { ConversationView } from "../../components/ConversationView";
@@ -50,10 +51,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [isLoading, setIsLoading] = useState(true);
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [promptText, setPromptText] = useState("");
-  const [showNewGenerationForm, setShowNewGenerationForm] = useState(false);
   const [jobStatus, setJobStatus] = useState<ActivityGenerationJob | null>(null);
   const [isJobLoading, setIsJobLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
@@ -105,6 +105,22 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     }
     return null;
   }, [generatedActivityId, jobStatus?.activity]);
+
+  const resetToNewConversation = useCallback(
+    (shouldCloseSidebar = false) => {
+      navigate(buildConversationUrl(null));
+      setConversation(null);
+      setJobStatus(null);
+      setError(null);
+      setPromptText("");
+      setFeedbackMessage("");
+      setFeedbackError(null);
+      if (shouldCloseSidebar) {
+        setIsSidebarOpen(false);
+      }
+    },
+    [buildConversationUrl, navigate]
+  );
 
   // Charge la conversation initiale
   useEffect(() => {
@@ -222,7 +238,10 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const handleSelectConversation = useCallback(
     (conv: Conversation) => {
       navigate(buildConversationUrl(conv.jobId));
-      setShowHistory(false);
+      setIsSidebarOpen(false);
+      setError(null);
+      setFeedbackMessage("");
+      setFeedbackError(null);
     },
     [buildConversationUrl, navigate]
   );
@@ -250,7 +269,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       // Rediriger vers la conversation nouvellement créée
       navigate(buildConversationUrl(job.jobId));
       setPromptText("");
-      setShowNewGenerationForm(false);
+      setIsSidebarOpen(false);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Erreur lors du démarrage de la génération"
@@ -501,265 +520,262 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     );
   }, [jobStatus?.pendingToolCall]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="mb-4 text-lg font-semibold text-[color:var(--brand-charcoal)]">
-            Chargement de la conversation...
+  const onboardingMessages = useMemo<ConversationMessage[]>(() => {
+    const firstTimestamp = new Date().toISOString();
+    const secondTimestamp = new Date(Date.now() + 1000).toISOString();
+    return [
+      {
+        role: "assistant",
+        content:
+          "Bonjour! Décrivons ensemble l’activité que vous souhaitez générer. Dites-moi le thème, le public visé et le format désiré, puis je m’occupe du reste.",
+        timestamp: firstTimestamp,
+      },
+      {
+        role: "assistant",
+        content:
+          "Quand vous êtes prêt·e, rédigez votre consigne dans le champ ci-dessous et appuyez sur Entrée pour lancer la génération.",
+        timestamp: secondTimestamp,
+      },
+    ];
+  }, []);
+
+  const messagesToDisplay = jobId && conversation ? conversation.messages : onboardingMessages;
+  const showLoadingState = Boolean(jobId && isLoading && !conversation);
+  const hasBlockingError = Boolean(jobId && error && !conversation);
+  const showGlobalErrorBanner = Boolean(jobId && error && conversation);
+  const conversationViewIsLoading = Boolean(
+    jobId && conversation?.status === "running" && (isPolling || isJobLoading)
+  );
+
+  return (
+    <div className="relative flex min-h-screen bg-gray-50">
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] transition lg:hidden"
+          aria-hidden="true"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex transform flex-col bg-white shadow-xl transition duration-200 ease-in-out lg:relative lg:inset-y-auto lg:h-auto lg:shadow-none ${
+          isSidebarOpen
+            ? "w-72 translate-x-0 border-r border-gray-200 lg:w-80"
+            : "w-72 -translate-x-full border-r border-gray-200 lg:w-0 lg:-translate-x-full lg:border-transparent"
+        }`}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
+            <div>
+              <p className="text-sm font-semibold text-[color:var(--brand-black)]">
+                Conversations
+              </p>
+              <p className="text-xs text-gray-500">Historique des demandes</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 transition hover:bg-gray-50"
+            >
+              Fermer
+            </button>
+          </div>
+          <div className="border-b border-gray-200 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => {
+                resetToNewConversation(true);
+              }}
+              className="w-full rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
+            >
+              + Nouvelle génération
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {conversations.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-xs text-gray-400">
+                Aucune conversation enregistrée
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {conversations.map((conv) => {
+                  const isActive = conv.jobId === jobId;
+                  return (
+                    <button
+                      key={conv.id}
+                      type="button"
+                      onClick={() => handleSelectConversation(conv)}
+                      className={`flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition hover:bg-gray-50 ${
+                        isActive ? "bg-red-50/60" : ""
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-[color:var(--brand-black)]">
+                          {conv.activityTitle || "Sans titre"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {new Date(conv.updatedAt).toLocaleDateString("fr-FR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        {conv.status === "running" && (
+                          <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-[10px] font-medium text-yellow-800">
+                            <span className="mr-1 h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
+                            En cours
+                          </span>
+                        )}
+                        {conv.status === "complete" && (
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-[10px] font-medium text-green-800">
+                            ✓ Terminée
+                          </span>
+                        )}
+                        {conv.status === "error" && (
+                          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-[10px] font-medium text-red-700">
+                            ✗ Erreur
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteConversationFromList(conv.id);
+                          }}
+                          className="text-[10px] font-medium text-red-600 transition hover:text-red-700"
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
-      </div>
-    );
-  }
+      </aside>
 
-  if (error) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-center">
-          <div className="mb-2 text-lg font-semibold text-red-800">Erreur</div>
-          <div className="text-sm text-red-600">{error}</div>
-          <button
-            onClick={() => navigate("/admin/activity-generation")}
-            className="mt-4 rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-          >
-            Retour
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Si pas de jobId, afficher la liste des conversations
-  if (!jobId) {
-    return (
-      <div className="flex min-h-screen flex-col">
+      <main className="flex flex-1 flex-col">
         <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
+            <div className="flex flex-1 items-center gap-3">
               <button
-                onClick={() => navigate("/activites")}
-                className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
-                title="Retour"
+                type="button"
+                onClick={() => setIsSidebarOpen((prev) => !prev)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-lg text-gray-600 transition hover:bg-gray-50"
+                aria-label={isSidebarOpen ? "Masquer les conversations" : "Afficher les conversations"}
               >
-                ← Retour
+                ☰
               </button>
-              <div>
-                <h1 className="text-xl font-semibold text-[color:var(--brand-black)]">
-                  Historique des conversations
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-xl font-semibold text-[color:var(--brand-black)]">
+                  {conversation?.activityTitle || "Assistant IA"}
                 </h1>
                 <p className="text-xs text-gray-500">
-                  Générations d'activités par IA
+                  {jobId ? (
+                    conversation ? (
+                      conversation.status === "running" ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+                          Génération en cours...
+                        </span>
+                      ) : conversation.status === "complete" ? (
+                        "Génération terminée"
+                      ) : conversation.status === "error" ? (
+                        "La génération a rencontré une erreur"
+                      ) : null
+                    ) : isLoading ? (
+                      "Chargement de la conversation..."
+                    ) : (
+                      "Conversation introuvable"
+                    )
+                  ) : (
+                    "Démarrez une nouvelle génération d’activité en discutant avec l’assistant."
+                  )}
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => setShowNewGenerationForm(!showNewGenerationForm)}
-              className="rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
-            >
-              {showNewGenerationForm ? "Annuler" : "+ Nouvelle génération"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {conversation?.status === "complete" && generatedActivityPath ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(generatedActivityPath)}
+                  className="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700"
+                >
+                  Ouvrir {generatedActivityTitle ?? "l’activité"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => resetToNewConversation()}
+                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+              >
+                Nouvelle conversation
+              </button>
+              {conversation ? (
+                <button
+                  type="button"
+                  onClick={handleDeleteConversation}
+                  className="rounded-full border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                >
+                  Supprimer
+                </button>
+              ) : null}
+            </div>
           </div>
         </header>
 
-        <div className="flex-1 px-4 py-6 sm:px-6 lg:overflow-y-auto">
-          {showNewGenerationForm && (
-            <div className="mx-auto mb-6 max-w-4xl space-y-4 rounded-3xl border border-white/60 bg-white/95 p-6 shadow-md">
-              <div className="space-y-2">
-                <h2 className="text-lg font-semibold text-[color:var(--brand-black)]">
-                  Nouvelle génération d'activité
-                </h2>
-                <p className="text-sm text-gray-600">
-                  Décrivez l'activité que vous souhaitez générer en quelques phrases.
-                </p>
-              </div>
-              {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                  {error}
-                </div>
-              )}
-              <div className="space-y-3">
-                <textarea
-                  value={promptText}
-                  onChange={(e) => setPromptText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      handleStartNewGeneration();
-                    }
-                  }}
-                  placeholder="Ex: Créer une activité sur la photosynthèse pour des étudiants de niveau collégial..."
-                  rows={4}
-                  className="w-full rounded-2xl border border-gray-300 bg-white p-4 text-sm text-gray-900 focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
-                  disabled={isGenerating}
-                />
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-gray-500">
-                    Appuyez sur Cmd+Entrée ou Ctrl+Entrée pour envoyer
+        {showGlobalErrorBanner ? (
+          <div className="border-l-4 border-red-400 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="flex items-start justify-between gap-3">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-xs font-semibold uppercase tracking-wide text-red-600 transition hover:text-red-700"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-hidden">
+            {hasBlockingError ? (
+              <div className="flex h-full items-center justify-center px-4">
+                <div className="max-w-sm rounded-3xl border border-red-200 bg-white p-6 text-center shadow-sm">
+                  <p className="text-sm font-medium text-red-700">
+                    {error}
                   </p>
                   <button
-                    onClick={handleStartNewGeneration}
-                    disabled={!promptText.trim() || isGenerating}
-                    className="rounded-full bg-[color:var(--brand-red)] px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-gray-300"
+                    type="button"
+                    onClick={() => resetToNewConversation()}
+                    className="mt-4 rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
                   >
-                    {isGenerating ? "Génération..." : "Générer"}
+                    Revenir à l’accueil de l’assistant
                   </button>
                 </div>
               </div>
-            </div>
-          )}
-
-          {conversations.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center text-gray-400">
-                <p className="text-sm">Aucune conversation disponible</p>
-                <p className="mt-2 text-xs">
-                  Cliquez sur "+ Nouvelle génération" pour commencer
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="mx-auto max-w-4xl space-y-4">
-              {conversations.map((conv) => (
-                <div
-                  key={conv.id}
-                  onClick={() => handleSelectConversation(conv)}
-                  className="w-full cursor-pointer rounded-3xl border border-white/60 bg-white/95 p-6 text-left shadow-sm transition hover:shadow-md"
-                >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex-1">
-                      <h3 className="mb-2 text-lg font-semibold text-[color:var(--brand-black)]">
-                        {conv.activityTitle || "Sans titre"}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {new Date(conv.updatedAt).toLocaleDateString("fr-FR", {
-                          day: "numeric",
-                          month: "long",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {conv.status === "running" && (
-                        <span className="inline-flex items-center rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-800">
-                          <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
-                          En cours
-                        </span>
-                      )}
-                      {conv.status === "complete" && (
-                        <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
-                          ✓ Terminée
-                        </span>
-                      )}
-                      {conv.status === "error" && (
-                        <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-800">
-                          ✗ Erreur
-                        </span>
-                      )}
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleDeleteConversationFromList(conv.id);
-                        }}
-                        className="rounded-full border border-red-200 px-3 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50"
-                      >
-                        Supprimer
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-red)]">
-                    Ouvrir la conversation
-                    <span aria-hidden="true">→</span>
-                  </div>
+            ) : showLoadingState ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center text-sm text-gray-500">
+                  Chargement de la conversation...
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (!conversation) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center text-gray-400">
-          <p className="text-sm">Conversation introuvable</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex min-h-screen flex-col">
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
-            <button
-              onClick={() => navigate(buildConversationUrl(null))}
-              className="rounded-full p-2 text-gray-600 hover:bg-gray-100"
-              title="Retour à l'historique"
-            >
-              ← Retour
-            </button>
-            <div>
-              <h1 className="text-xl font-semibold text-[color:var(--brand-black)]">
-                {conversation.activityTitle || "Génération d'activité"}
-              </h1>
-              <p className="text-xs text-gray-500">
-                {conversation.status === "running" && (
-                  <span className="inline-flex items-center">
-                    <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-green-500" />
-                    En cours...
-                  </span>
-                )}
-                {conversation.status === "complete" && (
-                  <span className="text-green-600">✓ Terminée</span>
-                )}
-                {conversation.status === "error" && (
-                  <span className="text-red-600">✗ Erreur</span>
-                )}
-              </p>
-            </div>
+              </div>
+            ) : (
+              <ConversationView
+                messages={messagesToDisplay}
+                isLoading={conversationViewIsLoading}
+              />
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {conversation?.status === "complete" && generatedActivityPath ? (
-              <button
-                onClick={() => navigate(generatedActivityPath)}
-                className="rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700"
-              >
-                Ouvrir {generatedActivityTitle ?? "l’activité"}
-              </button>
-            ) : null}
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className="rounded-full border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              {showHistory ? "Masquer" : "Historique"}
-            </button>
-            <button
-              onClick={handleDeleteConversation}
-              className="rounded-full border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-            >
-              Supprimer
-            </button>
-          </div>
-        </div>
-      </header>
 
-      {/* Contenu principal */}
-      <div className="flex flex-1 flex-col lg:flex-row lg:overflow-hidden">
-        {/* Zone de conversation */}
-        <div className="flex flex-1 flex-col bg-white lg:min-h-0 lg:overflow-hidden">
-          <div className="flex-1 lg:overflow-hidden">
-            <ConversationView
-              messages={conversation.messages}
-              isLoading={isPolling && conversation.status === "running"}
-            />
-          </div>
-          {jobId && (
+          {jobId && conversation ? (
             <div className="border-t border-gray-100 bg-white/95 px-4 py-4 sm:px-6">
               {jobStatus?.awaitingUserAction ? (
                 <div className="space-y-4">
@@ -843,12 +859,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                   {generatedActivityPath ? (
                     <div className="flex flex-wrap items-center gap-3">
                       <button
+                        type="button"
                         onClick={() => navigate(generatedActivityPath)}
                         className="inline-flex items-center justify-center rounded-full bg-green-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-green-700"
                       >
                         Ouvrir l’activité
                       </button>
                       <button
+                        type="button"
                         onClick={() => navigate("/activites")}
                         className="inline-flex items-center justify-center rounded-full border border-green-500 px-4 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100"
                       >
@@ -870,53 +888,46 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                 </div>
               )}
             </div>
-          )}
-        </div>
-
-        {/* Panneau d'historique (sidebar) */}
-        {showHistory && (
-          <aside className="mt-6 border-t border-gray-200 bg-white shadow-lg lg:mt-0 lg:w-80 lg:border-t-0 lg:border-l lg:shadow-none">
-            <div className="flex flex-col lg:h-full">
-              <div className="border-b border-gray-200 px-4 py-3">
-                <h2 className="text-sm font-semibold text-gray-700">
-                  Conversations récentes
-                </h2>
-              </div>
-              <div className="lg:flex-1 lg:overflow-y-auto">
-                {conversations.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-gray-400">
-                    Aucune conversation
+          ) : (
+            <div className="border-t border-gray-100 bg-white/90 px-4 py-4 sm:px-6">
+              <div className="mx-auto w-full max-w-3xl space-y-3 rounded-3xl border border-gray-200/70 bg-white/95 p-4 shadow-sm">
+                <textarea
+                  value={promptText}
+                  onChange={(event) => setPromptText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey && (event.metaKey || event.ctrlKey)) {
+                      event.preventDefault();
+                      handleStartNewGeneration();
+                    }
+                  }}
+                  placeholder="Décrivez l’activité à générer (thème, public, objectifs, contraintes...)."
+                  rows={3}
+                  className="w-full rounded-2xl border border-gray-300 bg-white p-3 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+                  disabled={isGenerating}
+                />
+                {!jobId && error ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {error}
                   </div>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {conversations.map((conv) => (
-                      <button
-                        key={conv.id}
-                        onClick={() => handleSelectConversation(conv)}
-                        className={`w-full px-4 py-3 text-left transition hover:bg-gray-50 ${
-                          conv.id === conversation.id ? "bg-blue-50" : ""
-                        }`}
-                      >
-                        <div className="mb-1 text-sm font-medium text-gray-800">
-                          {conv.activityTitle || "Sans titre"}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(conv.updatedAt).toLocaleDateString("fr-FR", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                ) : null}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-gray-500">
+                    Cmd+Entrée ou Ctrl+Entrée pour envoyer
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleStartNewGeneration}
+                    disabled={!promptText.trim() || isGenerating}
+                    className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-6 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+                  >
+                    {isGenerating ? "Génération..." : "Envoyer"}
+                  </button>
+                </div>
               </div>
             </div>
-          </aside>
-        )}
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

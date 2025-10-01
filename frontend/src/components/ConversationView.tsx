@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ConversationMessage } from "../api";
 
 interface ConversationViewProps {
@@ -127,6 +127,9 @@ export function ConversationView({
   messages,
   isLoading = false,
 }: ConversationViewProps): JSX.Element {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const bottomMarkerRef = useRef<HTMLDivElement | null>(null);
+
   // Filtre les messages système et développeur pour ne pas les afficher
   const visibleMessages = useMemo(() => {
     return messages.filter((msg) => {
@@ -161,6 +164,14 @@ export function ConversationView({
     });
   }, [messages]);
 
+  useEffect(() => {
+    if (bottomMarkerRef.current) {
+      bottomMarkerRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+    } else if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  }, [visibleMessages, isLoading]);
+
   if (messages.length === 0 && !isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -173,27 +184,33 @@ export function ConversationView({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
-        {visibleMessages.map((message, index) => (
-          <MessageBubble key={index} message={message} />
-        ))}
-        {isLoading && (
-          <div className="mb-6 flex justify-start">
-            <div className="rounded-3xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
-                <div
-                  className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
-                  style={{ animationDelay: "0.1s" }}
-                />
-                <div
-                  className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
-                  style={{ animationDelay: "0.2s" }}
-                />
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+      >
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col justify-end">
+          {visibleMessages.map((message, index) => (
+            <MessageBubble key={index} message={message} />
+          ))}
+          {isLoading && (
+            <div className="mb-6 flex justify-start">
+              <div className="rounded-3xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+                    style={{ animationDelay: "0.1s" }}
+                  />
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+                    style={{ animationDelay: "0.2s" }}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+          <div ref={bottomMarkerRef} />
+        </div>
       </div>
     </div>
   );
