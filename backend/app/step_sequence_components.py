@@ -385,6 +385,82 @@ GUIDED_FIELD_TYPES: tuple[str, ...] = (
     "multiple_choice",
 )
 
+_DEFAULT_BULLETED_LIST_MIN_BULLETS = 2
+_DEFAULT_BULLETED_LIST_MAX_BULLETS = 4
+_DEFAULT_BULLETED_LIST_MAX_WORDS_PER_BULLET = 12
+_DEFAULT_TEXTAREA_MIN_WORDS = 10
+_DEFAULT_TEXTAREA_MAX_WORDS = 120
+_DEFAULT_TWO_BULLETS_MAX_WORDS_PER_BULLET = 18
+_DEFAULT_TABLE_MEALS = ("Matin", "Midi", "Soir")
+_DEFAULT_CHOICE_LABELS = ("Option A", "Option B", "Option C")
+
+
+def _coerce_int(value: Any, *, minimum: int, fallback: int) -> int:
+    """Return ``value`` as an ``int`` constrained by ``minimum``.
+
+    ``fallback`` is returned when ``value`` cannot be interpreted as a
+    finite number.
+    """
+
+    candidate: int | None = None
+    if isinstance(value, (int, float)) and value == value:
+        candidate = int(value)
+    elif isinstance(value, str):
+        try:
+            candidate = int(float(value))
+        except ValueError:
+            candidate = None
+
+    if candidate is None:
+        candidate = fallback
+
+    if candidate < minimum:
+        return minimum
+    return candidate
+
+
+def _sanitize_choice_options(field_id: str, options: Any) -> list[dict[str, Any]]:
+    """Return a list of valid choice options, generating defaults if needed."""
+
+    sanitized: list[dict[str, Any]] = []
+    if isinstance(options, Sequence):
+        for option in options:
+            if not isinstance(option, Mapping):
+                continue
+            value = option.get("value")
+            label = option.get("label")
+            value_text = str(value).strip() if isinstance(value, str) else str(value or "").strip()
+            label_text = str(label).strip() if isinstance(label, str) else str(label or "").strip()
+            if not value_text or not label_text:
+                continue
+            description = option.get("description")
+            if isinstance(description, str):
+                description_text = description.strip() or None
+            else:
+                description_text = None
+            sanitized.append(
+                {
+                    "value": value_text,
+                    "label": label_text,
+                    "description": description_text,
+                }
+            )
+
+    if sanitized:
+        return sanitized
+
+    generated: list[dict[str, Any]] = []
+    for index, label in enumerate(_DEFAULT_CHOICE_LABELS, start=1):
+        suffix = chr(ord("a") + index - 1)
+        generated.append(
+            {
+                "value": f"{field_id}-option-{suffix}",
+                "label": label,
+                "description": None,
+            }
+        )
+    return generated
+
 
 FIELD_OPTION_SCHEMA: dict[str, Any] = _strict_object_schema(
     {
@@ -492,46 +568,50 @@ def create_form_step(
         raise ValueError("Un identifiant d'étape est requis pour create_form_step.")
 
     normalized_fields: list[dict[str, Any]] = []
-    for field in fields:
+    for index, field in enumerate(fields, start=1):
         if not isinstance(field, Mapping):
             continue
 
         normalized_field = deepcopy(field)
-        normalized_field.setdefault("minBullets", None)
-        normalized_field.setdefault("maxBullets", None)
-        normalized_field.setdefault("maxWordsPerBullet", None)
-        normalized_field.setdefault("mustContainAny", None)
-        normalized_field.setdefault("meals", None)
-        normalized_field.setdefault("minWords", None)
-        normalized_field.setdefault("maxWords", None)
-        normalized_field.setdefault("forbidWords", None)
-        normalized_field.setdefault("tone", None)
-        normalized_field.setdefault("minSelections", None)
-        normalized_field.setdefault("maxSelections", None)
-        normalized_field.setdefault("correctAnswer", None)
-        normalized_field.setdefault("correctAnswers", None)
+        field_identifier = normalized_field.get("id")
+        if isinstance(field_identifier, str):
+            normalized_id = field_identifier.strip()
+        else:
+            normalized_id = ""
+        if not normalized_id:
+            normalized_id = f"{resolved_step_id}-field-{index}"
+        normalized_field["id"] = normalized_id
 
-        options = normalized_field.get("options")
-        option_values: list[str] = []
-        if isinstance(options, Sequence):
-            normalized_options: list[dict[str, Any]] = []
-            for option in options:
-                if not isinstance(option, Mapping):
-                    continue
-                normalized_option = deepcopy(option)
-                normalized_option.setdefault("description", None)
-                normalized_options.append(normalized_option)
+        raw_label = normalized_field.get("label")
+        if isinstance(raw_label, str):
+            normalized_label = raw_label.strip()
+        elif raw_label is None:
+            normalized_label = ""
+        else:
+            normalized_label = str(raw_label).strip()
+        if not normalized_label:
+            normalized_label = normalized_id
+        normalized_field["label"] = normalized_label
+
+        raw_type = normalized_field.get("type")
+        if isinstance(raw_type, str):
+            normalized_type = raw_type.strip().lower()
+        else:
+            normalized_type = ""
+        if normalized_type not in GUIDED_FIELD_TYPES:
+            normalized_type = "textarea_with_counter"
+        normalized_field["type"] = normalized_type
+
+        field_type = normalized_type
+
+        if field_type in {"single_choice", "multiple_choice"}:
+            normalized_options = _sanitize_choice_options(normalized_id, normalized_field.get("options"))
             normalized_field["options"] = normalized_options
-            option_values = [
-                str(item.get("value"))
-                for item in normalized_options
-                if isinstance(item, Mapping) and item.get("value") is not None
-            ]
+            option_values = [option["value"] for option in normalized_options]
         else:
             normalized_field["options"] = None
             option_values = []
 
-        field_type = normalized_field.get("type")
         if field_type == "single_choice":
             correct_answer = normalized_field.get("correctAnswer")
             if not isinstance(correct_answer, str) or correct_answer not in option_values:
@@ -554,6 +634,145 @@ def create_form_step(
         else:
             normalized_field["correctAnswer"] = None
             normalized_field["correctAnswers"] = None
+
+        if field_type == "bulleted_list":
+            min_bullets = _coerce_int(
+                normalized_field.get("minBullets"),
+                minimum=1,
+                fallback=_DEFAULT_BULLETED_LIST_MIN_BULLETS,
+            )
+            max_bullets = _coerce_int(
+                normalized_field.get("maxBullets"),
+                minimum=min_bullets,
+                fallback=max(_DEFAULT_BULLETED_LIST_MAX_BULLETS, min_bullets),
+            )
+            max_words_per_bullet = _coerce_int(
+                normalized_field.get("maxWordsPerBullet"),
+                minimum=1,
+                fallback=_DEFAULT_BULLETED_LIST_MAX_WORDS_PER_BULLET,
+            )
+            normalized_field["minBullets"] = min_bullets
+            normalized_field["maxBullets"] = max_bullets
+            normalized_field["maxWordsPerBullet"] = max_words_per_bullet
+            raw_requirements = normalized_field.get("mustContainAny")
+            if isinstance(raw_requirements, Sequence) and not isinstance(raw_requirements, (str, bytes)):
+                sanitized_requirements = [
+                    item.strip()
+                    for item in raw_requirements
+                    if isinstance(item, str) and item.strip()
+                ]
+                normalized_field["mustContainAny"] = sanitized_requirements or None
+            else:
+                normalized_field["mustContainAny"] = None
+        elif field_type in {"table_menu_day", "table_menu_full"}:
+            meals = normalized_field.get("meals")
+            sanitized_meals: list[str] = []
+            if isinstance(meals, Sequence) and not isinstance(meals, (str, bytes)):
+                for meal in meals:
+                    if not isinstance(meal, str):
+                        continue
+                    trimmed = meal.strip()
+                    if trimmed and trimmed not in sanitized_meals:
+                        sanitized_meals.append(trimmed)
+            if not sanitized_meals:
+                sanitized_meals = list(_DEFAULT_TABLE_MEALS)
+            normalized_field["meals"] = sanitized_meals
+        elif field_type == "textarea_with_counter":
+            min_words = _coerce_int(
+                normalized_field.get("minWords"),
+                minimum=0,
+                fallback=_DEFAULT_TEXTAREA_MIN_WORDS,
+            )
+            max_words = _coerce_int(
+                normalized_field.get("maxWords"),
+                minimum=min_words,
+                fallback=max(_DEFAULT_TEXTAREA_MAX_WORDS, min_words),
+            )
+            normalized_field["minWords"] = min_words
+            normalized_field["maxWords"] = max_words
+            forbid_words = normalized_field.get("forbidWords")
+            if isinstance(forbid_words, Sequence) and not isinstance(forbid_words, (str, bytes)):
+                sanitized_forbidden = [
+                    word.strip()
+                    for word in forbid_words
+                    if isinstance(word, str) and word.strip()
+                ]
+                normalized_field["forbidWords"] = sanitized_forbidden or None
+            else:
+                normalized_field["forbidWords"] = None
+            tone = normalized_field.get("tone")
+            normalized_field["tone"] = tone.strip() if isinstance(tone, str) and tone.strip() else None
+        elif field_type == "two_bullets":
+            normalized_field["maxWordsPerBullet"] = _coerce_int(
+                normalized_field.get("maxWordsPerBullet"),
+                minimum=1,
+                fallback=_DEFAULT_TWO_BULLETS_MAX_WORDS_PER_BULLET,
+            )
+        elif field_type == "multiple_choice":
+            min_selections_value = normalized_field.get("minSelections")
+            max_selections_value = normalized_field.get("maxSelections")
+            min_selections: int | None
+            max_selections: int | None
+            if isinstance(min_selections_value, (int, float)):
+                min_selections = max(0, int(min_selections_value))
+            elif isinstance(min_selections_value, str):
+                try:
+                    min_selections = max(0, int(float(min_selections_value)))
+                except ValueError:
+                    min_selections = None
+            else:
+                min_selections = None
+
+            if isinstance(max_selections_value, (int, float)):
+                max_selections = max(1, int(max_selections_value))
+            elif isinstance(max_selections_value, str):
+                try:
+                    max_selections = max(1, int(float(max_selections_value)))
+                except ValueError:
+                    max_selections = None
+            else:
+                max_selections = None
+
+            option_count = len(option_values)
+            if min_selections is not None and min_selections > option_count:
+                min_selections = option_count if option_count > 0 else None
+            if max_selections is not None and max_selections > option_count:
+                max_selections = option_count if option_count > 0 else None
+            if (
+                min_selections is not None
+                and max_selections is not None
+                and max_selections < min_selections
+            ):
+                max_selections = min_selections if min_selections > 0 else None
+            normalized_field["minSelections"] = min_selections
+            normalized_field["maxSelections"] = max_selections
+        else:
+            normalized_field.setdefault("minBullets", None)
+            normalized_field.setdefault("maxBullets", None)
+            normalized_field.setdefault("maxWordsPerBullet", None)
+            normalized_field.setdefault("mustContainAny", None)
+            normalized_field.setdefault("meals", None)
+            normalized_field.setdefault("minWords", None)
+            normalized_field.setdefault("maxWords", None)
+            normalized_field.setdefault("forbidWords", None)
+            normalized_field.setdefault("tone", None)
+            normalized_field.setdefault("minSelections", None)
+            normalized_field.setdefault("maxSelections", None)
+
+        normalized_field.setdefault("minBullets", None)
+        normalized_field.setdefault("maxBullets", None)
+        normalized_field.setdefault("maxWordsPerBullet", None)
+        normalized_field.setdefault("mustContainAny", None)
+        normalized_field.setdefault("meals", None)
+        normalized_field.setdefault("minWords", None)
+        normalized_field.setdefault("maxWords", None)
+        normalized_field.setdefault("forbidWords", None)
+        normalized_field.setdefault("tone", None)
+        normalized_field.setdefault("options", None)
+        normalized_field.setdefault("minSelections", None)
+        normalized_field.setdefault("maxSelections", None)
+        normalized_field.setdefault("correctAnswer", None)
+        normalized_field.setdefault("correctAnswers", None)
 
         normalized_fields.append(normalized_field)
 
