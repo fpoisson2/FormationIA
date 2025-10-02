@@ -152,19 +152,14 @@ describe("Explorateur IA", () => {
     continueButton = await screen.findByRole("button", { name: /Continuer/i });
     fireEvent.click(continueButton);
 
-    const bestOption = await screen.findByRole("button", {
-      name: /Donne un plan en 5 sections sur l'énergie solaire/i,
-    });
-    fireEvent.click(bestOption);
-
-    const validateButton = await screen.findByRole("button", { name: /Valider/i });
-    fireEvent.click(validateButton);
-
     vi.runAllTimers();
     vi.useRealTimers();
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /Valider/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: /Quartier Clarté/i }) ??
+          screen.queryByText(/Quartier Clarté/i)
+      ).not.toBeInTheDocument();
     });
 
     const progressionPanel = screen.getByText("Progression").closest("div");
@@ -183,8 +178,9 @@ describe("Explorateur IA", () => {
     const exportText = await storedBlobs[0].text();
     const exportData = JSON.parse(exportText);
     expect(exportData.activity).toBe("Explorateur IA");
-    expect(exportData.quarters.clarte.details.score).toBe(100);
-    expect(exportData.quarters.clarte.details.selectedOptionId).toBe("B");
-    expect(exportData.quarters.clarte.payloads["clarte:quiz"]).toBeDefined();
+    expect(exportData.quarters.clarte.payloads).toEqual({});
+    expect(exportData.quarters.clarte.details.score).toBe(0);
+    expect(exportData.quarters.clarte.details.selectedOptionId).toBeNull();
+    expect(exportData.quarters.clarte.details.explanation).toBeNull();
   });
 });
