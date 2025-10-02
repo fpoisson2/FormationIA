@@ -91,6 +91,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [isRetryingJob, setIsRetryingJob] = useState(false);
   const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
+  const [isCancellingJob, setIsCancellingJob] = useState(false);
 
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const lastConversationUpdateRef = useRef<number>(0);
@@ -567,15 +568,17 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   }, [buildConversationUrl, promptText, isGenerating, token, navigate]);
 
   const handleSendFeedback = useCallback(
-    async (action: "approve" | "revise") => {
+    async (action: "approve" | "revise" | "message") => {
       if (!jobId || isSendingFeedback) {
         return;
       }
 
       const trimmedMessage = feedbackMessage.trim();
-      if (action === "revise" && trimmedMessage.length === 0) {
+      if ((action === "revise" || action === "message") && trimmedMessage.length === 0) {
         setFeedbackError(
-          "Ajoutez un message pour préciser les ajustements attendus."
+          action === "message"
+            ? "Ajoutez un message à envoyer."
+            : "Ajoutez un message pour préciser les ajustements attendus."
         );
         return;
       }
@@ -584,6 +587,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         jobStatus?.pendingToolCall?.name === "propose_step_sequence_plan";
 
       const buildFeedbackText = (): string => {
+        if (action === "message") {
+          return trimmedMessage;
+        }
         if (action === "approve") {
           if (expectingPlan) {
             let base = "Le plan proposé est validé.";
@@ -729,6 +735,26 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     resolveErrorMessage,
     token,
   ]);
+
+  const handleCancelGeneration = useCallback(() => {
+    if (isCancellingJob) {
+      return;
+    }
+
+    setIsCancellingJob(true);
+    setError(null);
+    setConnectionWarning(null);
+
+    const controller = streamAbortControllerRef.current;
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+      streamAbortControllerRef.current = null;
+    }
+
+    setIsStreaming(false);
+    resetToNewConversation(true);
+    setIsCancellingJob(false);
+  }, [isCancellingJob, resetToNewConversation]);
 
   const deleteConversationById = useCallback(
     async (conversationId: string, redirectToHistory = false) => {
@@ -951,30 +977,64 @@ export function ActivityGenerationConversationPage(): JSX.Element {
       (isStreaming || isJobLoading || jobStatus?.status === "pending")
   );
 
+  const awaitingAssistantResponse = Boolean(
+    jobId &&
+      conversation &&
+      !jobStatus?.awaitingUserAction &&
+      !jobStatus?.pendingToolCall &&
+      (isStreaming || jobStatus?.status === "running" || jobStatus?.status === "pending")
+  );
+
+  const awaitingUserAction = Boolean(jobStatus?.awaitingUserAction);
+
+  const shouldAutoExpandDetails = Boolean(
+    jobStatus?.pendingToolCall ||
+      isStreaming ||
+      jobStatus?.status === "running" ||
+      jobStatus?.status === "pending"
+  );
+
   const messagesWithAwaitingIndicator = useMemo(() => {
-    if (!awaitingFirstAssistantResponse) {
-      return messagesToDisplay;
+    const enrichedMessages = [...messagesToDisplay];
+
+    if (awaitingAssistantResponse) {
+      const alreadyPresent = enrichedMessages.some(
+        (message) => message.id === "awaiting-assistant-response"
+      );
+
+      if (!alreadyPresent) {
+        const awaitingTimestamp = (() => {
+          const lastTimestamp = conversation?.messages?.[conversation.messages.length - 1]?.timestamp;
+          if (typeof lastTimestamp === "string" && lastTimestamp.trim()) {
+            return lastTimestamp;
+          }
+          return new Date().toISOString();
+        })();
+
+        const awaitingMessage: ConversationMessage = {
+          id: "awaiting-assistant-response",
+          role: "assistant",
+          content: "Réponse de l’IA en cours...",
+          timestamp: awaitingTimestamp,
+        };
+
+        enrichedMessages.push(awaitingMessage);
+      }
     }
 
-    const placeholderTimestamp = (() => {
-      if (conversation?.messages?.length) {
-        const lastMessageTimestamp = conversation.messages[conversation.messages.length - 1]?.timestamp;
-        if (typeof lastMessageTimestamp === "string" && lastMessageTimestamp.trim()) {
-          return lastMessageTimestamp;
-        }
-      }
-      return new Date().toISOString();
-    })();
+    return enrichedMessages;
+  }, [awaitingAssistantResponse, conversation?.messages, messagesToDisplay]);
 
-    const awaitingMessage: ConversationMessage = {
-      id: "awaiting-first-assistant-response",
-      role: "assistant",
-      content: "L’IA prépare une première réponse...",
-      timestamp: placeholderTimestamp,
-    };
+  const awaitingActionRef = useRef(false);
 
-    return [...messagesToDisplay, awaitingMessage];
-  }, [awaitingFirstAssistantResponse, conversation?.messages, messagesToDisplay]);
+  useEffect(() => {
+    if (awaitingUserAction && !awaitingActionRef.current) {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+      });
+    }
+    awaitingActionRef.current = awaitingUserAction;
+  }, [awaitingUserAction]);
 
   useEffect(() => {
     if (!jobId) {
@@ -1079,8 +1139,23 @@ export function ActivityGenerationConversationPage(): JSX.Element {
     token,
   ]);
 
+  const sidebarBaseClass =
+    "fixed inset-y-0 left-0 z-40 flex transform flex-col bg-white shadow-xl transition duration-200 ease-in-out lg:relative lg:inset-y-auto lg:h-auto lg:shadow-none overflow-x-hidden";
+
+  const sidebarClassName = `${sidebarBaseClass} ${
+    isSidebarOpen
+      ? "w-72 translate-x-0 border-r border-gray-200 lg:w-80 lg:translate-x-0 lg:opacity-100"
+      : "w-72 -translate-x-full border-r border-gray-200 pointer-events-none lg:w-0 lg:translate-x-0 lg:border-transparent lg:opacity-0"
+  }`;
+
+  const containerClassName =
+    "relative flex min-h-screen flex-col bg-gradient-to-br from-slate-50 via-white to-slate-100 lg:flex-row";
+
+  const mainClassName =
+    "flex flex-1 flex-col bg-white/85 backdrop-blur-sm lg:rounded-l-3xl lg:shadow-xl";
+
   return (
-    <div className="relative flex min-h-screen bg-gray-50">
+    <div className={containerClassName}>
       {isSidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] transition lg:hidden"
@@ -1089,13 +1164,7 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         />
       )}
 
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 flex transform flex-col bg-white shadow-xl transition duration-200 ease-in-out lg:relative lg:inset-y-auto lg:h-auto lg:shadow-none ${
-          isSidebarOpen
-            ? "w-72 translate-x-0 border-r border-gray-200 lg:w-80"
-            : "w-72 -translate-x-full border-r border-gray-200 lg:w-0 lg:-translate-x-full lg:border-transparent"
-        }`}
-      >
+      <aside className={sidebarClassName} aria-hidden={!isSidebarOpen}>
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
             <div>
@@ -1191,8 +1260,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         </div>
       </aside>
 
-      <main className="flex flex-1 flex-col">
-        <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/95 px-4 py-4 backdrop-blur-sm shadow-sm sm:px-6">
+      <main className={mainClassName}>
+        <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/95 px-4 py-4 backdrop-blur-sm shadow-sm sm:px-6 lg:rounded-tl-3xl">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-1 items-center gap-3">
               <button
@@ -1232,6 +1301,13 @@ export function ActivityGenerationConversationPage(): JSX.Element {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate("/activites")}
+                className="rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+              >
+                Retour aux activités
+              </button>
               {conversation?.status === "complete" && generatedActivityPath ? (
                 <button
                   type="button"
@@ -1298,8 +1374,8 @@ export function ActivityGenerationConversationPage(): JSX.Element {
           </div>
         ) : null}
 
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-hidden pb-[260px] sm:pb-[240px]">
             {hasBlockingError ? (
               <div className="flex h-full items-center justify-center px-4">
                 <div className="max-w-sm rounded-3xl border border-red-200 bg-white p-6 text-center shadow-sm">
@@ -1326,13 +1402,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                 <ConversationView
                   messages={messagesWithAwaitingIndicator}
                   isLoading={conversationViewIsLoading}
+                  autoExpandDetails={shouldAutoExpandDetails}
                 />
               </div>
             )}
           </div>
 
           {jobId && conversation ? (
-            <div className="border-t border-gray-100 bg-white/95 px-4 py-4 sm:px-6">
+            <div className="sticky bottom-0 z-20 border-t border-gray-100 bg-white/95 px-4 py-4 backdrop-blur-sm sm:px-6">
               {jobStatus?.awaitingUserAction ? (
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -1393,6 +1470,14 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                           ? "Envoi en cours..."
                           : "Demander des ajustements"}
                       </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelGeneration}
+                        disabled={isCancellingJob || isSendingFeedback}
+                        className="inline-flex items-center justify-center rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isCancellingJob ? "Arrêt en cours..." : "Arrêter la génération"}
+                      </button>
                       <div className="text-xs text-gray-500">
                         {isJobLoading
                           ? "Mise à jour du statut en cours..."
@@ -1436,17 +1521,77 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                   )}
                 </div>
               ) : (
-                <div className="rounded-3xl border border-gray-200/70 bg-white/90 p-4 text-xs text-gray-500">
-                  {jobStatus?.status === "error"
-                    ? jobStatus.message ||
-                      "La génération s'est interrompue. Vous pouvez relancer une nouvelle demande."
-                    : "Aucune validation n'est requise pour le moment."}
+                <div className="space-y-3">
+                  {jobStatus?.status === "error" ? (
+                    <div className="rounded-3xl border border-gray-200/70 bg-white/90 p-4 text-xs text-gray-500">
+                      {jobStatus.message ||
+                        "La génération s'est interrompue. Vous pouvez relancer une nouvelle demande."}
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleRetryGeneration();
+                          }}
+                          disabled={isRetryingJob}
+                          className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-red)] px-4 py-2 text-xs font-semibold text-[color:var(--brand-red)] transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isRetryingJob ? "Nouvelle tentative..." : "Réessayer"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="space-y-3 rounded-3xl border border-gray-200/70 bg-white/95 p-5 shadow-sm">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-[color:var(--brand-black)]">
+                        Envoyer un message
+                      </p>
+                      <p className="text-xs text-[color:var(--brand-charcoal)]/70">
+                        Vous pouvez interrompre ou donner des instructions supplémentaires à tout moment.
+                      </p>
+                    </div>
+                    <div className="relative">
+                      <textarea
+                        value={feedbackMessage}
+                        onChange={(event) => setFeedbackMessage(event.target.value)}
+                        placeholder="Tapez un message pour interagir avec l'assistant..."
+                        rows={3}
+                        className="w-full rounded-2xl border border-gray-300 bg-white p-3 pr-12 text-sm text-[color:var(--brand-charcoal)] focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-red-200"
+                        disabled={isSendingFeedback}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCancelGeneration}
+                        disabled={isCancellingJob}
+                        className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Arrêter la génération"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          className="h-4 w-4"
+                        >
+                          <rect x="6" y="6" width="12" height="12" rx="1" />
+                        </svg>
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSendFeedback("message");
+                      }}
+                      disabled={isSendingFeedback || !feedbackMessage.trim()}
+                      className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+                    >
+                      {isSendingFeedback ? "Envoi en cours..." : "Envoyer"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           ) : (
-            <div className="border-t border-gray-100 bg-white/90 px-4 py-4 sm:px-6">
-              <div className="mx-auto w-full max-w-3xl space-y-3 rounded-3xl border border-gray-200/70 bg-white/95 p-4 shadow-sm">
+            <div className="sticky bottom-0 z-20 border-t border-gray-100 bg-white/90 px-4 py-5 backdrop-blur-sm sm:px-6">
+              <div className="mx-auto w-full max-w-3xl space-y-3 rounded-3xl border border-gray-200/70 bg-white/95 p-5 shadow-lg">
                 <textarea
                   value={promptText}
                   onChange={(event) => setPromptText(event.target.value)}

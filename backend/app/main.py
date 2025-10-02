@@ -1939,7 +1939,7 @@ class _ActivityGenerationJobState:
 class ActivityGenerationFeedbackRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    action: Literal["approve", "revise"]
+    action: Literal["approve", "revise", "message"]
     message: str | None = Field(default=None, max_length=1200)
 
     @model_validator(mode="after")
@@ -2137,6 +2137,15 @@ def _normalize_plain_text(text: str | None) -> str | None:
     stripped = stripped.replace("\r\n", "\n")
     stripped = re.sub(r"\n{3,}", "\n\n", stripped)
     return stripped.strip()
+
+
+def _normalize_string(value: Any) -> str:
+    """Return a stable string representation for deduplication checks."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _deserialize_activity_generation_job(
@@ -2383,7 +2392,64 @@ def _fetch_remote_conversation_items(conversation_id: str) -> list[dict[str, Any
         )
         return []
 
-    return collected
+    def _extract_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = _normalize_plain_text(value)
+            return normalized or value.strip() or None
+        if isinstance(value, Mapping):
+            text_value = value.get("text")
+            if isinstance(text_value, str):
+                normalized = _normalize_plain_text(text_value)
+                return normalized or text_value.strip() or None
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except TypeError:
+                return str(value)
+        if isinstance(value, Sequence):
+            parts: list[str] = []
+            for element in value:
+                text = _extract_text(element)
+                if text:
+                    parts.append(text)
+            if parts:
+                combined = "\n\n".join(parts)
+                normalized = _normalize_plain_text(combined)
+                return normalized or combined
+            return None
+        return str(value)
+
+    sanitized: list[dict[str, Any]] = []
+    seen_assistant: set[tuple[str | None, str | None]] = set()
+    seen_calls: set[tuple[str | None, str | None]] = set()
+
+    for entry in collected:
+        if not isinstance(entry, Mapping):
+            continue
+
+        role = entry.get("role")
+        message_type = entry.get("type")
+
+        if message_type in {"function_call", "function_call_output"}:
+            call_id = entry.get("call_id") or entry.get("id")
+            signature = (message_type, _normalize_string(call_id))
+            if signature in seen_calls:
+                continue
+            seen_calls.add(signature)
+
+        if role == "assistant":
+            text_value = _extract_text(entry.get("content")) or _extract_text(entry.get("text"))
+            if not text_value and message_type in {None, "message", "output_text"}:
+                continue
+            signature = (message_type, text_value)
+            if signature in seen_assistant:
+                continue
+            seen_assistant.add(signature)
+
+        sanitized.append(dict(entry))
+
+    return sanitized
 
 
 def _create_activity_generation_job(
@@ -4693,11 +4759,20 @@ def _serialize_conversation_entry(message: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in message.items()
         if key not in {"type", "summary", "id", "timestamp"}
     }
-    if "role" not in fallback:
-        fallback["role"] = "assistant"
-    fallback_role = fallback.get("role")
-    fallback["content"] = _ensure_content_list(fallback.get("content"), fallback_role)
-    return _maybe_attach_summary(fallback)
+    fallback_role = fallback.get("role") if isinstance(fallback.get("role"), str) else None
+    if fallback_role is None:
+        fallback_role = "assistant"
+
+    fallback_payload: dict[str, Any] = {
+        "role": fallback_role,
+        "content": _ensure_content_list(fallback.get("content"), fallback_role),
+    }
+
+    for optional_key in ("tool_call_id", "call_id", "name", "metadata"):
+        if optional_key in fallback:
+            fallback_payload[optional_key] = deepcopy(fallback[optional_key])
+
+    return _maybe_attach_summary(fallback_payload)
 
 
 def _serialize_conversation_for_responses(
@@ -4850,6 +4925,8 @@ def _run_activity_generation_job(job_id: str) -> None:
         streaming_reasoning_placeholder: dict[str, Any] | None = None
         streaming_function_placeholders: OrderedDict[int, dict[str, Any]] = OrderedDict()
         last_stream_update = 0.0
+        seen_assistant_signatures: set[tuple[str | None, str | None]] = set()
+        seen_function_call_signatures: set[tuple[str | None, str | None]] = set()
 
         def _maybe_emit_streaming_update(force: bool = False) -> None:
             nonlocal last_stream_update
@@ -5336,6 +5413,37 @@ def _run_activity_generation_job(job_id: str) -> None:
             return None
         return None
 
+    def _extract_assistant_text(item: Mapping[str, Any]) -> str | None:
+        text = _coerce_text_from_content(item.get("content"))
+        if text:
+            return text
+        return _coerce_text_from_content(item.get("text"))
+
+    def _append_conversation_item(item: Mapping[str, Any]) -> None:
+        normalized = dict(item)
+        role = normalized.get("role")
+        message_type = normalized.get("type")
+
+        if message_type in {"function_call", "function_call_output"}:
+            call_id = normalized.get("call_id") or normalized.get("id")
+            signature = (message_type, _normalize_string(call_id))
+            if signature in seen_function_call_signatures:
+                return
+            seen_function_call_signatures.add(signature)
+
+        if role == "assistant":
+            text_value = _extract_assistant_text(normalized)
+            if not text_value and message_type in {None, "message", "output_text"}:
+                return
+
+            if text_value:
+                signature = (message_type, text_value)
+                if signature in seen_assistant_signatures:
+                    return
+                seen_assistant_signatures.add(signature)
+
+        conversation.append(normalized)
+
     def _finalize_placeholder_from_item(item: Mapping[str, Any]) -> bool:
         item_type = item.get("type")
 
@@ -5416,7 +5524,7 @@ def _run_activity_generation_job(job_id: str) -> None:
     for item in filtered_items:
         if _finalize_placeholder_from_item(item):
             continue
-        conversation.append(item)
+        _append_conversation_item(item)
 
     def _remember_step(result: Any) -> None:
         if not isinstance(result, Mapping):
@@ -5432,7 +5540,7 @@ def _run_activity_generation_job(job_id: str) -> None:
         *,
         failure_message: str = "La génération a échoué lors de la transmission d'un résultat d'outil.",
     ) -> tuple[bool, list[dict[str, Any]]]:
-        conversation.append(message)
+        _append_conversation_item(message)
 
         followup_items: list[dict[str, Any]] = []
 
@@ -5538,7 +5646,7 @@ def _run_activity_generation_job(job_id: str) -> None:
             for extra in extra_messages:
                 if extra.get("type") == "reasoning_summary" and extra.get("content"):
                     extra.setdefault("role", "assistant")
-                conversation.append(extra)
+                _append_conversation_item(extra)
 
         return True
 
@@ -5670,7 +5778,7 @@ def _run_activity_generation_job(job_id: str) -> None:
 
             if _finalize_placeholder_from_item(extra_item):
                 continue
-            conversation.append(extra_item)
+            _append_conversation_item(extra_item)
 
         if name == "build_step_sequence_activity":
             _update_activity_generation_job(
@@ -5773,9 +5881,7 @@ def _run_activity_generation_job(job_id: str) -> None:
             )
             if isinstance(activity_identifier, str):
                 update_kwargs["activity_id"] = activity_identifier
-            message = (
-                "Structure de l'activité initialisée. Confirmez ou ajustez avant de générer la suite."
-            )
+            message = "Structure de l'activité initialisée. Validez pour continuer avec la création des étapes."
         elif name.startswith("create_"):
             _remember_step(result)
             step_count = len(cached_steps)
@@ -5836,16 +5942,28 @@ def _process_activity_generation_feedback(
             status_code=400,
             detail="La tâche n'accepte plus de retours utilisateur.",
         )
-    if not job.awaiting_user_action or job.pending_tool_call is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Aucun retour n'est attendu pour cette tâche actuellement.",
-        )
+
+    # Pour l'action "message", on autorise l'envoi à tout moment (interruption)
+    # Pour "approve" et "revise", on vérifie qu'une validation est attendue
+    if payload.action != "message":
+        if not job.awaiting_user_action or job.pending_tool_call is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Aucun retour n'est attendu pour cette tâche actuellement.",
+            )
 
     comment = (payload.message or "").strip()
     mark_plan_validated = False
 
-    if payload.action == "approve":
+    if payload.action == "message":
+        # Envoie le message tel quel sans transformation
+        if not comment:
+            raise HTTPException(
+                status_code=400,
+                detail="Un message est requis pour l'action 'message'.",
+            )
+        feedback_text = comment
+    elif payload.action == "approve":
         if job.expecting_plan:
             base = "Le plan proposé est validé."
             if comment:
@@ -6152,13 +6270,6 @@ def _sync_conversation_from_job(
         if cleaned_new in cleaned_existing:
             return cleaned_existing
         return f"{cleaned_existing}\n\n{cleaned_new}".strip()
-
-    def _normalize_string(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value
-        return str(value)
 
     def _normalize_arguments(value: Any) -> str:
         if value is None:

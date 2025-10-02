@@ -47,6 +47,7 @@ function splitBoldSegments(line: string): FormattedSegment[] {
 interface ConversationViewProps {
   messages: ConversationMessage[];
   isLoading?: boolean;
+  autoExpandDetails?: boolean;
 }
 
 function formatTimestamp(timestamp: string): string {
@@ -61,8 +62,38 @@ function formatTimestamp(timestamp: string): string {
   }
 }
 
-function MessageBubble({ message }: { message: ConversationMessage }): JSX.Element {
+function MessageBubble({
+  message,
+  autoExpand,
+}: {
+  message: ConversationMessage;
+  autoExpand: boolean;
+}): JSX.Element {
   const { role, content, toolCalls, reasoningSummary } = message;
+
+  const isAwaitingPlaceholder = message.id === "awaiting-assistant-response";
+  const reasoningDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const toolDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const previousAutoExpandRef = useRef(false);
+
+  useEffect(() => {
+    if (autoExpand) {
+      if (reasoningDetailsRef.current) {
+        reasoningDetailsRef.current.open = true;
+      }
+      if (toolDetailsRef.current) {
+        toolDetailsRef.current.open = true;
+      }
+    } else if (previousAutoExpandRef.current) {
+      if (reasoningDetailsRef.current) {
+        reasoningDetailsRef.current.open = false;
+      }
+      if (toolDetailsRef.current) {
+        toolDetailsRef.current.open = false;
+      }
+    }
+    previousAutoExpandRef.current = autoExpand;
+  }, [autoExpand]);
 
   const formattedToolCalls = useMemo(() => {
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
@@ -123,6 +154,25 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
   const isTool = role === "tool";
   const isSystem = role === "system" || role === "developer";
 
+  if (isAssistant && isAwaitingPlaceholder) {
+    return (
+      <div className="mb-6 flex justify-start">
+        <div className="max-w-full sm:max-w-[720px]">
+          <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-[color:var(--brand-red)]">
+            <span className="relative inline-flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[color:var(--brand-red)]/40" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[color:var(--brand-red)]" />
+            </span>
+            Réponse de l’IA en cours
+          </div>
+          <div className="mt-3 rounded-3xl border border-[color:var(--brand-red)]/30 bg-white/90 px-5 py-4 text-sm text-[color:var(--brand-charcoal)] shadow-sm">
+            {content}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Messages système/développeur (cachés ou affichés discrètement)
   if (isSystem) {
     return (
@@ -138,12 +188,12 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
   if (isUser) {
     return (
       <div className="mb-6 flex justify-end">
-        <div className="max-w-full sm:max-w-[720px]">
-          <div className="rounded-3xl bg-[color:var(--brand-red)] px-5 py-3 text-white shadow-sm">
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{content}</p>
-          </div>
-          <div className="mt-1 text-right text-xs text-gray-400">
+        <div className="max-w-full sm:max-w-[640px]">
+          <div className="mb-1 flex justify-end text-[11px] font-medium uppercase tracking-wide text-gray-400">
             {formatTimestamp(message.timestamp)}
+          </div>
+          <div className="rounded-3xl bg-gradient-to-r from-[color:var(--brand-red)] to-[#ff6b6b] px-5 py-3 text-sm font-medium text-white shadow-md shadow-[rgba(255,64,94,0.25)]">
+            <p className="whitespace-pre-wrap break-words leading-relaxed">{content}</p>
           </div>
         </div>
       </div>
@@ -155,14 +205,23 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
     return (
       <div className="mb-6 flex justify-start">
         <div className="max-w-full sm:max-w-[720px]">
-          <div className="rounded-3xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
+          <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-gray-400">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-lg text-[color:var(--brand-red)] shadow-sm shadow-[rgba(0,0,0,0.08)]">
+              🤖
+            </span>
+            {formatTimestamp(message.timestamp)}
+          </div>
+          <div className="rounded-3xl border border-gray-200 bg-white/95 px-5 py-4 shadow-md backdrop-blur">
             {content && (
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[color:var(--brand-charcoal)]">
                 {content}
               </p>
             )}
             {reasoningSummaryLines && (
-              <details className="mt-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3 text-xs">
+              <details
+                ref={reasoningDetailsRef}
+                className="mt-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3 text-xs"
+              >
                 <summary className="cursor-pointer font-semibold text-orange-800">
                   🧠 Résumé du raisonnement
                 </summary>
@@ -193,15 +252,21 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
               </details>
             )}
             {formattedToolCalls.length > 0 && (
-              <details className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3 text-xs">
+              <details
+                ref={toolDetailsRef}
+                className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-3 text-xs"
+              >
                 <summary className="cursor-pointer font-semibold text-blue-800">
                   🔧 Appels d'outils ({formattedToolCalls.length})
                 </summary>
                 <div className="mt-2 space-y-2">
                   {formattedToolCalls.map(({ key, label, payload }) => (
-                    <div key={key} className="rounded-2xl bg-blue-50 p-3 text-xs">
+                    <div
+                      key={key}
+                      className="rounded-2xl border border-blue-100 bg-white/90 p-3 text-[13px] shadow-sm"
+                    >
                       <div className="font-semibold text-blue-800">{label}</div>
-                      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-blue-700">
+                      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-[12px] text-blue-700">
                         {payload}
                       </pre>
                     </div>
@@ -209,9 +274,6 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
                 </div>
               </details>
             )}
-          </div>
-          <div className="mt-1 text-left text-xs text-gray-400">
-            {formatTimestamp(message.timestamp)}
           </div>
         </div>
       </div>
@@ -253,15 +315,15 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
 export function ConversationView({
   messages,
   isLoading = false,
+  autoExpandDetails = false,
 }: ConversationViewProps): JSX.Element {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const bottomMarkerRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
-  const previousScrollTopRef = useRef(0);
 
   // Filtre les messages système et développeur pour ne pas les afficher
   const visibleMessages = useMemo(() => {
-    return messages.filter((msg) => {
+    const filtered = messages.filter((msg) => {
       // On garde tous les messages sauf system et developer
       if (msg.role === "system" || msg.role === "developer") {
         return false;
@@ -294,7 +356,55 @@ export function ConversationView({
       }
       return true;
     });
+
+    const deduped: ConversationMessage[] = [];
+    const indexById = new Map<string, number>();
+    const indexBySignature = new Map<string, number>();
+
+    for (const msg of filtered) {
+      const id = typeof msg.id === "string" ? msg.id.trim() : "";
+      if (id) {
+        const existingIndex = indexById.get(id);
+        if (existingIndex != null) {
+          deduped[existingIndex] = msg;
+          continue;
+        }
+        indexById.set(id, deduped.length);
+        deduped.push(msg);
+        continue;
+      }
+
+      const content = typeof msg.content === "string" ? msg.content.trim() : "";
+      const toolSignature = Array.isArray(msg.toolCalls)
+        ? msg.toolCalls
+            .map((call) => `${call.name ?? ""}:${call.callId ?? ""}:${call.argumentsText ?? ""}`)
+            .join("|")
+        : "";
+      const signature = `${msg.role}:${msg.timestamp ?? ""}:${content}:${toolSignature}`;
+      const existingSignatureIndex = indexBySignature.get(signature);
+      if (existingSignatureIndex != null) {
+        deduped[existingSignatureIndex] = msg;
+        continue;
+      }
+      indexBySignature.set(signature, deduped.length);
+      deduped.push(msg);
+    }
+
+    return deduped;
   }, [messages]);
+
+  const lastAssistantIndex = useMemo(() => {
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const message = visibleMessages[index];
+      if (
+        message.role === "assistant" &&
+        message.id !== "awaiting-assistant-response"
+      ) {
+        return index;
+      }
+    }
+    return -1;
+  }, [visibleMessages]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -305,16 +415,8 @@ export function ConversationView({
     const updateShouldStickToBottom = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-      const isScrollingUp = scrollTop < previousScrollTopRef.current;
 
-      previousScrollTopRef.current = scrollTop;
-
-      if (isScrollingUp) {
-        shouldStickToBottomRef.current = false;
-        return;
-      }
-
-      shouldStickToBottomRef.current = distanceFromBottom <= 120;
+      shouldStickToBottomRef.current = distanceFromBottom <= 160;
     };
 
     updateShouldStickToBottom();
@@ -332,9 +434,15 @@ export function ConversationView({
 
     if (bottomMarkerRef.current) {
       bottomMarkerRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
-    } else if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      return;
     }
+
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      return;
+    }
+
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }, [visibleMessages, isLoading]);
 
   if (messages.length === 0 && !isLoading) {
@@ -351,12 +459,20 @@ export function ConversationView({
     <div className="flex h-full flex-col">
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-4 py-6 sm:px-6"
+        className="flex-1 overflow-y-auto px-3 py-6 sm:px-6 lg:px-10"
       >
-        <div className="mx-auto flex h-full w-full max-w-3xl flex-col justify-end">
-          {visibleMessages.map((message, index) => (
-            <MessageBubble key={index} message={message} />
-          ))}
+        <div className="mx-auto flex h-full w-full max-w-4xl flex-col justify-end">
+          {visibleMessages.map((message, index) => {
+            const key = message.id ?? `${message.role}-${message.timestamp ?? index}-${index}`;
+            const isAwaitingPlaceholder = message.id === "awaiting-assistant-response";
+            const shouldAutoExpand = Boolean(
+              autoExpandDetails &&
+                index === lastAssistantIndex &&
+                message.role === "assistant" &&
+                !isAwaitingPlaceholder
+            );
+            return <MessageBubble key={key} message={message} autoExpand={shouldAutoExpand} />;
+          })}
           {isLoading && (
             <div className="mb-6 flex justify-start">
               <div className="rounded-3xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
