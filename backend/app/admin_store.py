@@ -75,8 +75,9 @@ class LtiPlatform(BaseModel):
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
     read_only: bool = False
+    owner_username: str | None = Field(default=None, alias="ownerUsername")
 
-    model_config = ConfigDict(validate_assignment=True)
+    model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -98,6 +99,12 @@ class LtiPlatform(BaseModel):
             object.__setattr__(self, "deployment_ids", resolved)
         else:
             object.__setattr__(self, "deployment_ids", [])
+
+        if isinstance(self.owner_username, str):
+            owner = self.owner_username.strip()
+            object.__setattr__(self, "owner_username", owner or None)
+        else:
+            object.__setattr__(self, "owner_username", None)
         return self
 
 
@@ -523,6 +530,37 @@ class AdminStore:
             platforms = self._data.get("platforms", [])
             return [LtiPlatform.model_validate(item) for item in platforms]
 
+    def list_platforms_for_user(
+        self,
+        user: LocalUser | str | None,
+        *,
+        include_shared: bool = True,
+    ) -> list[LtiPlatform]:
+        """Return platforms accessible to the provided user."""
+
+        username: str | None
+        if isinstance(user, LocalUser):
+            username = user.username
+        elif isinstance(user, str):
+            username = user.strip() or None
+        else:
+            username = None
+
+        allowed: list[LtiPlatform] = []
+        for platform in self.list_platforms():
+            owner = platform.owner_username
+            if platform.read_only:
+                allowed.append(platform)
+                continue
+            if owner is None:
+                if include_shared:
+                    allowed.append(platform)
+                continue
+            if username and owner == username:
+                allowed.append(platform)
+        allowed.sort(key=lambda item: (str(item.issuer), item.client_id))
+        return allowed
+
     def get_platform(self, issuer: str, client_id: str) -> LtiPlatform | None:
         key = (issuer, client_id)
         for platform in self.list_platforms():
@@ -534,20 +572,63 @@ class AdminStore:
         platform = LtiPlatform.model_validate({**payload, "read_only": read_only})
         now = _now_iso()
         platform.updated_at = now
-        if not platform.created_at:
-            platform.created_at = now
         with self._lock:
             platforms = self._data.setdefault("platforms", [])
-            found = False
             for index, item in enumerate(platforms):
                 if item.get("issuer") == str(platform.issuer) and item.get("client_id") == platform.client_id:
+                    current = LtiPlatform.model_validate(item)
+                    if current.created_at:
+                        platform.created_at = current.created_at
+                    else:
+                        platform.created_at = platform.created_at or now
+                    if not platform.owner_username:
+                        platform.owner_username = current.owner_username
+                    platform.read_only = current.read_only or read_only
                     platforms[index] = platform.model_dump(mode="json")
-                    found = True
-                    break
-            if not found:
-                platforms.append(platform.model_dump(mode="json"))
+                    self._write()
+                    return platform
+
+            if not platform.created_at:
+                platform.created_at = now
+            platform.read_only = read_only
+            platforms.append(platform.model_dump(mode="json"))
             self._write()
         return platform
+
+    def upsert_platform_for_user(
+        self,
+        payload: dict[str, Any],
+        *,
+        owner: LocalUser | str,
+        read_only: bool = False,
+    ) -> LtiPlatform:
+        if isinstance(owner, LocalUser):
+            owner_username = owner.username
+        else:
+            owner_username = str(owner).strip()
+        if not owner_username:
+            raise AdminStoreError("Identifiant propriétaire invalide.")
+
+        issuer = str(payload.get("issuer") or "").strip()
+        client_id = str(payload.get("client_id") or "").strip()
+        if not issuer or not client_id:
+            raise AdminStoreError("Issuer et clientId sont requis.")
+
+        with self._lock:
+            existing = self.get_platform(issuer, client_id)
+            if (
+                existing
+                and not existing.read_only
+                and existing.owner_username
+                and existing.owner_username != owner_username
+            ):
+                raise AdminStoreError(
+                    "Cette plateforme est déjà associée à un autre utilisateur."
+                )
+
+        return self.upsert_platform(
+            {**payload, "owner_username": owner_username}, read_only=read_only
+        )
 
     def delete_platform(self, issuer: str, client_id: str) -> bool:
         with self._lock:
