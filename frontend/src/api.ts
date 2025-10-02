@@ -215,6 +215,8 @@ export interface AdminUser {
   createdAt?: string | null;
   updatedAt?: string | null;
   fromEnv?: boolean;
+  invitationCode?: string | null;
+  allowedActivities?: string[];
 }
 
 export interface AdminSession {
@@ -243,6 +245,7 @@ export interface AdminInvitationCode {
   createdAt: string;
   consumedAt?: string | null;
   consumedBy?: string | null;
+  activityId?: string | null;
 }
 
 export interface AdminInvitationListResponse {
@@ -252,6 +255,7 @@ export interface AdminInvitationListResponse {
 export interface AdminInvitationCreatePayload {
   role: string;
   code?: string;
+  activityId?: string;
 }
 
 export interface AdminInvitationCreateResponse {
@@ -406,6 +410,7 @@ export interface ActivityConfig {
 
 export interface ActivityConfigResponse extends ActivityConfig {
   usesDefaultFallback?: boolean;
+  allowedActivities?: string[];
 }
 
 export interface ActivityImportPayload {
@@ -523,7 +528,27 @@ export interface ActivityGenerationJobOptions {
 
 export const activities = {
   getConfig: async (): Promise<ActivityConfigResponse> =>
-    fetchJson<ActivityConfigResponse>(`${API_BASE_URL}/activities-config`),
+    fetchJson<ActivityConfigResponse>(`${API_BASE_URL}/api/activities-config`, {
+      credentials: "include",
+    }),
+};
+
+export interface StudentActivityJoinResponse {
+  activityId: string;
+  allowedActivities: string[];
+  user: AdminUser;
+}
+
+export const studentActivities = {
+  join: async (invitationCode: string): Promise<StudentActivityJoinResponse> =>
+    fetchJson<StudentActivityJoinResponse>(`${API_BASE_URL}/api/activities/join`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ invitationCode }),
+      credentials: "include",
+    }),
 };
 
 export const landingPage = {

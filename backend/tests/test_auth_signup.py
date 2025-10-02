@@ -64,7 +64,7 @@ def test_student_signup_requires_invitation(tmp_path) -> None:
             )
             assert missing.status_code == 422
 
-    code = store.generate_invitation_code("student").code
+    code = store.generate_invitation_code("student", activity_id="activity-test").code
 
     with override_store(store):
         with TestClient(app) as client:

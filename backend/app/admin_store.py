@@ -135,6 +135,9 @@ class LocalUser(BaseModel):
     updated_at: str = Field(default_factory=_now_iso, alias="updatedAt")
     from_env: bool = Field(default=False, alias="fromEnv")
     invitation_code: str | None = Field(default=None, alias="invitationCode")
+    allowed_activity_ids: list[str] = Field(
+        default_factory=list, alias="allowedActivities"
+    )
 
     model_config = ConfigDict(populate_by_name=True, validate_assignment=True)
 
@@ -151,6 +154,16 @@ class LocalUser(BaseModel):
         if not normalized_roles:
             normalized_roles = ["admin"]
         object.__setattr__(self, "roles", normalized_roles)
+
+        allowed: list[str] = []
+        for item in self.allowed_activity_ids:
+            if not isinstance(item, str):
+                continue
+            trimmed = item.strip()
+            if not trimmed or trimmed in allowed:
+                continue
+            allowed.append(trimmed)
+        object.__setattr__(self, "allowed_activity_ids", allowed)
         return self
 
     def verify_password(self, password: str) -> bool:
@@ -168,6 +181,7 @@ class InvitationCode(BaseModel):
     created_at: str = Field(default_factory=_now_iso, alias="createdAt")
     consumed_at: str | None = Field(default=None, alias="consumedAt")
     consumed_by: str | None = Field(default=None, alias="consumedBy")
+    activity_id: str | None = Field(default=None, alias="activityId")
 
     @model_validator(mode="after")
     def _normalize(self) -> "InvitationCode":
@@ -177,6 +191,13 @@ class InvitationCode(BaseModel):
         object.__setattr__(self, "role", normalized_role)
         if self.consumed_by is not None:
             object.__setattr__(self, "consumed_by", self.consumed_by.strip() or None)
+        if self.activity_id is not None:
+            trimmed = self.activity_id.strip()
+            object.__setattr__(self, "activity_id", trimmed or None)
+        if normalized_role == "student" and not self.activity_id:
+            raise ValueError(
+                "Les codes étudiants doivent être associés à une activité."
+            )
         return self
 
 
@@ -442,6 +463,11 @@ class AdminStore:
         invitation = raw_item.get("invitation_code") or raw_item.get("invitationCode")
         if isinstance(invitation, str) and invitation.strip():
             payload["invitation_code"] = invitation.strip()
+        allowed = raw_item.get("allowed_activity_ids") or raw_item.get("allowedActivities")
+        if isinstance(allowed, list):
+            payload["allowed_activity_ids"] = [
+                str(item).strip() for item in allowed if isinstance(item, str) and item.strip()
+            ]
         try:
             return LocalUser.model_validate(payload)
         except ValidationError:
@@ -610,6 +636,7 @@ class AdminStore:
         is_active: bool = True,
         from_env: bool = False,
         invitation_code: str | None = None,
+        allowed_activity_ids: Iterable[str] | None = None,
     ) -> LocalUser:
         username_value = username.strip()
         if not username_value:
@@ -629,6 +656,12 @@ class AdminStore:
             ]
         if invitation_code:
             payload["invitation_code"] = invitation_code.strip()
+        if allowed_activity_ids is not None:
+            payload["allowed_activity_ids"] = [
+                str(item).strip()
+                for item in allowed_activity_ids
+                if isinstance(item, str) and item.strip()
+            ]
 
         record = LocalUser.model_validate(payload)
         with self._lock:
@@ -644,6 +677,7 @@ class AdminStore:
         role: str,
         *,
         invitation_code: str | None = None,
+        activity_id: str | None = None,
     ) -> LocalUser:
         normalized_role = role.strip().lower()
         if normalized_role not in {"creator", "student"}:
@@ -656,17 +690,28 @@ class AdminStore:
             raise AdminStoreError("Un compte avec ce nom existe déjà.")
 
         invitation_value: str | None = None
+        allowed_ids: list[str] = []
+        additional_activity = (
+            activity_id.strip() if isinstance(activity_id, str) and activity_id.strip() else None
+        )
+
         if invitation_code and invitation_code.strip():
             consumed = self.consume_invitation(
                 invitation_code.strip(),
                 username=username_value,
                 role=normalized_role,
+                activity_id=additional_activity,
             )
             invitation_value = consumed.code
+            if consumed.activity_id:
+                allowed_ids.append(consumed.activity_id)
         elif normalized_role == "student":
             raise AdminStoreError(
                 "Un code d'invitation valide est requis pour créer un compte étudiant."
             )
+
+        if additional_activity and additional_activity not in allowed_ids:
+            allowed_ids.append(additional_activity)
 
         return self.create_user(
             username_value,
@@ -675,10 +720,15 @@ class AdminStore:
             is_active=True,
             from_env=False,
             invitation_code=invitation_value,
+            allowed_activity_ids=allowed_ids,
         )
 
     def generate_invitation_code(
-        self, role: str, *, code: str | None = None
+        self,
+        role: str,
+        *,
+        code: str | None = None,
+        activity_id: str | None = None,
     ) -> InvitationCode:
         normalized_role = role.strip().lower()
         if normalized_role not in {"creator", "student"}:
@@ -687,6 +737,14 @@ class AdminStore:
         requested_code = code.strip() if isinstance(code, str) else None
         if requested_code == "":
             requested_code = None
+
+        activity_value = activity_id.strip() if isinstance(activity_id, str) else None
+        if activity_value == "":
+            activity_value = None
+        if normalized_role == "student" and not activity_value:
+            raise AdminStoreError(
+                "Un code d'invitation étudiant doit être associé à une activité."
+            )
 
         with self._lock:
             records = self._data.setdefault("invitation_codes", [])
@@ -711,7 +769,9 @@ class AdminStore:
                         "Impossible de générer un code d'invitation unique."
                     )
 
-            invitation = InvitationCode(code=candidate, role=normalized_role)
+            invitation = InvitationCode(
+                code=candidate, role=normalized_role, activity_id=activity_value
+            )
             records.append(invitation.model_dump(by_alias=True, mode="json"))
             self._write()
             return invitation
@@ -786,12 +846,16 @@ class AdminStore:
         *,
         username: str | None = None,
         role: str | None = None,
+        activity_id: str | None = None,
     ) -> InvitationCode:
         value = code.strip()
         if not value:
             raise AdminStoreError("Le code d'invitation ne peut pas être vide.")
 
         normalized_role = role.strip().lower() if isinstance(role, str) else None
+        activity_value = activity_id.strip() if isinstance(activity_id, str) else None
+        if activity_value == "":
+            activity_value = None
 
         with self._lock:
             records = self._data.setdefault("invitation_codes", [])
@@ -806,6 +870,16 @@ class AdminStore:
                     raise AdminStoreError("Ce code d'invitation ne correspond pas au rôle demandé.")
                 if current.consumed_at:
                     raise AdminStoreError("Ce code d'invitation a déjà été utilisé.")
+                if activity_value:
+                    if current.activity_id and current.activity_id != activity_value:
+                        raise AdminStoreError(
+                            "Ce code d'invitation est associé à une autre activité."
+                        )
+                    current = current.model_copy(update={"activity_id": activity_value})
+                if current.role == "student" and not current.activity_id:
+                    raise AdminStoreError(
+                        "Ce code d'invitation est incomplet: aucune activité associée."
+                    )
                 updated = current.model_copy(
                     update={
                         "consumed_at": _now_iso(),
@@ -817,6 +891,42 @@ class AdminStore:
                 return updated
 
         raise AdminStoreError("Code d'invitation introuvable ou invalide.")
+
+    def merge_allowed_activities(
+        self, username: str, activity_ids: Iterable[str]
+    ) -> LocalUser:
+        username_value = username.strip()
+        if not username_value:
+            raise AdminStoreError("Compte administrateur introuvable.")
+
+        additions = [
+            str(item).strip() for item in activity_ids if isinstance(item, str) and item.strip()
+        ]
+        if not additions:
+            user = self.get_user(username_value)
+            if not user:
+                raise AdminStoreError("Compte administrateur introuvable.")
+            return user
+
+        with self._lock:
+            users = self._data.setdefault("local_users", [])
+            for index, item in enumerate(users):
+                if item.get("username") != username_value:
+                    continue
+                current = LocalUser.model_validate(item)
+                merged = _unique([*current.allowed_activity_ids, *additions])
+                updated = current.model_copy(
+                    update={
+                        "allowed_activity_ids": merged,
+                        "updated_at": _now_iso(),
+                        "from_env": False,
+                    }
+                )
+                users[index] = updated.model_dump()
+                self._write()
+                return updated
+
+        raise AdminStoreError("Compte administrateur introuvable.")
 
     # ------------------------------------------------------------------
     # LTI users statistics management

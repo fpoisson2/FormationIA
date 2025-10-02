@@ -820,6 +820,7 @@ class InvitationCodeCreateRequest(BaseModel):
 
     role: str = Field(..., min_length=1, max_length=32)
     code: str | None = Field(default=None, min_length=1, max_length=128)
+    activity_id: str | None = Field(default=None, alias="activityId", max_length=128)
 
     @model_validator(mode="after")
     def _normalize(self) -> "InvitationCodeCreateRequest":
@@ -830,6 +831,25 @@ class InvitationCodeCreateRequest(BaseModel):
         if self.code is not None:
             trimmed = self.code.strip()
             object.__setattr__(self, "code", trimmed or None)
+        if self.activity_id is not None:
+            trimmed_activity = self.activity_id.strip()
+            object.__setattr__(self, "activity_id", trimmed_activity or None)
+        if normalized_role == "student" and not self.activity_id:
+            raise ValueError("activityId est requis pour un code étudiant.")
+        return self
+
+
+class ActivityJoinRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    invitation_code: str = Field(..., alias="invitationCode", min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "ActivityJoinRequest":
+        trimmed = self.invitation_code.strip()
+        if not trimmed:
+            raise ValueError("invitationCode ne peut pas être vide.")
+        object.__setattr__(self, "invitation_code", trimmed)
         return self
 
 
@@ -1043,6 +1063,7 @@ def _normalize_activities_payload(
         normalized_activity = validated.model_dump(by_alias=True, exclude_none=True)
         _ensure_step_sequence_structure(normalized_activity)
         normalized.append(normalized_activity)
+    _validate_activity_invitation_codes(normalized, error_status=error_status)
     return normalized
 
 
@@ -1060,6 +1081,10 @@ def _load_activities_config() -> dict[str, Any]:
             }
         activities: list[dict[str, Any]] = activities_from_files
         _set_deep_link_catalog(activities)
+        try:
+            _set_activity_invitation_catalog(activities)
+        except ValueError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {
             "activities": activities,
             "usesDefaultFallback": False,
@@ -1112,6 +1137,10 @@ def _load_activities_config() -> dict[str, Any]:
     activities = _normalize_activities_payload(activities, error_status=500)
 
     _set_deep_link_catalog(activities)
+    try:
+        _set_activity_invitation_catalog(activities)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         generation_config = ActivityGenerationConfig.model_validate(
@@ -1146,6 +1175,9 @@ def _save_activities_config(config: dict[str, Any]) -> None:
         )
 
     normalized_activities = _normalize_activities_payload(activities, error_status=400)
+    invitation_index = _validate_activity_invitation_codes(
+        normalized_activities, error_status=400
+    )
 
     generation_data = config.get("activityGeneration")
     generation_config: ActivityGenerationConfig
@@ -1190,6 +1222,7 @@ def _save_activities_config(config: dict[str, Any]) -> None:
 
     _sync_activity_files(normalized_activities)
     _set_deep_link_catalog(normalized_activities)
+    _set_activity_invitation_catalog(normalized_activities, index=invitation_index)
 
 
 def _persist_generated_activity(activity: Mapping[str, Any]) -> dict[str, Any]:
@@ -2332,6 +2365,15 @@ class ActivityPayload(BaseModel):
     step_sequence: list[StepDefinitionPayload] | None = Field(
         default=None, alias="stepSequence"
     )
+    invitation_code: str | None = Field(default=None, alias="invitationCode")
+
+    @model_validator(mode="after")
+    def _normalize_invitation(self) -> "ActivityPayload":
+        if self.invitation_code is None:
+            return self
+        trimmed = self.invitation_code.strip()
+        object.__setattr__(self, "invitation_code", trimmed or None)
+        return self
 
 
 class ActivityGenerationConfig(BaseModel):
@@ -2511,6 +2553,8 @@ _DEFAULT_DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = [
 _DEEP_LINK_ACTIVITY_LOCK = Lock()
 DEEP_LINK_ACTIVITIES: list[dict[str, Any]] = []
 _DEEP_LINK_ACTIVITY_MAP: dict[str, dict[str, Any]] = {}
+_ACTIVITY_INVITATION_LOCK = Lock()
+_ACTIVITY_INVITATION_INDEX: dict[str, str] = {}
 
 
 def _string_or_none(value: Any) -> str | None:
@@ -2591,6 +2635,57 @@ def _extract_deep_link_activity(activity: Mapping[str, Any]) -> dict[str, Any] |
     }
 
 
+def _build_activity_invitation_index(
+    activities: Sequence[Mapping[str, Any]]
+) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for entry in activities:
+        if not isinstance(entry, Mapping):
+            continue
+        code_raw = entry.get("invitationCode")
+        code = _string_or_none(code_raw)
+        if code is None:
+            if isinstance(code_raw, str) or code_raw is not None:
+                entry.pop("invitationCode", None)
+            continue
+        entry["invitationCode"] = code
+        activity_id = _string_or_none(entry.get("id"))
+        if not activity_id:
+            raise ValueError(
+                "Les activités associées à invitationCode doivent définir un champ id non vide."
+            )
+        if code in index and index[code] != activity_id:
+            raise ValueError(
+                f"Le code d'invitation '{code}' est attribué à plusieurs activités."
+            )
+        index[code] = activity_id
+    return index
+
+
+def _validate_activity_invitation_codes(
+    activities: list[dict[str, Any]], *, error_status: int
+) -> dict[str, str]:
+    try:
+        return _build_activity_invitation_index(activities)
+    except ValueError as exc:
+        raise HTTPException(status_code=error_status, detail=str(exc)) from exc
+
+
+def _set_activity_invitation_catalog(
+    activities: Sequence[Mapping[str, Any]] | None,
+    *,
+    index: Mapping[str, str] | None = None,
+) -> None:
+    if not activities:
+        with _ACTIVITY_INVITATION_LOCK:
+            _ACTIVITY_INVITATION_INDEX.clear()
+        return
+    resolved_index = dict(index) if index is not None else _build_activity_invitation_index(activities)
+    with _ACTIVITY_INVITATION_LOCK:
+        _ACTIVITY_INVITATION_INDEX.clear()
+        _ACTIVITY_INVITATION_INDEX.update(resolved_index)
+
+
 def _set_deep_link_catalog(custom_activities: Sequence[Mapping[str, Any]] | None) -> None:
     merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -2622,6 +2717,7 @@ def _set_deep_link_catalog(custom_activities: Sequence[Mapping[str, Any]] | None
 
 def _initialize_deep_link_catalog() -> None:
     _set_deep_link_catalog(None)
+    _set_activity_invitation_catalog(None)
     try:
         config = _load_activities_config()
     except HTTPException:
@@ -3095,6 +3191,50 @@ def _clear_admin_cookie(response: Response) -> None:
     )
 
 
+def _authenticate_local_user_from_request(
+    request: Request,
+    store: AdminStore,
+    *,
+    optional: bool = False,
+) -> LocalUser | None:
+    if not _ADMIN_AUTH_SECRET:
+        if optional:
+            return None
+        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
+
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    token: str | None = None
+    provided_credentials = False
+    if auth_header:
+        provided_credentials = True
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        cookie_token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
+        if cookie_token:
+            token = cookie_token
+            provided_credentials = True
+
+    if not token:
+        if optional and not provided_credentials:
+            return None
+        raise HTTPException(status_code=401, detail="Authentification administrateur requise.")
+
+    try:
+        username, expires_at = decode_admin_token(token, _ADMIN_AUTH_SECRET)
+    except AdminAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    user = store.get_user(username)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="Compte administrateur introuvable ou inactif.")
+
+    request.state.admin_user = user
+    request.state.admin_token_exp = expires_at.isoformat().replace("+00:00", "Z")
+    request.state.admin_token = token
+    return user
+
+
 def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
     return {
         "username": user.username,
@@ -3104,6 +3244,7 @@ def _serialize_local_user(user: LocalUser) -> dict[str, Any]:
         "updatedAt": user.updated_at,
         "fromEnv": user.from_env,
         "invitationCode": user.invitation_code,
+        "allowedActivities": list(user.allowed_activity_ids),
     }
 
 
@@ -3114,6 +3255,7 @@ def _serialize_invitation_code(invitation: InvitationCode) -> dict[str, Any]:
         "createdAt": invitation.created_at,
         "consumedAt": invitation.consumed_at,
         "consumedBy": invitation.consumed_by,
+        "activityId": invitation.activity_id,
     }
 
 
@@ -3274,6 +3416,40 @@ def _admin_lti_user_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _filter_activities_for_user(
+    config: dict[str, Any], user: LocalUser | None
+) -> dict[str, Any]:
+    result = deepcopy(config)
+    activities = result.get("activities")
+    if not isinstance(activities, list):
+        result["activities"] = []
+        if user:
+            result["allowedActivities"] = list(user.allowed_activity_ids)
+        return result
+
+    if user is None:
+        return result
+
+    allowed = list(user.allowed_activity_ids)
+    result["allowedActivities"] = allowed
+
+    if user.has_role("admin"):
+        return result
+
+    if user.has_role("student"):
+        allowed_set = {item for item in allowed if item}
+        if allowed_set:
+            filtered = [
+                activity
+                for activity in activities
+                if _string_or_none(activity.get("id")) in allowed_set
+            ]
+        else:
+            filtered = []
+        result["activities"] = filtered
+    return result
+
+
 def _config_to_payload(config: LTIPlatformConfig) -> dict[str, Any]:
     return {
         "issuer": str(config.issuer),
@@ -3293,29 +3469,9 @@ def _require_authenticated_local_user(
     request: Request,
     store: AdminStore = Depends(_require_admin_store),
 ) -> LocalUser:
-    if not _ADMIN_AUTH_SECRET:
-        raise HTTPException(status_code=503, detail="ADMIN_AUTH_SECRET doit être configuré.")
-
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    token: str | None = None
-    if auth_header and auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-    if not token:
-        token = request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
-    if not token:
+    user = _authenticate_local_user_from_request(request, store, optional=False)
+    if user is None:  # pragma: no cover - defensive
         raise HTTPException(status_code=401, detail="Authentification administrateur requise.")
-
-    try:
-        username, expires_at = decode_admin_token(token, _ADMIN_AUTH_SECRET)
-    except AdminAuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
-    user = store.get_user(username)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=403, detail="Compte administrateur introuvable ou inactif.")
-    request.state.admin_user = user
-    request.state.admin_token_exp = expires_at.isoformat().replace("+00:00", "Z")
-    request.state.admin_token = token
     return user
 
 
@@ -3533,7 +3689,9 @@ def admin_create_invitation(
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     try:
-        invitation = store.generate_invitation_code(payload.role, code=payload.code)
+        invitation = store.generate_invitation_code(
+            payload.role, code=payload.code, activity_id=payload.activity_id
+        )
     except AdminStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"invitation": _serialize_invitation_code(invitation)}
@@ -3766,9 +3924,14 @@ def admin_list_lti_users(
 
 @app.get("/api/activities-config")
 @app.get("/activities-config")
-def get_activities_config() -> dict[str, Any]:
+def get_activities_config(
+    request: Request,
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
     """Endpoint public renvoyant la configuration des activités."""
-    return _load_activities_config()
+    config = _load_activities_config()
+    user = _authenticate_local_user_from_request(request, store, optional=True)
+    return _filter_activities_for_user(config, user)
 
 
 @app.get("/api/landing-page")
@@ -3778,12 +3941,55 @@ def get_landing_page_config_endpoint() -> dict[str, Any]:
     return _load_landing_page_config()
 
 
+@app.post("/api/activities/join")
+def join_activity(
+    payload: ActivityJoinRequest,
+    request: Request,
+    user: LocalUser = Depends(_require_authenticated_local_user),
+    store: AdminStore = Depends(_require_admin_store),
+) -> dict[str, Any]:
+    if not user.has_role("student"):
+        raise HTTPException(
+            status_code=403,
+            detail="Seuls les comptes étudiants peuvent rejoindre une activité via un code.",
+        )
+    try:
+        invitation = store.consume_invitation(
+            payload.invitation_code,
+            username=user.username,
+            role="student",
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    activity_id = invitation.activity_id
+    if not activity_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Ce code n'est associé à aucune activité.",
+        )
+
+    try:
+        updated_user = store.merge_allowed_activities(user.username, [activity_id])
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    request.state.admin_user = updated_user
+
+    return {
+        "activityId": activity_id,
+        "allowedActivities": list(updated_user.allowed_activity_ids),
+        "user": _serialize_local_user(updated_user),
+    }
+
+
 @admin_router.get("/activities")
 def admin_get_activities_config(
-    _: LocalUser = Depends(_require_admin_user),
+    user: LocalUser = Depends(_require_admin_user),
 ) -> dict[str, Any]:
     """Récupère la configuration des activités."""
-    return _load_activities_config()
+    config = _load_activities_config()
+    return _filter_activities_for_user(config, user)
 
 
 @admin_router.post("/activities")

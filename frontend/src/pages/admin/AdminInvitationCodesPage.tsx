@@ -14,6 +14,11 @@ const ROLE_LABELS: Record<string, string> = {
 
 type InvitationRole = "student" | "creator";
 
+interface ActivityOption {
+  id: string;
+  label: string;
+}
+
 const formatDateTime = (value: string | null | undefined): string => {
   if (!value) {
     return "—";
@@ -43,19 +48,62 @@ export function AdminInvitationCodesPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [creatingRole, setCreatingRole] = useState<InvitationRole | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
+  const [selectedActivityId, setSelectedActivityId] = useState<string>("");
 
   const fetchInvitations = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await admin.invitations.list(token);
-      setInvitations(normalizeInvitations(response.invitations));
+      const [invitationResponse, activitiesResponse] = await Promise.all([
+        admin.invitations.list(token),
+        admin.activities.get(token),
+      ]);
+      setInvitations(normalizeInvitations(invitationResponse.invitations));
+
+      const rawActivities = Array.isArray(activitiesResponse.activities)
+        ? (activitiesResponse.activities as Array<Record<string, any>>)
+        : [];
+      const options = rawActivities
+        .map((activity) => {
+          const idValue =
+            typeof activity?.id === "string" && activity.id.trim().length > 0
+              ? activity.id.trim()
+              : null;
+          if (!idValue) {
+            return null;
+          }
+          const card = activity?.card as Record<string, any> | undefined;
+          const cardTitle =
+            card && typeof card.title === "string" && card.title.trim().length > 0
+              ? card.title.trim()
+              : null;
+          const activityTitle =
+            typeof activity?.title === "string" && activity.title.trim().length > 0
+              ? activity.title.trim()
+              : null;
+          return {
+            id: idValue,
+            label: cardTitle ?? activityTitle ?? idValue,
+          } as ActivityOption;
+        })
+        .filter((option): option is ActivityOption => Boolean(option));
+      options.sort((a, b) => a.label.localeCompare(b.label, "fr", { sensitivity: "base" }));
+      setActivityOptions(options);
+      setSelectedActivityId((current) => {
+        if (current && options.some((option) => option.id === current)) {
+          return current;
+        }
+        return options[0]?.id ?? "";
+      });
     } catch (err) {
       const message =
         err instanceof Error
           ? err.message
-          : "Impossible de récupérer les codes d'invitation.";
+          : "Impossible de récupérer les codes d'invitation ou la liste des activités.";
       setError(message);
+      setActivityOptions([]);
+      setSelectedActivityId("");
     } finally {
       setLoading(false);
     }
@@ -77,11 +125,24 @@ export function AdminInvitationCodesPage(): JSX.Element {
     };
   }, [copiedCode]);
 
-  const handleGenerate = async (role: InvitationRole) => {
+  const handleGenerate = async (role: InvitationRole, activityId?: string) => {
     setCreatingRole(role);
     setError(null);
+    const targetActivityId =
+      role === "student"
+        ? (activityId ?? "").trim() || selectedActivityId
+        : undefined;
+    if (role === "student" && !targetActivityId) {
+      setError("Sélectionne une activité avant de générer un code étudiant.");
+      setCreatingRole(null);
+      return;
+    }
     try {
-      const response = await admin.invitations.create({ role }, token);
+      const payload: { role: string; activityId?: string } = { role };
+      if (role === "student" && targetActivityId) {
+        payload.activityId = targetActivityId;
+      }
+      const response = await admin.invitations.create(payload, token);
       setInvitations((current) =>
         normalizeInvitations([response.invitation, ...current])
       );
@@ -119,6 +180,14 @@ export function AdminInvitationCodesPage(): JSX.Element {
     [invitations]
   );
 
+  const activityLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    activityOptions.forEach((option) => {
+      map.set(option.id, option.label);
+    });
+    return map;
+  }, [activityOptions]);
+
   return (
     <div className="space-y-6">
       <header className="border-b border-[color:var(--brand-charcoal)]/10 pb-4">
@@ -132,19 +201,39 @@ export function AdminInvitationCodesPage(): JSX.Element {
       </header>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              void handleGenerate("student");
-            }}
-            disabled={creatingRole === "student"}
-            className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-400"
-          >
-            {creatingRole === "student"
-              ? "Génération…"
-              : "Nouveau code étudiant"}
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <select
+              value={selectedActivityId}
+              onChange={(event) => setSelectedActivityId(event.target.value)}
+              disabled={creatingRole === "student" || activityOptions.length === 0}
+              className="w-full rounded-full border border-[color:var(--brand-charcoal)]/20 bg-white px-4 py-2 text-sm text-[color:var(--brand-charcoal)] shadow-sm transition focus:border-[color:var(--brand-red)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-red)]/20 sm:w-64"
+            >
+              {activityOptions.length === 0 ? (
+                <option value="">Aucune activité disponible</option>
+              ) : (
+                activityOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))
+              )}
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                void handleGenerate("student", selectedActivityId);
+              }}
+              disabled={
+                creatingRole === "student" || !selectedActivityId || activityOptions.length === 0
+              }
+              className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+            >
+              {creatingRole === "student"
+                ? "Génération…"
+                : "Nouveau code étudiant"}
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -196,6 +285,9 @@ export function AdminInvitationCodesPage(): JSX.Element {
                   Rôle
                 </th>
                 <th scope="col" className="px-4 py-3 font-semibold">
+                  Activité
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
                   Statut
                 </th>
                 <th scope="col" className="px-4 py-3 font-semibold">
@@ -213,6 +305,9 @@ export function AdminInvitationCodesPage(): JSX.Element {
                   ? `Utilisé par ${invitation.consumedBy ?? "un compte"}`
                   : "Disponible";
                 const isCopied = copiedCode === invitation.code;
+                const activityLabel = invitation.activityId
+                  ? activityLabelById.get(invitation.activityId) ?? invitation.activityId
+                  : "—";
                 return (
                   <tr key={`${invitation.code}-${invitation.createdAt}`} className="align-top">
                     <td className="px-4 py-4 font-mono text-sm font-semibold text-[color:var(--brand-black)]">
@@ -220,6 +315,9 @@ export function AdminInvitationCodesPage(): JSX.Element {
                     </td>
                     <td className="px-4 py-4 text-[color:var(--brand-charcoal)]">
                       {roleLabel}
+                    </td>
+                    <td className="px-4 py-4 text-[color:var(--brand-charcoal)]">
+                      {activityLabel}
                     </td>
                     <td className="px-4 py-4 text-[color:var(--brand-charcoal)]">
                       {status}

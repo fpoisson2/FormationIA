@@ -186,7 +186,9 @@ def test_invitation_consumption_and_role_creation(tmp_path) -> None:
         store.create_user_with_role("etudfail", "StudentPwd1!", "student")
 
     invitation_creator = store.generate_invitation_code("creator", code="CREATOR-XYZ")
-    invitation_student = store.generate_invitation_code("student", code="STUDENT-ABC")
+    invitation_student = store.generate_invitation_code(
+        "student", code="STUDENT-ABC", activity_id="activity-xyz"
+    )
 
     with pytest.raises(AdminStoreError):
         store.create_user_with_role(
@@ -245,16 +247,21 @@ def test_admin_invitation_endpoints(tmp_path) -> None:
 
             created = client.post(
                 "/api/admin/invitations",
-                json={"role": "student"},
+                json={"role": "student", "activityId": "activity-demo"},
             )
             assert created.status_code == 201, created.text
             payload = created.json()
             assert payload["invitation"]["role"] == "student"
             assert payload["invitation"]["code"]
+            assert payload["invitation"]["activityId"] == "activity-demo"
 
             duplicate = client.post(
                 "/api/admin/invitations",
-                json={"role": "student", "code": payload["invitation"]["code"]},
+                json={
+                    "role": "student",
+                    "code": payload["invitation"]["code"],
+                    "activityId": "activity-demo",
+                },
             )
             assert duplicate.status_code == 400
 

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type FormEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -736,6 +737,8 @@ function ActivitySelector(): JSX.Element {
     token,
     logout: adminLogout,
     isProcessing: isAdminProcessing,
+    joinActivity,
+    activitiesRefreshToken,
   } = useAdminAuth();
   const displayName =
     context?.user?.name?.trim() ||
@@ -752,6 +755,10 @@ function ActivitySelector(): JSX.Element {
   const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
   const canLogout = isLTISession || isAdminAuthenticated;
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
+  const [isJoining, setIsJoining] = useState(false);
 
   const handleLogout = useCallback(async () => {
     if (isLoggingOut) {
@@ -784,6 +791,40 @@ function ActivitySelector(): JSX.Element {
     navigate,
     setEditMode,
   ]);
+
+  const handleJoinSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (isJoining) {
+        return;
+      }
+
+      const trimmed = joinCode.trim();
+      if (!trimmed) {
+        setJoinError("Entre un code d'invitation pour rejoindre l'activité.");
+        setJoinSuccess(null);
+        return;
+      }
+
+      setIsJoining(true);
+      setJoinError(null);
+      setJoinSuccess(null);
+      try {
+        await joinActivity(trimmed);
+        setJoinCode("");
+        await loadSavedConfig();
+        setJoinSuccess("Activité ajoutée à ta sélection !");
+      } catch (error) {
+        const message =
+          extractErrorMessage(error) ??
+          "Impossible de valider ce code pour le moment.";
+        setJoinError(message);
+      } finally {
+        setIsJoining(false);
+      }
+    },
+    [isJoining, joinCode, joinActivity, loadSavedConfig]
+  );
 
   const existingActivityIds = useMemo(
     () => editableActivities.map((activity) => activity.id),
@@ -1000,7 +1041,7 @@ function ActivitySelector(): JSX.Element {
 
   useEffect(() => {
     void loadSavedConfig();
-  }, [loadSavedConfig]);
+  }, [loadSavedConfig, activitiesRefreshToken]);
 
   const refreshGeneratedActivity = useCallback(
     async (activityId: string | null) => {
@@ -1774,6 +1815,10 @@ function ActivitySelector(): JSX.Element {
   };
 
   const isLogoutDisabled = isLoggingOut || isAdminProcessing;
+  const canJoinActivities =
+    isAdminAuthenticated &&
+    userRoles.includes("student") &&
+    !canAccessAdmin(userRoles);
   const adminActionControls = canShowAdminButton ? (
     <>
       {isEditMode ? (
@@ -1914,6 +1959,67 @@ function ActivitySelector(): JSX.Element {
               <p className="text-lg font-medium text-[color:var(--brand-charcoal)] md:text-xl">
                 Bienvenue <span className="font-semibold text-[color:var(--brand-black)]">{displayName}</span>
               </p>
+            </div>
+          ) : null}
+          {canJoinActivities && !isEditMode ? (
+            <div className="animate-section rounded-3xl border border-sky-200/80 bg-sky-50/90 p-6 text-sky-900 shadow-sm backdrop-blur">
+              <div className="flex flex-col gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-sky-700/80">
+                    Ajouter une activité
+                  </p>
+                  <p className="text-sm leading-relaxed">
+                    Saisis le code étudiant reçu pour débloquer une nouvelle activité dans cette sélection.
+                  </p>
+                </div>
+                <form
+                  className="flex flex-col gap-3 md:flex-row md:items-center"
+                  onSubmit={handleJoinSubmit}
+                >
+                  <input
+                    type="text"
+                    value={joinCode}
+                    onChange={(event) => {
+                      setJoinCode(event.target.value);
+                      setJoinError(null);
+                      setJoinSuccess(null);
+                    }}
+                    placeholder="Code d'invitation"
+                    className="w-full rounded-full border border-sky-300 bg-white/90 px-4 py-2 text-sm text-sky-900 shadow-sm transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 md:flex-1"
+                    disabled={isJoining}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isJoining}
+                    className="inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
+                  >
+                    {isJoining ? "Validation..." : "Rejoindre"}
+                  </button>
+                </form>
+                {joinError ? (
+                  <p className="text-sm text-red-700">{joinError}</p>
+                ) : null}
+                {joinSuccess ? (
+                  <p className="text-sm text-green-700">{joinSuccess}</p>
+                ) : null}
+                {Array.isArray(adminUser?.allowedActivities) &&
+                adminUser?.allowedActivities.length ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-sky-800">
+                    <span className="font-semibold uppercase tracking-wide text-sky-700/80">
+                      Activités débloquées
+                    </span>
+                    {adminUser.allowedActivities.map((activityId) => (
+                      <span
+                        key={activityId}
+                        className="rounded-full border border-sky-300 bg-white/80 px-2 py-1 font-semibold text-sky-700 shadow-sm"
+                      >
+                        {activityId}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : null}
           </>

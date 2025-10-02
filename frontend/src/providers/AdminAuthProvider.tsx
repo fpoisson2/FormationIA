@@ -11,6 +11,7 @@ import {
 
 import {
   admin,
+  studentActivities,
   type AdminAuthResponse,
   type AdminLoginPayload,
   type AdminMeResponse,
@@ -18,6 +19,7 @@ import {
   type AdminUser,
   type CreatorSignupPayload,
   type StudentSignupPayload,
+  type StudentActivityJoinResponse,
 } from "../api";
 
 type AdminAuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -37,6 +39,7 @@ interface StoredTestSession {
     roles: string[];
     isActive?: boolean;
     fromEnv?: boolean;
+    allowedActivities?: string[];
   };
 }
 
@@ -57,6 +60,9 @@ interface AdminAuthContextValue {
   applySession: (session: AdminSession) => void;
   startTestSession: () => AdminSession | null;
   setEditMode: (enabled: boolean) => void;
+  joinActivity: (invitationCode: string) => Promise<StudentActivityJoinResponse>;
+  requestActivitiesReload: () => void;
+  activitiesRefreshToken: number;
 }
 
 const STORAGE_KEY = "formationia.admin.session";
@@ -74,6 +80,7 @@ const TEST_SESSION_BLUEPRINT: AdminSession = {
     roles: ["admin"],
     isActive: true,
     fromEnv: true,
+    allowedActivities: [],
   },
 };
 
@@ -130,6 +137,9 @@ function readStoredTestSession(): AdminSession | null {
           typeof storedUser.fromEnv === "boolean"
             ? storedUser.fromEnv
             : TEST_SESSION_BLUEPRINT.user.fromEnv,
+        allowedActivities: Array.isArray(storedUser.allowedActivities)
+          ? storedUser.allowedActivities
+          : TEST_SESSION_BLUEPRINT.user.allowedActivities,
       },
     };
   } catch (error) {
@@ -168,6 +178,7 @@ function persistTestSession(session: AdminSession | null): void {
         roles: session.user.roles,
         isActive: session.user.isActive,
         fromEnv: session.user.fromEnv,
+        allowedActivities: session.user.allowedActivities,
       },
     };
     window.sessionStorage.setItem(TEST_STORAGE_KEY, JSON.stringify(payload));
@@ -196,11 +207,20 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [activitiesRefreshToken, setActivitiesRefreshToken] = useState(0);
+
+  const requestActivitiesReload = useCallback(() => {
+    setActivitiesRefreshToken((value) => value + 1);
+  }, []);
 
   const tokenRef = useRef<string | null>(token);
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
+  const expiresAtRef = useRef<string | null>(expiresAt);
+  useEffect(() => {
+    expiresAtRef.current = expiresAt;
+  }, [expiresAt]);
 
   const applySession = useCallback((session: AdminSession) => {
     setUser(session.user);
@@ -217,7 +237,8 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     } else {
       persistSession(null);
     }
-  }, []);
+    requestActivitiesReload();
+  }, [requestActivitiesReload]);
 
   useEffect(() => {
     if (isAdminTestMode) {
@@ -412,6 +433,52 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
     [applySession]
   );
 
+  const joinActivity = useCallback(
+    async (invitationCode: string): Promise<StudentActivityJoinResponse> => {
+      const trimmed = invitationCode.trim();
+      if (!trimmed) {
+        throw new Error("Un code d'invitation est requis.");
+      }
+
+      if (isAdminTestMode) {
+        const baseUser = user ?? TEST_SESSION_BLUEPRINT.user;
+        const currentAllowed = Array.isArray(baseUser.allowedActivities)
+          ? baseUser.allowedActivities
+          : [];
+        const updatedAllowed = Array.from(new Set([...currentAllowed, trimmed]));
+        const updatedRoles = baseUser.roles.includes("student")
+          ? baseUser.roles
+          : [...baseUser.roles, "student"];
+        const updatedUser: AdminUser = {
+          ...baseUser,
+          roles: updatedRoles,
+          allowedActivities: updatedAllowed,
+        };
+        const session: AdminSession = {
+          token: TEST_SESSION_BLUEPRINT.token,
+          expiresAt: null,
+          user: updatedUser,
+        };
+        applySession(session);
+        return {
+          activityId: trimmed,
+          allowedActivities: updatedAllowed,
+          user: updatedUser,
+        };
+      }
+
+      const response = await studentActivities.join(trimmed);
+      const session: AdminSession = {
+        token: tokenRef.current,
+        expiresAt: expiresAtRef.current,
+        user: response.user,
+      };
+      applySession(session);
+      return response;
+    },
+    [applySession, isAdminTestMode, user]
+  );
+
   const logout = useCallback(async () => {
     setIsProcessing(true);
     try {
@@ -430,9 +497,10 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       if (isAdminTestMode) {
         persistTestSession(null);
       }
+      requestActivitiesReload();
       setIsProcessing(false);
     }
-  }, []);
+  }, [isAdminTestMode, requestActivitiesReload]);
 
   const refresh = useCallback(async () => {
     setIsProcessing(true);
@@ -502,6 +570,9 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       applySession,
       startTestSession,
       setEditMode,
+      joinActivity,
+      requestActivitiesReload,
+      activitiesRefreshToken,
     }),
     [
       status,
@@ -511,6 +582,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       error,
       isProcessing,
       isEditMode,
+      isAdminTestMode,
       login,
       signupCreator,
       signupStudent,
@@ -519,6 +591,9 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps): JSX.Ele
       applySession,
       startTestSession,
       setEditMode,
+      joinActivity,
+      requestActivitiesReload,
+      activitiesRefreshToken,
     ]
   );
 
