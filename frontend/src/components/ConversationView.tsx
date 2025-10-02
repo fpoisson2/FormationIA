@@ -126,7 +126,7 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
                 <div className="mt-2 space-y-1 text-left text-[13px] leading-relaxed text-orange-800">
                   {reasoningSummaryLines.map((line, index) => (
                     <p key={index} className="whitespace-pre-wrap break-words">
-                      <strong>{line}</strong>
+                      {line}
                     </p>
                   ))}
                 </div>

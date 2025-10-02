@@ -6465,12 +6465,8 @@ def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: S
                 if reasoning_summary:
                     normalized_summary = _normalize_plain_text(reasoning_summary) or reasoning_summary.strip()
                     if normalized_summary:
-                        bold_lines = "\n".join(
-                            "**" + line + "**" if line else ""
-                            for line in normalized_summary.splitlines()
-                        ).strip("\n")
                         yield "\n\n<details>\n<summary>🧠 Résumé du raisonnement</summary>\n\n"
-                        yield bold_lines
+                        yield normalized_summary
                         yield "\n</details>"
         except HTTPException:
             raise
