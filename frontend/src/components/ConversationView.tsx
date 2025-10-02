@@ -1,6 +1,49 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ConversationMessage, ConversationMessageToolCall } from "../api";
 
+interface FormattedSegment {
+  content: string;
+  bold: boolean;
+}
+
+function splitBoldSegments(line: string): FormattedSegment[] {
+  const segments: FormattedSegment[] = [];
+  const boldPattern = /\*\*(.+?)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = boldPattern.exec(line)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({
+        content: line.slice(lastIndex, match.index),
+        bold: false,
+      });
+    }
+
+    const rawContent = match[1];
+    const trimmedContent = rawContent.trim();
+    segments.push({
+      content: trimmedContent || rawContent,
+      bold: true,
+    });
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < line.length) {
+    segments.push({
+      content: line.slice(lastIndex),
+      bold: false,
+    });
+  }
+
+  if (segments.length === 0) {
+    segments.push({ content: line, bold: false });
+  }
+
+  return segments;
+}
+
 interface ConversationViewProps {
   messages: ConversationMessage[];
   isLoading?: boolean;
@@ -124,11 +167,28 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
                   🧠 Résumé du raisonnement
                 </summary>
                 <div className="mt-2 space-y-1 text-left text-[13px] leading-relaxed text-orange-800">
-                  {reasoningSummaryLines.map((line, index) => (
-                    <p key={index} className="whitespace-pre-wrap break-words">
-                      {line}
-                    </p>
-                  ))}
+                  {reasoningSummaryLines.map((line, index) => {
+                    const segments = splitBoldSegments(line);
+                    return (
+                      <p key={index} className="whitespace-pre-wrap break-words">
+                        {segments.map((segment, segmentIndex) => {
+                          if (!segment.content) {
+                            return null;
+                          }
+                          if (segment.bold) {
+                            return (
+                              <strong key={`${index}-${segmentIndex}`} className="font-semibold">
+                                {segment.content}
+                              </strong>
+                            );
+                          }
+                          return (
+                            <span key={`${index}-${segmentIndex}`}>{segment.content}</span>
+                          );
+                        })}
+                      </p>
+                    );
+                  })}
                 </div>
               </details>
             )}
