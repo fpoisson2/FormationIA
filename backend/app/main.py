@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import deque
+from collections import OrderedDict, deque
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from openai import BadRequestError, OpenAI as ResponsesClient, omit
 from openai.lib.streaming.responses import ResponseStream
+from openai.lib.streaming.responses import _events as streaming_events
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .admin_store import (
@@ -4847,7 +4848,47 @@ def _run_activity_generation_job(job_id: str) -> None:
 
         streaming_assistant_placeholder: dict[str, Any] | None = None
         streaming_reasoning_placeholder: dict[str, Any] | None = None
-        streaming_function_placeholders: dict[str, dict[str, Any]] = {}
+        streaming_function_placeholders: OrderedDict[int, dict[str, Any]] = OrderedDict()
+        last_stream_update = 0.0
+
+        def _maybe_emit_streaming_update(force: bool = False) -> None:
+            nonlocal last_stream_update
+            if not (
+                streaming_assistant_placeholder
+                or streaming_reasoning_placeholder
+                or streaming_function_placeholders
+            ):
+                return
+
+            now = time.monotonic()
+            if not force and now - last_stream_update < 0.2:
+                return
+
+            last_stream_update = now
+            preview_conversation = [deepcopy(item) for item in conversation]
+
+            if streaming_assistant_placeholder is not None:
+                preview_conversation.append(deepcopy(streaming_assistant_placeholder))
+
+            if streaming_function_placeholders:
+                for _, placeholder in sorted(streaming_function_placeholders.items()):
+                    preview_conversation.append(deepcopy(placeholder))
+
+            if streaming_reasoning_placeholder is not None:
+                preview_conversation.append(deepcopy(streaming_reasoning_placeholder))
+
+            status_message = (
+                f"Génération en cours ({iteration}/{MAX_ACTIVITY_GENERATION_ITERATIONS})."
+            )
+
+            _update_activity_generation_job(
+                job_id,
+                status="running",
+                message=status_message,
+                conversation=preview_conversation,
+                cached_steps=cached_steps,
+                conversation_id=conversation_id,
+            )
 
         responses_client = getattr(client, "responses", None)
         if responses_client is None:
@@ -4863,7 +4904,180 @@ def _run_activity_generation_job(job_id: str) -> None:
             "reasoning": {"effort": thinking, "summary": "auto"},
         }
 
-        response = responses_client.create(**request_kwargs)
+        try:
+            with _responses_create_stream(
+                responses_client,
+                **request_kwargs,
+            ) as stream:
+                for event in stream:
+                    if isinstance(event, streaming_events.ResponseErrorEvent):
+                        error_message = "Erreur du service de génération."
+                        details = getattr(event, "error", None)
+                        if isinstance(details, Mapping):
+                            error_message = (
+                                str(details.get("message")) or error_message
+                            )
+                        raise RuntimeError(error_message)
+
+                    if isinstance(event, streaming_events.ResponseFailedEvent):
+                        failure_message = "Erreur du service de génération."
+                        details = getattr(event, "error", None)
+                        if isinstance(details, Mapping):
+                            failure_message = (
+                                str(details.get("message")) or failure_message
+                            )
+                        raise RuntimeError(failure_message)
+
+                    if isinstance(event, streaming_events.ResponseTextDeltaEvent):
+                        text_snapshot = event.snapshot or ""
+                        streaming_assistant_placeholder = {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": text_snapshot}
+                            ],
+                        }
+                        _maybe_emit_streaming_update()
+                        continue
+
+                    if isinstance(event, streaming_events.ResponseTextDoneEvent):
+                        final_text = event.text or ""
+                        streaming_assistant_placeholder = {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": final_text}
+                            ],
+                        }
+                        _maybe_emit_streaming_update(force=True)
+                        continue
+
+                    if isinstance(
+                        event, streaming_events.ResponseReasoningSummaryTextDeltaEvent
+                    ):
+                        chunk = event.delta or ""
+                        if streaming_reasoning_placeholder is None:
+                            streaming_reasoning_placeholder = {
+                                "type": "reasoning_summary",
+                                "role": "assistant",
+                                "content": chunk,
+                            }
+                        else:
+                            existing = streaming_reasoning_placeholder.get("content", "")
+                            streaming_reasoning_placeholder["content"] = existing + chunk
+                        _maybe_emit_streaming_update()
+                        continue
+
+                    if isinstance(
+                        event, streaming_events.ResponseReasoningSummaryTextDoneEvent
+                    ):
+                        final_summary = event.text or ""
+                        streaming_reasoning_placeholder = {
+                            "type": "reasoning_summary",
+                            "role": "assistant",
+                            "content": final_summary,
+                        }
+                        _maybe_emit_streaming_update(force=True)
+                        continue
+
+                    if isinstance(event, streaming_events.ResponseReasoningTextDeltaEvent):
+                        reasoning_chunk = event.text or ""
+                        if not reasoning_chunk:
+                            continue
+                        if streaming_reasoning_placeholder is None:
+                            streaming_reasoning_placeholder = {
+                                "type": "reasoning_summary",
+                                "role": "assistant",
+                                "content": reasoning_chunk,
+                            }
+                        else:
+                            existing = streaming_reasoning_placeholder.get("content", "")
+                            streaming_reasoning_placeholder["content"] = (
+                                existing + reasoning_chunk
+                            )
+                        _maybe_emit_streaming_update()
+                        continue
+
+                    if isinstance(event, streaming_events.ResponseReasoningTextDoneEvent):
+                        final_reasoning = event.text or ""
+                        if final_reasoning:
+                            streaming_reasoning_placeholder = {
+                                "type": "reasoning_summary",
+                                "role": "assistant",
+                                "content": final_reasoning,
+                            }
+                            _maybe_emit_streaming_update(force=True)
+                        continue
+
+                    if isinstance(
+                        event, streaming_events.ResponseFunctionCallArgumentsDeltaEvent
+                    ):
+                        fallback_seed = f"call_{iteration}_{event.output_index}"
+                        call_id = _normalize_tool_call_identifier(
+                            event.item_id,
+                            fallback_seed=fallback_seed,
+                            prefix="call",
+                        )
+                        placeholder = streaming_function_placeholders.get(
+                            event.output_index
+                        )
+                        if placeholder is None:
+                            placeholder = {
+                                "type": "function_call",
+                                "role": "assistant",
+                                "call_id": call_id,
+                                "name": "outil",
+                                "arguments": "",
+                            }
+                            streaming_function_placeholders[event.output_index] = placeholder
+                        placeholder["call_id"] = call_id
+                        placeholder["arguments"] = event.snapshot or ""
+                        _maybe_emit_streaming_update()
+                        continue
+
+                    if isinstance(
+                        event, streaming_events.ResponseFunctionCallArgumentsDoneEvent
+                    ):
+                        fallback_seed = f"call_{iteration}_{event.output_index}"
+                        call_id = _normalize_tool_call_identifier(
+                            event.item_id,
+                            fallback_seed=fallback_seed,
+                            prefix="call",
+                        )
+                        placeholder = streaming_function_placeholders.get(
+                            event.output_index
+                        )
+                        if placeholder is None:
+                            placeholder = {
+                                "type": "function_call",
+                                "role": "assistant",
+                                "call_id": call_id,
+                                "arguments": "",
+                            }
+                            streaming_function_placeholders[event.output_index] = placeholder
+                        placeholder["call_id"] = call_id
+                        arguments_value = event.arguments
+                        if isinstance(arguments_value, str):
+                            placeholder["arguments"] = arguments_value
+                        else:
+                            try:
+                                placeholder["arguments"] = json.dumps(
+                                    arguments_value, ensure_ascii=False
+                                )
+                            except TypeError:
+                                placeholder["arguments"] = json.dumps(
+                                    arguments_value, default=str
+                                )
+                        event_name = getattr(event, "name", None)
+                        if isinstance(event_name, str) and event_name:
+                            placeholder["name"] = event_name
+                        _maybe_emit_streaming_update(force=True)
+                        continue
+
+                response = stream.get_final_response()
+        except Exception:
+            # En cas d'erreur, on laisse le bloc d'exception extérieur gérer la suite.
+            raise
     except Exception as exc:  # pragma: no cover - defensive
         handled_missing_tool_output = False
         if isinstance(exc, BadRequestError):

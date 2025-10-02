@@ -423,9 +423,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
     const shouldStream = Boolean(
       !jobStatus ||
-        jobStatus.status === "running" ||
         jobStatus.awaitingUserAction ||
-        jobStatus.pendingToolCall
+        jobStatus.pendingToolCall ||
+        (jobStatus.status !== "complete" && jobStatus.status !== "error")
     );
 
     if (!shouldStream) {
@@ -936,14 +936,45 @@ export function ActivityGenerationConversationPage(): JSX.Element {
         (Array.isArray(lastAssistantMessage.toolCalls) && lastAssistantMessage.toolCalls.length > 0))
   );
 
-  const conversationViewIsLoading = Boolean(
+  const awaitingFirstAssistantResponse = Boolean(
     jobId &&
-      conversation?.status === "running" &&
       !jobStatus?.awaitingUserAction &&
       !jobStatus?.pendingToolCall &&
       !lastAssistantMessageHasContent &&
-      (isStreaming || isJobLoading)
+      ((conversation && conversation.status === "running") ||
+        jobStatus?.status === "pending" ||
+        jobStatus?.status === "running")
   );
+
+  const conversationViewIsLoading = Boolean(
+    !awaitingFirstAssistantResponse &&
+      (isStreaming || isJobLoading || jobStatus?.status === "pending")
+  );
+
+  const messagesWithAwaitingIndicator = useMemo(() => {
+    if (!awaitingFirstAssistantResponse) {
+      return messagesToDisplay;
+    }
+
+    const placeholderTimestamp = (() => {
+      if (conversation?.messages?.length) {
+        const lastMessageTimestamp = conversation.messages[conversation.messages.length - 1]?.timestamp;
+        if (typeof lastMessageTimestamp === "string" && lastMessageTimestamp.trim()) {
+          return lastMessageTimestamp;
+        }
+      }
+      return new Date().toISOString();
+    })();
+
+    const awaitingMessage: ConversationMessage = {
+      id: "awaiting-first-assistant-response",
+      role: "assistant",
+      content: "L’IA prépare une première réponse...",
+      timestamp: placeholderTimestamp,
+    };
+
+    return [...messagesToDisplay, awaitingMessage];
+  }, [awaitingFirstAssistantResponse, conversation?.messages, messagesToDisplay]);
 
   useEffect(() => {
     if (!jobId) {
@@ -1291,10 +1322,12 @@ export function ActivityGenerationConversationPage(): JSX.Element {
                 </div>
               </div>
             ) : (
-              <ConversationView
-                messages={messagesToDisplay}
-                isLoading={conversationViewIsLoading}
-              />
+              <div className="relative h-full">
+                <ConversationView
+                  messages={messagesWithAwaitingIndicator}
+                  isLoading={conversationViewIsLoading}
+                />
+              </div>
             )}
           </div>
 
