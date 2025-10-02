@@ -79,30 +79,46 @@ def test_create_form_step_includes_all_fields() -> None:
         "failureMessage",
     }
     field = config["fields"][0]
-    assert set(field) == {
-        "id",
-        "label",
-        "type",
-        "minBullets",
-        "maxBullets",
-        "maxWordsPerBullet",
-        "mustContainAny",
-        "meals",
-        "minWords",
-        "maxWords",
-        "forbidWords",
-        "tone",
-        "options",
-        "minSelections",
-        "maxSelections",
-        "correctAnswer",
-        "correctAnswers",
-    }
-    assert field["options"][0]["description"] is None
-    assert field["minBullets"] is None
+    assert set(field) == {"id", "label", "type", "options", "correctAnswer"}
+    assert "correctAnswers" not in field
+    assert field["options"][0] == {"value": "a", "label": "Option A"}
     assert field["correctAnswer"] == "a"
-    assert field["correctAnswers"] is None
     assert config["failureMessage"] == "Mauvaise réponse, réessaie."
+
+
+def test_create_form_step_provides_defaults_for_missing_configuration() -> None:
+    step = create_form_step(
+        step_id="formulaire",
+        fields=[
+            {"id": "texte", "label": "Texte", "type": "textarea_with_counter"},
+            {"id": "liste", "label": "Liste", "type": "bulleted_list"},
+            {"id": "menu", "label": "Menu", "type": "table_menu_day", "meals": []},
+            {"id": "choix", "label": "Choix", "type": "single_choice", "options": []},
+        ],
+    )
+
+    fields = step["config"]["fields"]
+    assert len(fields) == 4
+
+    textarea = fields[0]
+    assert textarea["minWords"] == 10
+    assert textarea["maxWords"] >= 10
+    assert textarea.get("forbidWords") is None
+    assert textarea.get("tone") is None
+
+    bulleted = fields[1]
+    assert bulleted["minBullets"] == 2
+    assert bulleted["maxBullets"] >= 2
+    assert bulleted["maxWordsPerBullet"] == 12
+    assert bulleted.get("mustContainAny") is None
+
+    table = fields[2]
+    assert table["meals"] == ["Matin", "Midi", "Soir"]
+
+    single_choice = fields[3]
+    assert len(single_choice["options"]) >= 1
+    assert single_choice["correctAnswer"] == single_choice["options"][0]["value"]
+    assert "correctAnswers" not in single_choice
 
 
 def test_create_form_step_accepts_id_alias() -> None:
@@ -114,10 +130,10 @@ def test_create_form_step_accepts_id_alias() -> None:
     assert step["id"] == "alias"
     field = step["config"]["fields"][0]
     assert field["type"] == "single_choice"
-    assert field["options"] is None
-    assert field["minSelections"] is None
-    assert field["correctAnswer"] is None
-    assert field["correctAnswers"] is None
+    assert field["options"]
+    assert field.get("minSelections") is None
+    assert field["correctAnswer"] == field["options"][0]["value"]
+    assert field.get("correctAnswers") is None
 
 
 def test_create_video_step_preserves_sources_and_captions() -> None:
