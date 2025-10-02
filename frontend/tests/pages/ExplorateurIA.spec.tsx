@@ -20,12 +20,17 @@ vi.mock("../../src/api", () => ({
   updateActivityProgress: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { useMemo, useState } from "react";
 import {
   StepSequenceActivity,
+  StepSequenceContext,
   type StepDefinition,
   type StepSequenceActivityProps,
   createDefaultExplorateurWorldConfig,
 } from "../../src/modules/step-sequence";
+import ExplorateurIA, {
+  createDefaultExplorateurIAConfig,
+} from "../../src/pages/ExplorateurIA";
 
 function createExplorateurSteps(): StepDefinition[] {
   return [
@@ -123,6 +128,50 @@ function renderExplorateurIA(props?: Partial<StepSequenceActivityProps>) {
   return render(<StepSequenceActivity {...mergedProps} />);
 }
 
+function ConfigDesignerHarness() {
+  const [config, setConfig] = useState(createDefaultExplorateurIAConfig());
+  const definition = useMemo(
+    () => ({
+      id: "explorateur:world",
+      component: "explorateur-world",
+      config,
+    }),
+    [config]
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [definition],
+      payloads: {},
+      isEditMode: true,
+      onAdvance: () => {},
+      onUpdateConfig: setConfig,
+      goToStep: () => {},
+      activityContext: null,
+      setManualAdvanceHandler: () => {},
+      setManualAdvanceDisabled: () => {},
+      getManualAdvanceState: () => ({ handler: null, disabled: false }),
+    }),
+    [definition]
+  );
+
+  return (
+    <StepSequenceContext.Provider value={contextValue}>
+      <ExplorateurIA
+        definition={definition}
+        config={config}
+        payload={null}
+        isActive
+        isEditMode
+        onAdvance={() => {}}
+        onUpdateConfig={setConfig}
+      />
+    </StepSequenceContext.Provider>
+  );
+}
+
 describe("Explorateur IA", () => {
   it("permet de compléter le quartier Clarté et d'exporter les données", async () => {
     const storedBlobs: Blob[] = [];
@@ -186,5 +235,37 @@ describe("Explorateur IA", () => {
     expect(exportData.quarters.clarte.details.score).toBe(100);
     expect(exportData.quarters.clarte.details.selectedOptionId).toBe("B");
     expect(exportData.quarters.clarte.payloads["clarte:quiz"]).toBeDefined();
+  });
+});
+
+describe("Explorateur IA designer", () => {
+  it("permet d'ajouter un quartier personnalisé", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const addQuarterButton = await screen.findByRole("button", {
+      name: /Ajouter un quartier/i,
+    });
+    fireEvent.click(addQuarterButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Supprimer Nouveau quartier/i })
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("permet de supprimer un quartier par défaut", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const removeButton = await screen.findByRole("button", {
+      name: /Supprimer Quartier Clarté/i,
+    });
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Supprimer Quartier Clarté/i })
+      ).not.toBeInTheDocument();
+    });
   });
 });

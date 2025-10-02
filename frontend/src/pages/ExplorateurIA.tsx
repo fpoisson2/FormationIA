@@ -4556,6 +4556,11 @@ export default function ExplorateurIA({
     [config]
   );
 
+  const latestConfigRef = useRef(sanitizedConfig);
+  useEffect(() => {
+    latestConfigRef.current = sanitizedConfig;
+  }, [sanitizedConfig]);
+
   const experienceModeMeta = useMemo(
     () => EXPERIENCE_MODE_DEFINITIONS[sanitizedConfig.experienceMode],
     [sanitizedConfig.experienceMode]
@@ -4651,38 +4656,39 @@ export default function ExplorateurIA({
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
+      const baseConfig = latestConfigRef.current;
       const nextQuarters = sanitizeQuarterConfigs(
-        patch.quarters ?? sanitizedConfig.quarters,
+        patch.quarters ?? baseConfig.quarters,
         DEFAULT_EXPLORATEUR_QUARTERS
       );
       const derived = deriveQuarterData(nextQuarters);
       const expandedQuarterSteps = expandQuarterSteps(
-        patch.steps ?? sanitizedConfig.steps,
+        patch.steps ?? baseConfig.steps,
         WORLD1_QUARTER_STEPS,
         derived.quarterOrder
       );
       const { designerSteps, quarterSteps } = sanitizeQuarterDesignerSteps(
-        patch.quarterDesignerSteps ?? sanitizedConfig.quarterDesignerSteps,
+        patch.quarterDesignerSteps ?? baseConfig.quarterDesignerSteps,
         nextQuarters,
         expandedQuarterSteps
       );
       const nextExperienceMode = sanitizeExperienceMode(
-        patch.experienceMode ?? sanitizedConfig.experienceMode
+        patch.experienceMode ?? baseConfig.experienceMode
       );
       const next: ExplorateurIAConfig = {
         terrain: {
-          themeId:
-            patch.terrain?.themeId ?? sanitizedConfig.terrain.themeId,
-          seed: patch.terrain?.seed ?? sanitizedConfig.terrain.seed,
+          themeId: patch.terrain?.themeId ?? baseConfig.terrain.themeId,
+          seed: patch.terrain?.seed ?? baseConfig.terrain.seed,
         },
         steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
         quarterDesignerSteps: cloneQuarterStepMap(designerSteps),
         quarters: nextQuarters,
         experienceMode: nextExperienceMode,
       };
+      latestConfigRef.current = next;
       effectiveOnUpdateConfig(next);
     },
-    [effectiveOnUpdateConfig, sanitizedConfig]
+    [effectiveOnUpdateConfig]
   );
 
   const emitQuarterConfig = useCallback(
@@ -6331,6 +6337,53 @@ function ExplorateurIAConfigDesigner({
     onUpdateQuarters,
   ]);
 
+  const handleRemoveQuarter = useCallback(
+    (quarterId: QuarterId) => {
+      if (!config.quarters.some((quarter) => quarter.id === quarterId)) {
+        return;
+      }
+      const nextQuarters = config.quarters
+        .filter((quarter) => quarter.id !== quarterId)
+        .map(cloneQuarter);
+      onUpdateQuarters(nextQuarters);
+
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      delete designerMap[quarterId];
+
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        designerMap,
+        nextQuarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        designerMap,
+        nextQuarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+
+      setExpandedQuarterIds((current) =>
+        current.includes(quarterId)
+          ? current.filter((id) => id !== quarterId)
+          : current
+      );
+      setPendingStepIdByQuarter((current) => {
+        if (!(quarterId in current)) {
+          return current;
+        }
+        const { [quarterId]: _removed, ...rest } = current;
+        return rest;
+      });
+    },
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      onUpdateQuarters,
+      setExpandedQuarterIds,
+      setPendingStepIdByQuarter,
+    ]
+  );
+
   const handleMoveQuarter = useCallback(
     (index: number, direction: -1 | 1) => {
       const targetIndex = index + direction;
@@ -6962,6 +7015,14 @@ function ExplorateurIAConfigDesigner({
                       className="rounded-full border border-orange-200 px-3 py-1 font-semibold text-orange-700 transition hover:border-orange-300 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       ↓ Descendre
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveQuarter(quarter.id)}
+                      className="rounded-full border border-rose-200 px-3 py-1 font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                      aria-label={`Supprimer ${quarter.label || quarter.id}`}
+                    >
+                      Supprimer
                     </button>
                   </div>
                 </header>
