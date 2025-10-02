@@ -525,6 +525,7 @@ export interface ConversationMessage {
   toolCallId?: string | null;
   name?: string | null;
   timestamp: string;
+  reasoningSummary?: string | null;
 }
 
 export interface Conversation {

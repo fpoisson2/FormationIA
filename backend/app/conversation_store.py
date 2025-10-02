@@ -25,6 +25,7 @@ class ConversationMessage:
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+    reasoning_summary: str | None = None
     timestamp: str = field(default_factory=_now_iso)
 
 
@@ -55,6 +56,8 @@ def _message_to_dict(msg: ConversationMessage) -> dict[str, Any]:
         result["toolCallId"] = msg.tool_call_id
     if msg.name is not None:
         result["name"] = msg.name
+    if msg.reasoning_summary is not None:
+        result["reasoningSummary"] = msg.reasoning_summary
     return result
 
 
@@ -66,6 +69,7 @@ def _message_from_dict(data: dict[str, Any]) -> ConversationMessage:
         tool_calls=data.get("toolCalls", data.get("tool_calls")),
         tool_call_id=data.get("toolCallId", data.get("tool_call_id")),
         name=data.get("name"),
+        reasoning_summary=data.get("reasoningSummary", data.get("reasoning_summary")),
         timestamp=data.get("timestamp", _now_iso()),
     )
 
