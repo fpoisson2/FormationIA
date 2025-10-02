@@ -5290,10 +5290,7 @@ def _run_activity_generation_job(job_id: str) -> None:
     if reasoning_summary is not None:
         cleaned_summary = _normalize_plain_text(reasoning_summary) or reasoning_summary.strip()
         if cleaned_summary:
-            summary_message = f"Résumé du raisonnement\n\n{cleaned_summary}".strip()
-            normalized_summary = _normalize_plain_text(summary_message)
-            if normalized_summary:
-                summary_message = normalized_summary
+            summary_message = _normalize_plain_text(cleaned_summary) or cleaned_summary
             reasoning_item = next(
                 (item for item in filtered_items if item.get("type") in {"reasoning", "reasoning_summary"}),
                 None,
@@ -6143,6 +6140,19 @@ def _sync_conversation_from_job(
         else []
     )
 
+    def _merge_reasoning_text(existing: str | None, new_value: str) -> str:
+        cleaned_new = (new_value or "").strip()
+        if not cleaned_new:
+            return existing or ""
+        if not existing:
+            return cleaned_new
+        cleaned_existing = existing.strip()
+        if not cleaned_existing:
+            return cleaned_new
+        if cleaned_new in cleaned_existing:
+            return cleaned_existing
+        return f"{cleaned_existing}\n\n{cleaned_new}".strip()
+
     def _normalize_string(value: Any) -> str:
         if value is None:
             return ""
@@ -6308,6 +6318,7 @@ def _sync_conversation_from_job(
         content: str | None = None
         tool_calls: list[dict[str, Any]] | None = None
         tool_call_id = raw_message.get("tool_call_id") or raw_message.get("toolCallId")
+        reasoning_summary_text: str | None = None
 
         if msg_type == "function_call":
             parsed_call = _normalize_tool_calls([raw_message])
@@ -6331,7 +6342,8 @@ def _sync_conversation_from_job(
             )
             normalized_summary = _normalize_plain_text(summary_text)
             if normalized_summary:
-                content = f"Résumé du raisonnement\n\n{normalized_summary}".strip()
+                reasoning_summary_text = normalized_summary
+                content = None
             else:
                 continue
         else:
@@ -6361,7 +6373,18 @@ def _sync_conversation_from_job(
             if _message_signature_from_message(existing_message) == message_signature:
                 message_kwargs.setdefault("timestamp", existing_message.timestamp)
 
-        messages.append(ConversationMessage(**message_kwargs))
+        conversation_message = ConversationMessage(**message_kwargs)
+        if reasoning_summary_text:
+            if messages and messages[-1].role == "assistant":
+                last_message = messages[-1]
+                last_message.reasoning_summary = _merge_reasoning_text(
+                    last_message.reasoning_summary,
+                    reasoning_summary_text,
+                )
+                continue
+            conversation_message.reasoning_summary = reasoning_summary_text
+
+        messages.append(conversation_message)
 
     # Crée ou met à jour la conversation
     conversation = Conversation(
@@ -6440,8 +6463,15 @@ def _stream_summary(client: ResponsesClient, model: str, prompt: str, payload: S
                 final_response = stream.get_final_response()
                 reasoning_summary = _extract_reasoning_summary(final_response)
                 if reasoning_summary:
-                    yield "\n\nRésumé du raisonnement :\n"
-                    yield reasoning_summary
+                    normalized_summary = _normalize_plain_text(reasoning_summary) or reasoning_summary.strip()
+                    if normalized_summary:
+                        bold_lines = "\n".join(
+                            "**" + line + "**" if line else ""
+                            for line in normalized_summary.splitlines()
+                        ).strip("\n")
+                        yield "\n\n<details>\n<summary>🧠 Résumé du raisonnement</summary>\n\n"
+                        yield bold_lines
+                        yield "\n</details>"
         except HTTPException:
             raise
         except Exception as exc:  # pragma: no cover - defensive catch

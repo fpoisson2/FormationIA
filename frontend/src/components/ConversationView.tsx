@@ -19,7 +19,7 @@ function formatTimestamp(timestamp: string): string {
 }
 
 function MessageBubble({ message }: { message: ConversationMessage }): JSX.Element {
-  const { role, content, toolCalls } = message;
+  const { role, content, toolCalls, reasoningSummary } = message;
 
   const formattedToolCalls = useMemo(() => {
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
@@ -62,6 +62,17 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
       }
     });
   }, [toolCalls]);
+
+  const reasoningSummaryLines = useMemo(() => {
+    if (typeof reasoningSummary !== "string") {
+      return null;
+    }
+    const trimmed = reasoningSummary.trim();
+    if (!trimmed) {
+      return null;
+    }
+    return trimmed.split(/\r?\n/);
+  }, [reasoningSummary]);
 
   // Détermine le style selon le rôle
   const isUser = role === "user";
@@ -107,17 +118,36 @@ function MessageBubble({ message }: { message: ConversationMessage }): JSX.Eleme
                 {content}
               </p>
             )}
+            {reasoningSummaryLines && (
+              <details className="mt-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3 text-xs">
+                <summary className="cursor-pointer font-semibold text-orange-800">
+                  🧠 Résumé du raisonnement
+                </summary>
+                <div className="mt-2 space-y-1 text-left text-[13px] leading-relaxed text-orange-800">
+                  {reasoningSummaryLines.map((line, index) => (
+                    <p key={index} className="whitespace-pre-wrap break-words">
+                      <strong>{line}</strong>
+                    </p>
+                  ))}
+                </div>
+              </details>
+            )}
             {formattedToolCalls.length > 0 && (
-              <div className="mt-3 space-y-2">
-                {formattedToolCalls.map(({ key, label, payload }) => (
-                  <div key={key} className="rounded-2xl bg-blue-50/50 p-3 text-xs">
-                    <div className="font-semibold text-blue-800">🔧 {label}</div>
-                    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-blue-700">
-                      {payload}
-                    </pre>
-                  </div>
-                ))}
-              </div>
+              <details className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3 text-xs">
+                <summary className="cursor-pointer font-semibold text-blue-800">
+                  🔧 Appels d'outils ({formattedToolCalls.length})
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {formattedToolCalls.map(({ key, label, payload }) => (
+                    <div key={key} className="rounded-2xl bg-blue-50 p-3 text-xs">
+                      <div className="font-semibold text-blue-800">{label}</div>
+                      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-blue-700">
+                        {payload}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
           </div>
           <div className="mt-1 text-left text-xs text-gray-400">
