@@ -947,9 +947,34 @@ export function ActivityGenerationConversationPage(): JSX.Element {
   );
 
   const conversationViewIsLoading = Boolean(
-    awaitingFirstAssistantResponse &&
+    !awaitingFirstAssistantResponse &&
       (isStreaming || isJobLoading || jobStatus?.status === "pending")
   );
+
+  const messagesWithAwaitingIndicator = useMemo(() => {
+    if (!awaitingFirstAssistantResponse) {
+      return messagesToDisplay;
+    }
+
+    const placeholderTimestamp = (() => {
+      if (conversation?.messages?.length) {
+        const lastMessageTimestamp = conversation.messages[conversation.messages.length - 1]?.timestamp;
+        if (typeof lastMessageTimestamp === "string" && lastMessageTimestamp.trim()) {
+          return lastMessageTimestamp;
+        }
+      }
+      return new Date().toISOString();
+    })();
+
+    const awaitingMessage: ConversationMessage = {
+      id: "awaiting-first-assistant-response",
+      role: "assistant",
+      content: "L’IA prépare une première réponse...",
+      timestamp: placeholderTimestamp,
+    };
+
+    return [...messagesToDisplay, awaitingMessage];
+  }, [awaitingFirstAssistantResponse, conversation?.messages, messagesToDisplay]);
 
   useEffect(() => {
     if (!jobId) {
@@ -1299,24 +1324,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
             ) : (
               <div className="relative h-full">
                 <ConversationView
-                  messages={messagesToDisplay}
+                  messages={messagesWithAwaitingIndicator}
                   isLoading={conversationViewIsLoading}
                 />
-                {awaitingFirstAssistantResponse ? (
-                  <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center px-4 sm:px-6">
-                    <div
-                      className="inline-flex items-center gap-3 rounded-full border border-sky-200/70 bg-white/95 px-4 py-2 text-xs font-medium text-sky-800 shadow-lg backdrop-blur"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      <span className="relative inline-flex h-3 w-3">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400/70" />
-                        <span className="relative inline-flex h-3 w-3 rounded-full bg-sky-500" />
-                      </span>
-                      <span>L’IA prépare une première réponse...</span>
-                    </div>
-                  </div>
-                ) : null}
               </div>
             )}
           </div>
