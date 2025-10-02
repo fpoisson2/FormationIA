@@ -5167,6 +5167,102 @@ def _run_activity_generation_job(job_id: str) -> None:
         _launch_activity_generation_job(job_id)
         return
 
+    def _collapse_stream_output_items(
+        items: Sequence[Mapping[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        if not items:
+            return []
+
+        grouped: dict[Any, dict[str, Any]] = {}
+        order: list[Any] = []
+        unique_counter = 0
+
+        for position, candidate in enumerate(items):
+            if not isinstance(candidate, Mapping):
+                continue
+
+            output_index = candidate.get("output_index")
+            has_index = output_index is not None
+
+            if has_index:
+                bucket_key = ("__index__", repr(output_index))
+            else:
+                bucket_key = ("__no_index__", unique_counter)
+                unique_counter += 1
+
+            bucket = grouped.get(bucket_key)
+            if bucket is None:
+                bucket = {
+                    "items": [],
+                    "first_pos": position,
+                    "has_index": has_index,
+                }
+                grouped[bucket_key] = bucket
+                order.append(bucket_key)
+            bucket["items"].append(candidate)
+            if position < bucket["first_pos"]:
+                bucket["first_pos"] = position
+
+        collapsed: list[dict[str, Any]] = []
+
+        for bucket_key in sorted(order, key=lambda key: grouped[key]["first_pos"]):
+            bucket = grouped[bucket_key]
+            bucket_items = bucket["items"]
+
+            if not bucket["has_index"]:
+                for item in bucket_items:
+                    if isinstance(item, Mapping):
+                        collapsed.append(dict(item))
+                continue
+
+            has_message = any(
+                isinstance(item, Mapping) and item.get("type") == "message"
+                for item in bucket_items
+            )
+
+            bucket_result: list[dict[str, Any]] = []
+            seen_output_texts: set[str] = set()
+            message_added = False
+
+            for item in bucket_items:
+                if not isinstance(item, Mapping):
+                    continue
+
+                item_type = item.get("type")
+
+                if item_type == "message":
+                    if not message_added:
+                        bucket_result.append(dict(item))
+                        message_added = True
+                    continue
+
+                if item_type == "output_text":
+                    if has_message:
+                        continue
+                    text_value = item.get("text")
+                    if isinstance(text_value, str):
+                        normalized_text = text_value.strip()
+                    else:
+                        try:
+                            normalized_text = json.dumps(
+                                text_value, ensure_ascii=False
+                            ).strip()
+                        except TypeError:
+                            normalized_text = json.dumps(
+                                text_value, default=str
+                            ).strip()
+                    if normalized_text in seen_output_texts:
+                        continue
+                    seen_output_texts.add(normalized_text)
+                    bucket_result.append(dict(item))
+                    continue
+
+                bucket_result.append(dict(item))
+
+            collapsed.extend(bucket_result)
+
+        return collapsed
+
     filtered_items: list[dict[str, Any]] = []
     for item in output_items:
         normalized = _normalize_response_item(item)
@@ -5176,6 +5272,8 @@ def _run_activity_generation_job(job_id: str) -> None:
             logger.debug("Ignoring web_search_call output: %r", item)
             continue
         filtered_items.append(normalized)
+
+    filtered_items = _collapse_stream_output_items(filtered_items)
 
     if not filtered_items:
         _update_activity_generation_job(
@@ -5315,6 +5413,8 @@ def _run_activity_generation_job(job_id: str) -> None:
                 return True
 
         return False
+
+    filtered_items = _collapse_stream_output_items(filtered_items)
 
     for item in filtered_items:
         if _finalize_placeholder_from_item(item):
@@ -5557,7 +5657,7 @@ def _run_activity_generation_job(job_id: str) -> None:
         if not success:
             return
 
-        for extra_item in extra_messages:
+        for extra_item in _collapse_stream_output_items(extra_messages):
             if extra_item.get("type") in {"reasoning", "reasoning_summary"}:
                 extra_item.setdefault("role", "assistant")
                 text_value = extra_item.get("content")
