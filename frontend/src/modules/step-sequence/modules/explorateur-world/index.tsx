@@ -1,9 +1,14 @@
-import ExplorateurIA, {
+import { Suspense, lazy } from "react";
+
+import {
   createDefaultExplorateurIAConfig,
   sanitizeExplorateurIAConfig,
-  type ExplorateurIAConfig,
-  type ExplorateurIATerrainConfig,
-} from "../../../../pages/ExplorateurIA";
+} from "../../../../pages/explorateurIA/worldConfig";
+import type {
+  ExplorateurExperienceMode,
+  ExplorateurIAConfig,
+  ExplorateurIATerrainConfig,
+} from "../../../../pages/explorateurIA/worldConfig";
 import { registerStepComponent } from "../../registry";
 import type {
   StepComponentProps,
@@ -11,10 +16,28 @@ import type {
   StepSequenceLayoutOverrides,
 } from "../../types";
 
+const ExplorateurIALazy = lazy(() =>
+  import("../../../../pages/ExplorateurIA").then((module) => ({
+    default: module.default,
+  }))
+);
+
+function ExplorateurWorldFallback(): JSX.Element {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-slate-50 text-sm text-slate-500">
+      Chargement de l’Explorateur IA…
+    </div>
+  );
+}
+
 export function ExplorateurWorldStep(
   props: StepComponentProps
 ): JSX.Element {
-  return <ExplorateurIA {...props} />;
+  return (
+    <Suspense fallback={<ExplorateurWorldFallback />}>
+      <ExplorateurIALazy {...props} />
+    </Suspense>
+  );
 }
 
 const EXPLORATEUR_WORLD_LAYOUT_OVERRIDES: StepSequenceLayoutOverrides = Object.freeze({
@@ -42,7 +65,7 @@ export type {
   ExplorateurIAConfig as ExplorateurWorldConfig,
   ExplorateurIATerrainConfig as ExplorateurWorldTerrainConfig,
   ExplorateurExperienceMode as ExplorateurWorldExperienceMode,
-} from "../../../../pages/ExplorateurIA";
+} from "../../../../pages/explorateurIA/worldConfig";
 
 export const createDefaultExplorateurWorldConfig =
   createDefaultExplorateurIAConfig;

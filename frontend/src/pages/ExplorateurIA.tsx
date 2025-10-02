@@ -51,6 +51,38 @@ import {
   QUARTER_DESIGNER_STEP_LIBRARY,
 } from "./explorateurIA/designerUtils";
 import {
+  createDefaultExplorateurIAConfig,
+  DEFAULT_EXPERIENCE_MODE,
+  DEFAULT_TERRAIN_THEME_ID,
+  isTerrainThemeId,
+  sanitizeExperienceMode,
+  sanitizeExplorateurIAConfig,
+  sanitizeTerrainConfig,
+  WORLD_SEED,
+} from "./explorateurIA/worldConfig";
+import type {
+  ExplorateurExperienceMode,
+  ExplorateurIAConfig,
+  ExplorateurIATerrainConfig,
+  TerrainThemeId,
+} from "./explorateurIA/worldConfig";
+export {
+  createDefaultExplorateurIAConfig,
+  sanitizeExplorateurIAConfig,
+  sanitizeExperienceMode,
+  sanitizeTerrainConfig,
+  DEFAULT_EXPERIENCE_MODE,
+  DEFAULT_TERRAIN_THEME_ID,
+  WORLD_SEED,
+  isTerrainThemeId,
+} from "./explorateurIA/worldConfig";
+export type {
+  ExplorateurExperienceMode,
+  ExplorateurIAConfig,
+  ExplorateurIATerrainConfig,
+  TerrainThemeId,
+} from "./explorateurIA/worldConfig";
+import {
   createInitialProgress,
   updateClarteProgress,
   updateCreationProgress,
@@ -107,10 +139,6 @@ import { Modal } from "./explorateurIA/Modal";
 type InventoryDefinition = ExplorateurIAInventoryDefinition;
 
 type InventoryEntry = InventoryDefinition & { obtained: boolean };
-
-export type ExplorateurExperienceMode = "guided" | "open-world";
-
-const DEFAULT_EXPERIENCE_MODE: ExplorateurExperienceMode = "guided";
 
 const KNOWN_QUARTER_IDS = new Set<QuarterId>(
   Array.from(DEFAULT_QUARTER_IDS) as QuarterId[]
@@ -865,12 +893,6 @@ const TERRAIN_THEMES = {
     base: TILE_KIND.SNOW,
   },
 } as const satisfies Record<string, TerrainThemeConfig>;
-
-export type TerrainThemeId = keyof typeof TERRAIN_THEMES;
-
-function isTerrainThemeId(value: unknown): value is TerrainThemeId {
-  return typeof value === "string" && value in TERRAIN_THEMES;
-}
 
 const TERRAIN_THEME_ORDER: TerrainThemeId[] = [
   "sand",
@@ -2466,10 +2488,7 @@ function distributeIndices(total: number, count: number): number[] {
 
 const WORLD_WIDTH = 25;
 const WORLD_HEIGHT = 25;
-const WORLD_SEED = 1247;
 let currentWorldSeed = WORLD_SEED;
-
-const DEFAULT_TERRAIN_THEME_ID: TerrainThemeId = "sand";
 
 type ExperienceModeDefinition = {
   label: string;
@@ -2514,122 +2533,11 @@ const EXPERIENCE_MODE_OPTIONS = Object.freeze(
   >
 );
 
-export interface ExplorateurIATerrainConfig {
-  themeId: TerrainThemeId;
-  seed: number;
-}
-
-export interface ExplorateurIAConfig {
-  terrain: ExplorateurIATerrainConfig;
-  steps: StepDefinition[];
-  quarterDesignerSteps: QuarterSteps;
-  quarters: ExplorateurIAQuarterConfig[];
-  experienceMode: ExplorateurExperienceMode;
-}
-
-function sanitizeTerrainConfig(
-  value: unknown
-): ExplorateurIATerrainConfig {
-  if (!value || typeof value !== "object") {
-    return { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED };
-  }
-  const base = value as Partial<ExplorateurIATerrainConfig> & {
-    theme?: unknown;
-    themeId?: unknown;
-    seed?: unknown;
-  };
-  const rawTheme = base.themeId ?? base.theme;
-  const themeId = isTerrainThemeId(rawTheme)
-    ? rawTheme
-    : DEFAULT_TERRAIN_THEME_ID;
-  const seed =
-    typeof base.seed === "number" && Number.isFinite(base.seed)
-      ? Math.trunc(base.seed)
-      : WORLD_SEED;
-  return { themeId, seed } satisfies ExplorateurIATerrainConfig;
-}
-
-function sanitizeExperienceMode(
-  value: unknown
-): ExplorateurExperienceMode {
-  if (value === "open-world") {
-    return "open-world";
-  }
-  if (value === "guided") {
-    return "guided";
-  }
-  return DEFAULT_EXPERIENCE_MODE;
-}
-
 function getDefaultExplorateurSteps(): StepDefinition[] {
   return flattenQuarterSteps(
     WORLD1_QUARTER_STEPS,
     DEFAULT_DERIVED_QUARTERS.quarterOrder
   ).map(cloneStepDefinition);
-}
-
-export function createDefaultExplorateurIAConfig(): ExplorateurIAConfig {
-  const quarters = DEFAULT_EXPLORATEUR_QUARTERS.map((quarter) => ({
-    ...quarter,
-    inventory: quarter.inventory ? { ...quarter.inventory } : null,
-  }));
-  const derived = deriveQuarterData(quarters);
-  const quarterSteps = expandQuarterSteps(
-    getDefaultExplorateurSteps(),
-    WORLD1_QUARTER_STEPS,
-    derived.quarterOrder
-  );
-  const designerSteps = createDefaultQuarterDesignerStepMap(
-    quarters,
-    quarterSteps
-  );
-  return {
-    terrain: { themeId: DEFAULT_TERRAIN_THEME_ID, seed: WORLD_SEED },
-    steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
-    quarterDesignerSteps: designerSteps,
-    quarters,
-    experienceMode: DEFAULT_EXPERIENCE_MODE,
-  };
-}
-
-export function sanitizeExplorateurIAConfig(
-  config: unknown
-): ExplorateurIAConfig {
-  if (!config || typeof config !== "object") {
-    return createDefaultExplorateurIAConfig();
-  }
-  const base = config as Partial<ExplorateurIAConfig> & {
-    terrain?: unknown;
-    steps?: unknown;
-    quarters?: unknown;
-    quarterDesignerSteps?: unknown;
-    experienceMode?: unknown;
-  };
-  const terrain = sanitizeTerrainConfig(base.terrain);
-  const steps = sanitizeSteps(base.steps);
-  const quarters = sanitizeQuarterConfigs(
-    base.quarters,
-    DEFAULT_EXPLORATEUR_QUARTERS
-  );
-  const experienceMode = sanitizeExperienceMode(base.experienceMode);
-  const derived = deriveQuarterData(quarters);
-  const expandedQuarterSteps = expandQuarterSteps(
-    steps.length > 0 ? steps : getDefaultExplorateurSteps(),
-    WORLD1_QUARTER_STEPS,
-    derived.quarterOrder
-  );
-  const { designerSteps, quarterSteps } = sanitizeQuarterDesignerSteps(
-    base.quarterDesignerSteps,
-    quarters,
-    expandedQuarterSteps
-  );
-  return {
-    terrain,
-    steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
-    quarterDesignerSteps: designerSteps,
-    quarters,
-    experienceMode,
-  };
 }
 
 const FALLBACK_LANDMARKS: Record<QuarterId, { x: number; y: number }> = {
