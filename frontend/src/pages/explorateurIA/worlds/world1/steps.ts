@@ -4,12 +4,6 @@ import {
 } from "../../../../modules/step-sequence";
 
 import {
-  DEFAULT_CLARTE_QUIZ_CONFIG,
-  DEFAULT_CREATION_BUILDER_CONFIG,
-  DEFAULT_DECISION_PATH_CONFIG,
-  DEFAULT_ETHICS_DILEMMAS_CONFIG,
-} from "../../modules";
-import {
   DEFAULT_EXPLORATEUR_QUARTERS,
   deriveQuarterData,
 } from "../../config";
@@ -87,11 +81,6 @@ const CLARTE_STEPS: StepDefinition[] = [
         "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=800&q=80",
     },
   },
-  {
-    id: "clarte:quiz",
-    component: "custom",
-    config: DEFAULT_CLARTE_QUIZ_CONFIG,
-  },
 ];
 
 const CREATION_STEPS: StepDefinition[] = [
@@ -112,11 +101,6 @@ const CREATION_STEPS: StepDefinition[] = [
         ],
       },
     },
-  },
-  {
-    id: "creation:builder",
-    component: "custom",
-    config: DEFAULT_CREATION_BUILDER_CONFIG,
   },
   {
     id: "creation:reflection",
@@ -153,11 +137,6 @@ const DECISION_STEPS: StepDefinition[] = [
       body: "Expérimentez différentes stratégies et observez leurs compromis pour mener votre projet.",
     },
   },
-  {
-    id: "decision:path",
-    component: "custom",
-    config: DEFAULT_DECISION_PATH_CONFIG,
-  },
 ];
 
 const ETHIQUE_STEPS: StepDefinition[] = [
@@ -168,11 +147,6 @@ const ETHIQUE_STEPS: StepDefinition[] = [
       title: "Quartier Éthique",
       body: "Chaque scénario illustre une dérive potentielle. Sélectionnez la réponse qui protège au mieux les usagers.",
     },
-  },
-  {
-    id: "ethique:dilemmas",
-    component: "custom",
-    config: DEFAULT_ETHICS_DILEMMAS_CONFIG,
   },
   {
     id: "ethique:commitment",

@@ -523,38 +523,6 @@ export const QUARTER_DESIGNER_STEP_LIBRARY: QuarterDesignerStepLibraryEntry[] = 
     create: (quarter, steps) =>
       createSequenceStepFromTemplate(quarter, "form", steps),
   },
-  {
-    type: "clarte-quiz",
-    label: "Quiz Clarté",
-    description: "Question à choix multiple avec score.",
-    icon: "❓",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "clarte-quiz", steps),
-  },
-  {
-    type: "creation-builder",
-    label: "Atelier Création",
-    description: "Assembler une consigne créative étape par étape.",
-    icon: "🎨",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "creation-builder", steps),
-  },
-  {
-    type: "decision-path",
-    label: "Parcours Décision",
-    description: "Comparer différentes stratégies décisionnelles.",
-    icon: "🧭",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "decision-path", steps),
-  },
-  {
-    type: "ethics-dilemmas",
-    label: "Dilemmes Éthique",
-    description: "Scénarios à choix pour explorer les enjeux éthiques.",
-    icon: "⚖️",
-    create: (quarter, steps) =>
-      createSequenceStepFromTemplate(quarter, "ethics-dilemmas", steps),
-  },
 ];
 
 export function getDesignerStepMeta(type: string) {
