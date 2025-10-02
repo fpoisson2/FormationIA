@@ -887,6 +887,44 @@ function ActivitySelector(): JSX.Element {
   const canShowAdminButton = isAdminAuthenticated && canAccessAdmin(userRoles);
   const canLogout = isLTISession || isAdminAuthenticated;
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
+  const adminActionsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const closeAdminMenu = useCallback(() => {
+    setIsAdminMenuOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isAdminMenuOpen) {
+      return;
+    }
+
+    const handleInteractionOutside = (event: MouseEvent | FocusEvent) => {
+      if (
+        adminActionsMenuRef.current &&
+        event.target instanceof Node &&
+        !adminActionsMenuRef.current.contains(event.target)
+      ) {
+        setIsAdminMenuOpen(false);
+      }
+    };
+
+    const handleEscapeKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsAdminMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleInteractionOutside);
+    document.addEventListener("focusin", handleInteractionOutside);
+    document.addEventListener("keydown", handleEscapeKey);
+
+    return () => {
+      document.removeEventListener("mousedown", handleInteractionOutside);
+      document.removeEventListener("focusin", handleInteractionOutside);
+      document.removeEventListener("keydown", handleEscapeKey);
+    };
+  }, [isAdminMenuOpen]);
 
   const handleLogout = useCallback(async () => {
     if (isLoggingOut) {
@@ -895,6 +933,7 @@ function ActivitySelector(): JSX.Element {
 
     setIsLoggingOut(true);
     try {
+      closeAdminMenu();
       if (isLTISession) {
         await ltiLogout();
       }
@@ -912,6 +951,7 @@ function ActivitySelector(): JSX.Element {
     }
   }, [
     adminLogout,
+    closeAdminMenu,
     isAdminAuthenticated,
     isLoggingOut,
     isLTISession,
@@ -2028,72 +2068,115 @@ function ActivitySelector(): JSX.Element {
   };
 
   const isLogoutDisabled = isLoggingOut || isAdminProcessing;
-  const adminActionControls = canShowAdminButton ? (
+  const logoutButton = canLogout ? (
+    <button
+      type="button"
+      onClick={() => {
+        void handleLogout();
+      }}
+      disabled={isLogoutDisabled}
+      className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-xs font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+    >
+      {isLogoutDisabled ? "Déconnexion..." : "Se déconnecter"}
+    </button>
+  ) : null;
+  const headerActions = canShowAdminButton ? (
     <div className="flex flex-wrap items-center gap-2">
-      {isEditMode ? (
-        <>
-          <button
-            onClick={handleSaveChanges}
-            disabled={isSaving}
-            className="inline-flex items-center justify-center rounded-full border border-green-600/20 bg-green-50 px-4 py-2 text-xs font-medium text-green-700 transition hover:border-green-600/40 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSaving ? "Sauvegarde..." : "Sauvegarder"}
-          </button>
-          <button
-            onClick={handleCancelChanges}
-            disabled={isSaving}
-            className="inline-flex items-center justify-center rounded-full border border-red-600/20 bg-red-50 px-4 py-2 text-xs font-medium text-red-700 transition hover:border-red-600/40 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Annuler
-          </button>
-        </>
-      ) : (
+      {!isEditMode ? (
         <button
-          onClick={() => setEditMode(true)}
+          onClick={() => {
+            setEditMode(true);
+          }}
           disabled={isLoading}
           className="inline-flex items-center justify-center rounded-full border border-orange-600/20 bg-orange-50 px-4 py-2 text-xs font-medium text-orange-700 transition hover:border-orange-600/40 hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isLoading ? "Chargement..." : "Mode édition"}
         </button>
-      )}
-      <Link
-        to="/admin"
-        className="inline-flex items-center justify-center rounded-full border border-[color:var(--brand-charcoal)]/20 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
-      >
-        Administration
-      </Link>
-    </div>
-  ) : null;
-
-  const generationShortcut = canShowAdminButton ? (
-    <Link
-      to="/assistant-ia"
-      className="inline-flex items-center justify-center gap-2 rounded-full border border-sky-500/40 bg-sky-600 px-4 py-2 text-xs font-semibold text-white transition hover:border-sky-600 hover:bg-sky-700"
-    >
-      <MagicWandIcon className="h-4 w-4" />
-      Générer une activité
-    </Link>
-  ) : null;
-
-  const headerActions =
-    generationShortcut || adminActionControls || canLogout ? (
-      <div className="flex flex-wrap items-center gap-3">
-        {generationShortcut}
-        {adminActionControls}
-        {canLogout ? (
-          <button
-            type="button"
-            onClick={() => {
-              void handleLogout();
-            }}
-            disabled={isLogoutDisabled}
-            className="inline-flex items-center justify-center rounded-full bg-[color:var(--brand-red)] px-4 py-2 text-xs font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
+      ) : null}
+      <div className="relative" ref={adminActionsMenuRef}>
+        <button
+          type="button"
+          onClick={() => setIsAdminMenuOpen((previous) => !previous)}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-[color:var(--brand-charcoal)]/20 bg-white/80 px-4 py-2 text-xs font-medium text-[color:var(--brand-charcoal)] transition hover:border-[color:var(--brand-red)]/40 hover:text-[color:var(--brand-red)]"
+          aria-haspopup="menu"
+          aria-expanded={isAdminMenuOpen}
+          aria-controls="activity-admin-actions-menu"
+        >
+          Actions admin
+          <span aria-hidden="true">{isAdminMenuOpen ? "▴" : "▾"}</span>
+        </button>
+        {isAdminMenuOpen ? (
+          <div
+            id="activity-admin-actions-menu"
+            role="menu"
+            className="absolute right-0 z-20 mt-2 w-64 space-y-1 rounded-2xl border border-gray-200 bg-white/95 p-2 text-left text-sm text-[color:var(--brand-charcoal)] shadow-xl backdrop-blur"
           >
-            {isLogoutDisabled ? "Déconnexion..." : "Se déconnecter"}
-          </button>
+            {isEditMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeAdminMenu();
+                    void handleSaveChanges();
+                  }}
+                  disabled={isSaving}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-left font-medium transition hover:border-green-200 hover:bg-green-50 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-white disabled:text-gray-400"
+                >
+                  <span>{isSaving ? "Sauvegarde..." : "Sauvegarder les modifications"}</span>
+                  <span aria-hidden="true">💾</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeAdminMenu();
+                    void handleCancelChanges();
+                  }}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-left font-medium text-red-600 transition hover:border-red-200 hover:bg-red-50"
+                >
+                  <span>Annuler les modifications</span>
+                  <span aria-hidden="true">↺</span>
+                </button>
+                <div className="my-1 h-px bg-gray-100" aria-hidden="true"></div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeAdminMenu();
+                    setEditMode(true);
+                  }}
+                  disabled={isLoading}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-left font-medium transition hover:border-orange-200 hover:bg-orange-50 disabled:cursor-not-allowed disabled:border-transparent disabled:bg-white disabled:text-gray-400"
+                >
+                  <span>{isLoading ? "Chargement..." : "Activer le mode édition"}</span>
+                  <span aria-hidden="true">✏️</span>
+                </button>
+                <div className="my-1 h-px bg-gray-100" aria-hidden="true"></div>
+              </>
+            )}
+            <Link
+              to="/assistant-ia"
+              onClick={closeAdminMenu}
+              className="flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 font-medium transition hover:border-sky-200 hover:bg-sky-50"
+            >
+              <span>Générer une activité</span>
+              <MagicWandIcon className="h-4 w-4" />
+            </Link>
+            <Link
+              to="/admin"
+              onClick={closeAdminMenu}
+              className="flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 font-medium transition hover:border-[color:var(--brand-red)]/30 hover:bg-[color:var(--brand-red)]/10"
+            >
+              <span>Espace administration</span>
+              <span aria-hidden="true">↗</span>
+            </Link>
+          </div>
         ) : null}
       </div>
-    ) : null;
+      {logoutButton}
+    </div>
+  ) : logoutButton;
 
   return (
     <>
@@ -2658,6 +2741,41 @@ function ActivitySelector(): JSX.Element {
         ) : null}
       </div>
       </ActivityLayout>
+      {isEditMode ? (
+        <div className="pointer-events-none sticky bottom-6 left-0 right-0 z-30 flex justify-center px-4 sm:px-6">
+          <div className="pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-3xl border border-orange-200/70 bg-white/95 p-4 text-sm text-[color:var(--brand-charcoal)] shadow-xl backdrop-blur">
+            <div className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-wider text-orange-600 sm:flex-row sm:items-center sm:justify-between">
+              <span>Mode édition actif</span>
+              <span className="font-normal normal-case tracking-normal text-orange-700">
+                Pensez à sauvegarder vos modifications.
+              </span>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  closeAdminMenu();
+                  void handleCancelChanges();
+                }}
+                className="inline-flex items-center justify-center rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:border-red-300 hover:bg-red-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeAdminMenu();
+                  void handleSaveChanges();
+                }}
+                disabled={isSaving}
+                className="inline-flex items-center justify-center rounded-full border border-green-600/20 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 transition hover:border-green-600/40 hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSaving ? "Sauvegarde..." : "Sauvegarder"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <AdminModal
         open={Boolean(stepSequenceEditorActivityId)}
         onClose={handleCloseStepSequenceEditor}
