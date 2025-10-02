@@ -281,6 +281,7 @@ export interface AdminPlatform {
   createdAt?: string | null;
   updatedAt?: string | null;
   readOnly?: boolean;
+  ownerUsername?: string | null;
 }
 
 export interface AdminPlatformPayload {

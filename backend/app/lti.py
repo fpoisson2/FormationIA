@@ -548,25 +548,39 @@ class LTIService:
         self.refresh_key_set()
         self.reload_platforms()
 
-    def register_platform(self, payload: dict[str, Any], *, persist: bool = True) -> LTIPlatformConfig:
+    def register_platform(
+        self,
+        payload: dict[str, Any],
+        *,
+        persist: bool = True,
+        owner_username: str | None = None,
+    ) -> LTIPlatformConfig:
         config = LTIPlatformConfig.model_validate(payload)
         self._platforms[config.cache_key()] = config
         if persist and self._admin_store is not None:
-            self._admin_store.upsert_platform(
-                {
-                    "issuer": str(config.issuer),
-                    "client_id": config.client_id,
-                    "authorization_endpoint": str(config.authorization_endpoint)
-                    if config.authorization_endpoint
-                    else None,
-                    "token_endpoint": str(config.token_endpoint) if config.token_endpoint else None,
-                    "jwks_uri": str(config.jwks_uri) if config.jwks_uri else None,
-                    "deployment_id": config.deployment_id,
-                    "deployment_ids": config.deployment_ids,
-                    "audience": config.audience,
-                },
-                read_only=False,
-            )
+            payload_to_store = {
+                "issuer": str(config.issuer),
+                "client_id": config.client_id,
+                "authorization_endpoint": str(config.authorization_endpoint)
+                if config.authorization_endpoint
+                else None,
+                "token_endpoint": str(config.token_endpoint) if config.token_endpoint else None,
+                "jwks_uri": str(config.jwks_uri) if config.jwks_uri else None,
+                "deployment_id": config.deployment_id,
+                "deployment_ids": config.deployment_ids,
+                "audience": config.audience,
+            }
+            if owner_username:
+                self._admin_store.upsert_platform_for_user(
+                    payload_to_store,
+                    owner=owner_username,
+                    read_only=False,
+                )
+            else:
+                self._admin_store.upsert_platform(
+                    payload_to_store,
+                    read_only=False,
+                )
         return config
 
     def update_key_paths(self, private_path: str | None, public_path: str | None) -> None:

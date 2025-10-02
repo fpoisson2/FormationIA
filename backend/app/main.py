@@ -30,6 +30,7 @@ from .admin_store import (
     AdminStoreError,
     InvitationCode,
     LocalUser,
+    LtiPlatform,
     LtiUserStat,
     create_admin_token,
     decode_admin_token,
@@ -3117,9 +3118,14 @@ def _serialize_invitation_code(invitation: InvitationCode) -> dict[str, Any]:
     }
 
 
-def _serialize_platform(config: LTIPlatformConfig, store: AdminStore | None) -> dict[str, Any]:
+def _serialize_platform(
+    config: LTIPlatformConfig,
+    store: AdminStore | None,
+    metadata: LtiPlatform | None = None,
+) -> dict[str, Any]:
     issuer = str(config.issuer)
-    metadata = store.get_platform(issuer, config.client_id) if store else None
+    if metadata is None and store is not None:
+        metadata = store.get_platform(issuer, config.client_id)
     read_only = metadata.read_only if metadata else store is None
     return {
         "issuer": issuer,
@@ -3135,6 +3141,7 @@ def _serialize_platform(config: LTIPlatformConfig, store: AdminStore | None) -> 
         "createdAt": metadata.created_at if metadata else None,
         "updatedAt": metadata.updated_at if metadata else None,
         "readOnly": read_only,
+        "ownerUsername": metadata.owner_username if metadata else None,
     }
 
 
@@ -3541,12 +3548,36 @@ def admin_create_invitation(
 
 @admin_router.get("/lti-platforms")
 def admin_list_lti_platforms(
-    _: LocalUser = Depends(_require_admin_user),
+    current_user: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     service = _resolve_lti_service()
     service.reload_platforms()
-    platforms = [_serialize_platform(config, store) for config in service.list_platforms()]
+    accessible_platforms = store.list_platforms_for_user(current_user)
+    platforms: list[dict[str, Any]] = []
+    for metadata in accessible_platforms:
+        issuer = str(metadata.issuer)
+        client_id = metadata.client_id
+        try:
+            config = service.get_platform(issuer, client_id, allow_autodiscovery=False)
+        except LTILoginError:
+            config = LTIPlatformConfig.model_validate(
+                {
+                    "issuer": issuer,
+                    "client_id": client_id,
+                    "authorization_endpoint": str(metadata.authorization_endpoint)
+                    if metadata.authorization_endpoint
+                    else None,
+                    "token_endpoint": str(metadata.token_endpoint)
+                    if metadata.token_endpoint
+                    else None,
+                    "jwks_uri": str(metadata.jwks_uri) if metadata.jwks_uri else None,
+                    "deployment_id": metadata.deployment_id,
+                    "deployment_ids": metadata.deployment_ids,
+                    "audience": metadata.audience,
+                }
+            )
+        platforms.append(_serialize_platform(config, store, metadata))
     platforms.sort(key=lambda item: (item["issuer"], item["clientId"]))
     return {"platforms": platforms}
 
@@ -3569,7 +3600,7 @@ def _payload_from_create(payload: AdminLtiPlatformCreate) -> dict[str, Any]:
 @admin_router.post("/lti-platforms", status_code=status.HTTP_201_CREATED)
 def admin_create_lti_platform(
     payload: AdminLtiPlatformCreate,
-    _: LocalUser = Depends(_require_admin_user),
+    current_user: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     issuer = str(payload.issuer)
@@ -3578,16 +3609,32 @@ def admin_create_lti_platform(
     if existing:
         if existing.read_only:
             raise HTTPException(status_code=403, detail="La plateforme est gérée en lecture seule.")
+        if (
+            existing.owner_username
+            and existing.owner_username != current_user.username
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Cette plateforme est associée à un autre utilisateur.",
+            )
         raise HTTPException(status_code=409, detail="La plateforme existe déjà. Utilise PUT ou PATCH.")
     service = _resolve_lti_service()
-    config = service.register_platform(_payload_from_create(payload), persist=True)
-    return {"platform": _serialize_platform(config, store)}
+    try:
+        config = service.register_platform(
+            _payload_from_create(payload),
+            persist=True,
+            owner_username=current_user.username,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    metadata = store.get_platform(issuer, client_id)
+    return {"platform": _serialize_platform(config, store, metadata)}
 
 
 @admin_router.put("/lti-platforms")
 def admin_put_lti_platform(
     payload: AdminLtiPlatformCreate,
-    _: LocalUser = Depends(_require_admin_user),
+    current_user: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     issuer = str(payload.issuer)
@@ -3595,15 +3642,34 @@ def admin_put_lti_platform(
     existing = store.get_platform(issuer, client_id)
     if existing and existing.read_only:
         raise HTTPException(status_code=403, detail="Cette plateforme est verrouillée en lecture seule.")
+    if (
+        existing
+        and existing.owner_username
+        and existing.owner_username != current_user.username
+        and not existing.read_only
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Cette plateforme est associée à un autre utilisateur.",
+        )
     service = _resolve_lti_service()
-    config = service.register_platform(_payload_from_create(payload), persist=True)
-    return {"platform": _serialize_platform(config, store)}
+    owner_username = (existing.owner_username if existing else None) or current_user.username
+    try:
+        config = service.register_platform(
+            _payload_from_create(payload),
+            persist=True,
+            owner_username=owner_username,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    metadata = store.get_platform(issuer, client_id)
+    return {"platform": _serialize_platform(config, store, metadata)}
 
 
 @admin_router.patch("/lti-platforms")
 def admin_patch_lti_platform(
     payload: AdminLtiPlatformPatch,
-    _: LocalUser = Depends(_require_admin_user),
+    current_user: LocalUser = Depends(_require_admin_user),
     store: AdminStore = Depends(_require_admin_store),
 ) -> dict[str, Any]:
     issuer = str(payload.issuer)
@@ -3611,6 +3677,16 @@ def admin_patch_lti_platform(
     metadata = store.get_platform(issuer, client_id)
     if metadata and metadata.read_only:
         raise HTTPException(status_code=403, detail="Cette plateforme est verrouillée en lecture seule.")
+    if (
+        metadata
+        and metadata.owner_username
+        and metadata.owner_username != current_user.username
+        and not metadata.read_only
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Cette plateforme est associée à un autre utilisateur.",
+        )
     service = _resolve_lti_service()
     try:
         current = service.get_platform(issuer, client_id, allow_autodiscovery=False)
@@ -3645,8 +3721,17 @@ def admin_patch_lti_platform(
     if "audience" in updates:
         config_payload["audience"] = updates["audience"]
 
-    config = service.register_platform(config_payload, persist=True)
-    return {"platform": _serialize_platform(config, store)}
+    owner_username = (metadata.owner_username if metadata else None) or current_user.username
+    try:
+        config = service.register_platform(
+            config_payload,
+            persist=True,
+            owner_username=owner_username,
+        )
+    except AdminStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    metadata = store.get_platform(issuer, client_id)
+    return {"platform": _serialize_platform(config, store, metadata)}
 
 
 @admin_router.delete("/lti-platforms", status_code=status.HTTP_204_NO_CONTENT)

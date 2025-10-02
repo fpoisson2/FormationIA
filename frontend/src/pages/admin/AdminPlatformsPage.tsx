@@ -63,7 +63,8 @@ function normalizePayload(state: PlatformFormState): AdminPlatformPayload {
 }
 
 export function AdminPlatformsPage(): JSX.Element {
-  const { token } = useAdminAuth();
+  const { token, user } = useAdminAuth();
+  const ownerUsername = user?.username ?? null;
   const [platforms, setPlatforms] = useState<AdminPlatform[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,14 +90,24 @@ export function AdminPlatformsPage(): JSX.Element {
     setError(null);
     try {
       const response = await admin.platforms.list(token);
-      setPlatforms(response.platforms);
+      const filtered = response.platforms.filter((platform) => {
+        const platformOwner = platform.ownerUsername ?? null;
+        if (!platformOwner) {
+          return true;
+        }
+        if (!ownerUsername) {
+          return false;
+        }
+        return platformOwner === ownerUsername;
+      });
+      setPlatforms(filtered);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Impossible de récupérer les plateformes.";
       setError(message);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, ownerUsername]);
 
   const fetchKeyset = useCallback(async () => {
     setKeyLoading(true);
@@ -143,6 +154,16 @@ export function AdminPlatformsPage(): JSX.Element {
 
   const upsertPlatformInList = (platform: AdminPlatform) => {
     setPlatforms((current) => {
+      const isAccessible =
+        !platform.ownerUsername || (ownerUsername !== null && platform.ownerUsername === ownerUsername);
+      const nextList = isAccessible
+        ? [...current]
+        : current.filter(
+            (item) => !(item.issuer === platform.issuer && item.clientId === platform.clientId)
+          );
+      if (!isAccessible) {
+        return nextList;
+      }
       const existingIndex = current.findIndex(
         (item) => item.issuer === platform.issuer && item.clientId === platform.clientId
       );
@@ -155,9 +176,8 @@ export function AdminPlatformsPage(): JSX.Element {
           return a.clientId.localeCompare(b.clientId);
         });
       }
-      const next = [...current];
-      next[existingIndex] = platform;
-      return next;
+      nextList[existingIndex] = platform;
+      return nextList;
     });
   };
 
@@ -187,6 +207,13 @@ export function AdminPlatformsPage(): JSX.Element {
   const handleDelete = async (platform: AdminPlatform) => {
     const confirmMessage = `Supprimer la plateforme ${platform.issuer} (${platform.clientId}) ?`;
     if (!window.confirm(confirmMessage)) {
+      return;
+    }
+    if (
+      platform.ownerUsername &&
+      (ownerUsername === null || platform.ownerUsername !== ownerUsername)
+    ) {
+      setError("Tu ne peux pas supprimer une plateforme appartenant à un autre utilisateur.");
       return;
     }
     try {
@@ -219,7 +246,16 @@ export function AdminPlatformsPage(): JSX.Element {
   const modalDescription = editingPlatform
     ? "Les modifications seront appliquées immédiatement."
     : "Enregistre les informations fournies par ton fournisseur LTI.";
-  const isReadOnly = editingPlatform?.readOnly ?? false;
+  const ownershipLocked = Boolean(
+    editingPlatform?.ownerUsername &&
+      (ownerUsername === null || editingPlatform.ownerUsername !== ownerUsername)
+  );
+  const isReadOnly = (editingPlatform?.readOnly ?? false) || ownershipLocked;
+  const readOnlyMessage = ownershipLocked
+    ? "Cette plateforme appartient à un autre utilisateur et ne peut pas être modifiée depuis ton compte."
+    : editingPlatform?.readOnly
+    ? "Cette plateforme est gérée automatiquement et ne peut pas être modifiée depuis l’interface."
+    : null;
 
   const keysetReadonly = keyset?.readOnly ?? false;
   const keyModalTitle = keysetReadonly ? "Clés LTI (lecture seule)" : "Mettre à jour les clés LTI";
@@ -269,6 +305,11 @@ export function AdminPlatformsPage(): JSX.Element {
           <p className="mt-1 text-sm text-[color:var(--brand-charcoal)]">
             Déclare les plateformes de confiance et maintiens leurs paramètres d’authentification.
           </p>
+          {ownerUsername ? (
+            <p className="mt-1 text-xs uppercase tracking-wide text-[color:var(--brand-charcoal)]/70">
+              Plateformes associées au compte <span className="font-semibold">{ownerUsername}</span>.
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button
@@ -401,13 +442,22 @@ export function AdminPlatformsPage(): JSX.Element {
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--brand-charcoal)]/10 bg-white/95">
-              {platforms.map((platform) => (
-                <tr key={`${platform.issuer}-${platform.clientId}`} className="transition hover:bg-[color:var(--brand-sand)]/40">
-                  <td className="px-4 py-3 font-medium text-[color:var(--brand-black)]">{platform.issuer}</td>
-                  <td className="px-4 py-3 text-[color:var(--brand-charcoal)]">{platform.clientId}</td>
-                  <td className="px-4 py-3 text-[color:var(--brand-charcoal)]">
-                    {platform.audience ? platform.audience : <span className="text-xs italic text-[color:var(--brand-charcoal)]/60">(non défini)</span>}
-                  </td>
+              {platforms.map((platform) => {
+                const platformOwnedByOther = Boolean(
+                  platform.ownerUsername &&
+                    (ownerUsername === null || platform.ownerUsername !== ownerUsername)
+                );
+                const deleteDisabled = platform.readOnly || platformOwnedByOther;
+                return (
+                  <tr
+                    key={`${platform.issuer}-${platform.clientId}`}
+                    className="transition hover:bg-[color:var(--brand-sand)]/40"
+                  >
+                    <td className="px-4 py-3 font-medium text-[color:var(--brand-black)]">{platform.issuer}</td>
+                    <td className="px-4 py-3 text-[color:var(--brand-charcoal)]">{platform.clientId}</td>
+                    <td className="px-4 py-3 text-[color:var(--brand-charcoal)]">
+                      {platform.audience ? platform.audience : <span className="text-xs italic text-[color:var(--brand-charcoal)]/60">(non défini)</span>}
+                    </td>
                   <td className="px-4 py-3 text-[color:var(--brand-charcoal)]">
                     {platform.deploymentIds.length > 0 ? platform.deploymentIds.join(", ") : "—"}
                   </td>
@@ -421,6 +471,11 @@ export function AdminPlatformsPage(): JSX.Element {
                         Éditable
                       </span>
                     )}
+                    {platformOwnedByOther ? (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-[color:var(--brand-charcoal)]/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--brand-charcoal)]/80">
+                        Autre propriétaire
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -437,14 +492,15 @@ export function AdminPlatformsPage(): JSX.Element {
                           void handleDelete(platform);
                         }}
                         className="rounded-full border border-red-200 px-3 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50"
-                        disabled={platform.readOnly}
+                        disabled={deleteDisabled}
                       >
                         Supprimer
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -571,9 +627,9 @@ export function AdminPlatformsPage(): JSX.Element {
             />
           </label>
         </form>
-        {isReadOnly ? (
+        {readOnlyMessage ? (
           <p className="rounded-2xl bg-[color:var(--brand-sand)]/70 p-3 text-xs text-[color:var(--brand-charcoal)]">
-            Cette plateforme est gérée automatiquement et ne peut pas être modifiée depuis l’interface.
+            {readOnlyMessage}
           </p>
         ) : null}
       </AdminModal>
