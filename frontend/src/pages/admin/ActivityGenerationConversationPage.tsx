@@ -423,9 +423,9 @@ export function ActivityGenerationConversationPage(): JSX.Element {
 
     const shouldStream = Boolean(
       !jobStatus ||
-        jobStatus.status === "running" ||
         jobStatus.awaitingUserAction ||
-        jobStatus.pendingToolCall
+        jobStatus.pendingToolCall ||
+        (jobStatus.status !== "complete" && jobStatus.status !== "error")
     );
 
     if (!shouldStream) {
