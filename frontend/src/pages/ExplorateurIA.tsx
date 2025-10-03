@@ -6561,22 +6561,13 @@ function ExplorateurIAConfigDesigner({
   const handleRemoveDesignerStep = useCallback(
     (quarterId: QuarterId, stepId: string) => {
       const steps = config.quarterDesignerSteps[quarterId] ?? [];
-      const target = steps.find((step) => step.id === stepId);
-      if (!target) {
+      if (!steps.some((step) => step.id === stepId)) {
         return;
       }
-      const targetQuarter = config.quarters.find(
-        (quarter) => quarter.id === quarterId
-      );
-      if (!targetQuarter) {
+      if (!config.quarters.some((quarter) => quarter.id === quarterId)) {
         return;
       }
-      const type = resolveDesignerStepType(target);
-      const isGoalQuarter = Boolean(targetQuarter.isGoal);
       if (steps.length <= 1) {
-        return;
-      }
-      if (type === "explorateur-quarter-basics" && !isGoalQuarter) {
         return;
       }
       const updatedSteps = steps.filter((step) => step.id !== stepId);
@@ -6760,10 +6751,7 @@ function ExplorateurIAConfigDesigner({
                     const itemType = resolveDesignerStepType(definition);
                     const itemMeta = getDesignerStepMeta(itemType);
                     const isActive = index === stepIndex;
-                    const canRemove =
-                      context.steps.length > 1 &&
-                      (itemType !== "explorateur-quarter-basics" ||
-                        isGoalQuarter);
+                    const canRemove = context.steps.length > 1;
                     return (
                       <li
                         key={definition.id}

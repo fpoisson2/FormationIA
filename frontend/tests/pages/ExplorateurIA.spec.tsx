@@ -320,4 +320,46 @@ describe("Explorateur IA designer", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  it("permet de retirer l'étape Informations générales d'un quartier standard", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const clarteHeading = await screen.findByRole("heading", {
+      name: /Quartier Clarté/i,
+    });
+    const clarteCard = clarteHeading.closest("article");
+    expect(clarteCard).not.toBeNull();
+    if (!clarteCard) {
+      throw new Error("La carte du quartier Clarté est introuvable");
+    }
+
+    const configureButton = within(clarteCard).getByRole("button", {
+      name: /Configurer/i,
+    });
+    fireEvent.click(configureButton);
+
+    const infoStepToggle = await within(clarteCard).findByRole("button", {
+      name: /Informations générales/i,
+    });
+    const infoStepItem = infoStepToggle.closest("li");
+    expect(infoStepItem).not.toBeNull();
+    if (!infoStepItem) {
+      throw new Error("L'étape Informations générales est introuvable");
+    }
+
+    const removeButton = within(infoStepItem).getByRole("button", {
+      name: /Supprimer/i,
+    });
+    expect(removeButton).not.toBeDisabled();
+
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(
+        within(clarteCard).queryByRole("button", {
+          name: /Informations générales/i,
+        })
+      ).not.toBeInTheDocument();
+    });
+  });
 });
