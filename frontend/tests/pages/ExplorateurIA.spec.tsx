@@ -268,4 +268,14 @@ describe("Explorateur IA designer", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  it("n'affiche pas d'option pour supprimer la mairie", async () => {
+    render(<ConfigDesignerHarness />);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Supprimer Mairie \(Bilan\)/i })
+      ).not.toBeInTheDocument();
+    });
+  });
 });

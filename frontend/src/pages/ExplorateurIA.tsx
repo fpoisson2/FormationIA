@@ -6339,7 +6339,13 @@ function ExplorateurIAConfigDesigner({
 
   const handleRemoveQuarter = useCallback(
     (quarterId: QuarterId) => {
-      if (!config.quarters.some((quarter) => quarter.id === quarterId)) {
+      const targetQuarter = config.quarters.find(
+        (quarter) => quarter.id === quarterId
+      );
+      if (!targetQuarter) {
+        return;
+      }
+      if (targetQuarter.isGoal) {
         return;
       }
       const nextQuarters = config.quarters
@@ -7016,14 +7022,16 @@ function ExplorateurIAConfigDesigner({
                     >
                       ↓ Descendre
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveQuarter(quarter.id)}
-                      className="rounded-full border border-rose-200 px-3 py-1 font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
-                      aria-label={`Supprimer ${quarter.label || quarter.id}`}
-                    >
-                      Supprimer
-                    </button>
+                    {!isGoal ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveQuarter(quarter.id)}
+                        className="rounded-full border border-rose-200 px-3 py-1 font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                        aria-label={`Supprimer ${quarter.label || quarter.id}`}
+                      >
+                        Supprimer
+                      </button>
+                    ) : null}
                   </div>
                 </header>
                 <dl className="space-y-2 text-sm text-orange-800">
