@@ -278,4 +278,46 @@ describe("Explorateur IA designer", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  it("permet de retirer l'étape Informations générales de la mairie", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const mairieHeading = await screen.findByRole("heading", {
+      name: /Mairie \(Bilan\)/i,
+    });
+    const mairieCard = mairieHeading.closest("article");
+    expect(mairieCard).not.toBeNull();
+    if (!mairieCard) {
+      throw new Error("La carte de la mairie est introuvable");
+    }
+
+    const configureButton = within(mairieCard).getByRole("button", {
+      name: /Configurer/i,
+    });
+    fireEvent.click(configureButton);
+
+    const infoStepToggle = await within(mairieCard).findByRole("button", {
+      name: /Informations générales/i,
+    });
+    const infoStepItem = infoStepToggle.closest("li");
+    expect(infoStepItem).not.toBeNull();
+    if (!infoStepItem) {
+      throw new Error("L'étape Informations générales est introuvable");
+    }
+
+    const removeButton = within(infoStepItem).getByRole("button", {
+      name: /Supprimer/i,
+    });
+    expect(removeButton).not.toBeDisabled();
+
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(
+        within(mairieCard).queryByRole("button", {
+          name: /Informations générales/i,
+        })
+      ).not.toBeInTheDocument();
+    });
+  });
 });

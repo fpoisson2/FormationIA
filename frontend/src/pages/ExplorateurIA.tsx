@@ -6561,15 +6561,22 @@ function ExplorateurIAConfigDesigner({
   const handleRemoveDesignerStep = useCallback(
     (quarterId: QuarterId, stepId: string) => {
       const steps = config.quarterDesignerSteps[quarterId] ?? [];
-      if (steps.length <= 1) {
-        return;
-      }
       const target = steps.find((step) => step.id === stepId);
       if (!target) {
         return;
       }
+      const targetQuarter = config.quarters.find(
+        (quarter) => quarter.id === quarterId
+      );
+      if (!targetQuarter) {
+        return;
+      }
       const type = resolveDesignerStepType(target);
-      if (type === "explorateur-quarter-basics") {
+      const isGoalQuarter = Boolean(targetQuarter.isGoal);
+      if (steps.length <= 1) {
+        return;
+      }
+      if (type === "explorateur-quarter-basics" && !isGoalQuarter) {
         return;
       }
       const updatedSteps = steps.filter((step) => step.id !== stepId);
@@ -6713,6 +6720,10 @@ function ExplorateurIAConfigDesigner({
         advance,
       }: StepSequenceRenderWrapperProps
     ) => {
+      const quarter = config.quarters.find(
+        (candidate) => candidate.id === quarterId
+      );
+      const isGoalQuarter = Boolean(quarter?.isGoal);
       const stepType = resolveDesignerStepType(step);
       const meta = getDesignerStepMeta(stepType);
       const isFirst = stepIndex === 0;
@@ -6751,7 +6762,8 @@ function ExplorateurIAConfigDesigner({
                     const isActive = index === stepIndex;
                     const canRemove =
                       context.steps.length > 1 &&
-                      itemType !== "explorateur-quarter-basics";
+                      (itemType !== "explorateur-quarter-basics" ||
+                        isGoalQuarter);
                     return (
                       <li
                         key={definition.id}
