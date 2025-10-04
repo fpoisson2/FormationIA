@@ -4556,6 +4556,11 @@ export default function ExplorateurIA({
     [config]
   );
 
+  const latestConfigRef = useRef(sanitizedConfig);
+  useEffect(() => {
+    latestConfigRef.current = sanitizedConfig;
+  }, [sanitizedConfig]);
+
   const experienceModeMeta = useMemo(
     () => EXPERIENCE_MODE_DEFINITIONS[sanitizedConfig.experienceMode],
     [sanitizedConfig.experienceMode]
@@ -4651,38 +4656,39 @@ export default function ExplorateurIA({
 
   const emitConfig = useCallback(
     (patch: Partial<ExplorateurIAConfig>) => {
+      const baseConfig = latestConfigRef.current;
       const nextQuarters = sanitizeQuarterConfigs(
-        patch.quarters ?? sanitizedConfig.quarters,
+        patch.quarters ?? baseConfig.quarters,
         DEFAULT_EXPLORATEUR_QUARTERS
       );
       const derived = deriveQuarterData(nextQuarters);
       const expandedQuarterSteps = expandQuarterSteps(
-        patch.steps ?? sanitizedConfig.steps,
+        patch.steps ?? baseConfig.steps,
         WORLD1_QUARTER_STEPS,
         derived.quarterOrder
       );
       const { designerSteps, quarterSteps } = sanitizeQuarterDesignerSteps(
-        patch.quarterDesignerSteps ?? sanitizedConfig.quarterDesignerSteps,
+        patch.quarterDesignerSteps ?? baseConfig.quarterDesignerSteps,
         nextQuarters,
         expandedQuarterSteps
       );
       const nextExperienceMode = sanitizeExperienceMode(
-        patch.experienceMode ?? sanitizedConfig.experienceMode
+        patch.experienceMode ?? baseConfig.experienceMode
       );
       const next: ExplorateurIAConfig = {
         terrain: {
-          themeId:
-            patch.terrain?.themeId ?? sanitizedConfig.terrain.themeId,
-          seed: patch.terrain?.seed ?? sanitizedConfig.terrain.seed,
+          themeId: patch.terrain?.themeId ?? baseConfig.terrain.themeId,
+          seed: patch.terrain?.seed ?? baseConfig.terrain.seed,
         },
         steps: flattenQuarterSteps(quarterSteps, derived.quarterOrder),
         quarterDesignerSteps: cloneQuarterStepMap(designerSteps),
         quarters: nextQuarters,
         experienceMode: nextExperienceMode,
       };
+      latestConfigRef.current = next;
       effectiveOnUpdateConfig(next);
     },
-    [effectiveOnUpdateConfig, sanitizedConfig]
+    [effectiveOnUpdateConfig]
   );
 
   const emitQuarterConfig = useCallback(
@@ -6331,6 +6337,59 @@ function ExplorateurIAConfigDesigner({
     onUpdateQuarters,
   ]);
 
+  const handleRemoveQuarter = useCallback(
+    (quarterId: QuarterId) => {
+      const targetQuarter = config.quarters.find(
+        (quarter) => quarter.id === quarterId
+      );
+      if (!targetQuarter) {
+        return;
+      }
+      if (targetQuarter.isGoal) {
+        return;
+      }
+      const nextQuarters = config.quarters
+        .filter((quarter) => quarter.id !== quarterId)
+        .map(cloneQuarter);
+      onUpdateQuarters(nextQuarters);
+
+      const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+      delete designerMap[quarterId];
+
+      const fallbackSteps = extractQuarterStepsFromDesignerMap(
+        designerMap,
+        nextQuarters
+      );
+      const { designerSteps } = sanitizeQuarterDesignerSteps(
+        designerMap,
+        nextQuarters,
+        fallbackSteps
+      );
+      onUpdateQuarterDesignerSteps(designerSteps);
+
+      setExpandedQuarterIds((current) =>
+        current.includes(quarterId)
+          ? current.filter((id) => id !== quarterId)
+          : current
+      );
+      setPendingStepIdByQuarter((current) => {
+        if (!(quarterId in current)) {
+          return current;
+        }
+        const { [quarterId]: _removed, ...rest } = current;
+        return rest;
+      });
+    },
+    [
+      config.quarterDesignerSteps,
+      config.quarters,
+      onUpdateQuarterDesignerSteps,
+      onUpdateQuarters,
+      setExpandedQuarterIds,
+      setPendingStepIdByQuarter,
+    ]
+  );
+
   const handleMoveQuarter = useCallback(
     (index: number, direction: -1 | 1) => {
       const targetIndex = index + direction;
@@ -6502,15 +6561,13 @@ function ExplorateurIAConfigDesigner({
   const handleRemoveDesignerStep = useCallback(
     (quarterId: QuarterId, stepId: string) => {
       const steps = config.quarterDesignerSteps[quarterId] ?? [];
+      if (!steps.some((step) => step.id === stepId)) {
+        return;
+      }
+      if (!config.quarters.some((quarter) => quarter.id === quarterId)) {
+        return;
+      }
       if (steps.length <= 1) {
-        return;
-      }
-      const target = steps.find((step) => step.id === stepId);
-      if (!target) {
-        return;
-      }
-      const type = resolveDesignerStepType(target);
-      if (type === "explorateur-quarter-basics") {
         return;
       }
       const updatedSteps = steps.filter((step) => step.id !== stepId);
@@ -6654,6 +6711,10 @@ function ExplorateurIAConfigDesigner({
         advance,
       }: StepSequenceRenderWrapperProps
     ) => {
+      const quarter = config.quarters.find(
+        (candidate) => candidate.id === quarterId
+      );
+      const isGoalQuarter = Boolean(quarter?.isGoal);
       const stepType = resolveDesignerStepType(step);
       const meta = getDesignerStepMeta(stepType);
       const isFirst = stepIndex === 0;
@@ -6690,9 +6751,7 @@ function ExplorateurIAConfigDesigner({
                     const itemType = resolveDesignerStepType(definition);
                     const itemMeta = getDesignerStepMeta(itemType);
                     const isActive = index === stepIndex;
-                    const canRemove =
-                      context.steps.length > 1 &&
-                      itemType !== "explorateur-quarter-basics";
+                    const canRemove = context.steps.length > 1;
                     return (
                       <li
                         key={definition.id}
@@ -6963,6 +7022,16 @@ function ExplorateurIAConfigDesigner({
                     >
                       ↓ Descendre
                     </button>
+                    {!isGoal ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveQuarter(quarter.id)}
+                        className="rounded-full border border-rose-200 px-3 py-1 font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                        aria-label={`Supprimer ${quarter.label || quarter.id}`}
+                      >
+                        Supprimer
+                      </button>
+                    ) : null}
                   </div>
                 </header>
                 <dl className="space-y-2 text-sm text-orange-800">
