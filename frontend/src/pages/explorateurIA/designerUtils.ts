@@ -204,14 +204,24 @@ export function createInventoryDesignerStep(
   } satisfies StepDefinition;
 }
 
+type CreateQuarterDesignerStepOptions = {
+  includePlaceholderWhenEmpty?: boolean;
+};
+
 export function createDefaultQuarterDesignerSteps(
   quarter: ExplorateurIAQuarterConfig,
-  quarterSteps: StepDefinition[] = []
+  quarterSteps?: StepDefinition[] | null,
+  options: CreateQuarterDesignerStepOptions = {}
 ): StepDefinition[] {
+  const { includePlaceholderWhenEmpty = true } = options;
   const designerSteps: StepDefinition[] = [createBasicsDesignerStep(quarter)];
 
   const effectiveQuarterSteps = (
-    quarterSteps.length > 0 ? quarterSteps : createPlaceholderQuarterSteps(quarter)
+    Array.isArray(quarterSteps) && quarterSteps.length > 0
+      ? quarterSteps
+      : includePlaceholderWhenEmpty
+      ? createPlaceholderQuarterSteps(quarter)
+      : []
   ).map((step) => ({
     ...cloneStepDefinition(step),
     id: ensureStepHasQuarterPrefix(step.id, quarter.id),
@@ -275,9 +285,17 @@ export function sanitizeQuarterDesignerSteps(
 
   for (const quarter of quarters) {
     const rawSteps = rawMap[quarter.id];
+    const hasFallbackOverride = Object.prototype.hasOwnProperty.call(
+      fallbackQuarterSteps,
+      quarter.id
+    );
+    const fallbackSequenceSource = hasFallbackOverride
+      ? fallbackQuarterSteps[quarter.id] ?? []
+      : undefined;
     const fallbackDesignerSteps = createDefaultQuarterDesignerSteps(
       quarter,
-      fallbackQuarterSteps[quarter.id] ?? []
+      fallbackSequenceSource,
+      { includePlaceholderWhenEmpty: !hasFallbackOverride }
     );
     const sanitized = sanitizeSteps(rawSteps, fallbackDesignerSteps);
     const normalized = (sanitized.length ? sanitized : fallbackDesignerSteps).map(
@@ -296,12 +314,24 @@ export function sanitizeQuarterDesignerSteps(
       .filter((step) => !isQuarterDesignerMetaType(resolveDesignerStepType(step)))
       .map((step) => ensureQuarterSequenceStep(step, quarter.id));
 
-    quarterResult[quarter.id] = (actualSteps.length
-      ? actualSteps
-      : fallbackActualSteps.length
-      ? fallbackActualSteps
-      : createPlaceholderQuarterSteps(quarter)
-    ).map(cloneStepDefinition);
+    const normalizedActualSteps = actualSteps.length
+      ? actualSteps.map(cloneStepDefinition)
+      : null;
+
+    let resolvedActualSteps: StepDefinition[];
+    if (normalizedActualSteps) {
+      resolvedActualSteps = normalizedActualSteps;
+    } else if (typeof fallbackSequenceSource !== "undefined") {
+      resolvedActualSteps = (fallbackSequenceSource ?? []).map(cloneStepDefinition);
+    } else if (fallbackActualSteps.length > 0) {
+      resolvedActualSteps = fallbackActualSteps.map(cloneStepDefinition);
+    } else {
+      resolvedActualSteps = createPlaceholderQuarterSteps(quarter).map(
+        cloneStepDefinition
+      );
+    }
+
+    quarterResult[quarter.id] = resolvedActualSteps;
 
     result[quarter.id] = synced.map(cloneStepDefinition);
   }

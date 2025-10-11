@@ -20,12 +20,22 @@ vi.mock("../../src/api", () => ({
   updateActivityProgress: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { useMemo, useState } from "react";
 import {
   StepSequenceActivity,
+  StepSequenceContext,
   type StepDefinition,
   type StepSequenceActivityProps,
   createDefaultExplorateurWorldConfig,
 } from "../../src/modules/step-sequence";
+import ExplorateurIA, {
+  createDefaultExplorateurIAConfig,
+} from "../../src/pages/ExplorateurIA";
+import { cloneQuarterStepMap } from "../../src/pages/explorateurIA/configUtils";
+import {
+  extractQuarterStepsFromDesignerMap,
+  sanitizeQuarterDesignerSteps,
+} from "../../src/pages/explorateurIA/designerUtils";
 
 function createExplorateurSteps(): StepDefinition[] {
   return [
@@ -123,6 +133,50 @@ function renderExplorateurIA(props?: Partial<StepSequenceActivityProps>) {
   return render(<StepSequenceActivity {...mergedProps} />);
 }
 
+function ConfigDesignerHarness() {
+  const [config, setConfig] = useState(createDefaultExplorateurIAConfig());
+  const definition = useMemo(
+    () => ({
+      id: "explorateur:world",
+      component: "explorateur-world",
+      config,
+    }),
+    [config]
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      stepIndex: 0,
+      stepCount: 1,
+      steps: [definition],
+      payloads: {},
+      isEditMode: true,
+      onAdvance: () => {},
+      onUpdateConfig: setConfig,
+      goToStep: () => {},
+      activityContext: null,
+      setManualAdvanceHandler: () => {},
+      setManualAdvanceDisabled: () => {},
+      getManualAdvanceState: () => ({ handler: null, disabled: false }),
+    }),
+    [definition]
+  );
+
+  return (
+    <StepSequenceContext.Provider value={contextValue}>
+      <ExplorateurIA
+        definition={definition}
+        config={config}
+        payload={null}
+        isActive
+        isEditMode
+        onAdvance={() => {}}
+        onUpdateConfig={setConfig}
+      />
+    </StepSequenceContext.Provider>
+  );
+}
+
 describe("Explorateur IA", () => {
   it("permet de compléter le quartier Clarté et d'exporter les données", async () => {
     const storedBlobs: Blob[] = [];
@@ -186,5 +240,154 @@ describe("Explorateur IA", () => {
     expect(exportData.quarters.clarte.details.score).toBe(100);
     expect(exportData.quarters.clarte.details.selectedOptionId).toBe("B");
     expect(exportData.quarters.clarte.payloads["clarte:quiz"]).toBeDefined();
+  });
+});
+
+describe("Explorateur IA designer", () => {
+  it("permet d'ajouter un quartier personnalisé", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const addQuarterButton = await screen.findByRole("button", {
+      name: /Ajouter un quartier/i,
+    });
+    fireEvent.click(addQuarterButton);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /Supprimer Nouveau quartier/i })
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("permet de supprimer un quartier par défaut", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const removeButton = await screen.findByRole("button", {
+      name: /Supprimer Quartier Clarté/i,
+    });
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Supprimer Quartier Clarté/i })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("n'affiche pas d'option pour supprimer la mairie", async () => {
+    render(<ConfigDesignerHarness />);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: /Supprimer Mairie \(Bilan\)/i })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("permet de retirer l'étape Informations générales de la mairie", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const mairieHeading = await screen.findByRole("heading", {
+      name: /Mairie \(Bilan\)/i,
+    });
+    const mairieCard = mairieHeading.closest("article");
+    expect(mairieCard).not.toBeNull();
+    if (!mairieCard) {
+      throw new Error("La carte de la mairie est introuvable");
+    }
+
+    const configureButton = within(mairieCard).getByRole("button", {
+      name: /Configurer/i,
+    });
+    fireEvent.click(configureButton);
+
+    const infoStepToggle = await within(mairieCard).findByRole("button", {
+      name: /Informations générales/i,
+    });
+    const infoStepItem = infoStepToggle.closest("li");
+    expect(infoStepItem).not.toBeNull();
+    if (!infoStepItem) {
+      throw new Error("L'étape Informations générales est introuvable");
+    }
+
+    const removeButton = within(infoStepItem).getByRole("button", {
+      name: /Supprimer/i,
+    });
+    expect(removeButton).not.toBeDisabled();
+
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(
+        within(mairieCard).queryByRole("button", {
+          name: /Informations générales/i,
+        })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("permet de retirer l'étape Informations générales d'un quartier standard", async () => {
+    render(<ConfigDesignerHarness />);
+
+    const clarteHeading = await screen.findByRole("heading", {
+      name: /Quartier Clarté/i,
+    });
+    const clarteCard = clarteHeading.closest("article");
+    expect(clarteCard).not.toBeNull();
+    if (!clarteCard) {
+      throw new Error("La carte du quartier Clarté est introuvable");
+    }
+
+    const configureButton = within(clarteCard).getByRole("button", {
+      name: /Configurer/i,
+    });
+    fireEvent.click(configureButton);
+
+    const infoStepToggle = await within(clarteCard).findByRole("button", {
+      name: /Informations générales/i,
+    });
+    const infoStepItem = infoStepToggle.closest("li");
+    expect(infoStepItem).not.toBeNull();
+    if (!infoStepItem) {
+      throw new Error("L'étape Informations générales est introuvable");
+    }
+
+    const removeButton = within(infoStepItem).getByRole("button", {
+      name: /Supprimer/i,
+    });
+    expect(removeButton).not.toBeDisabled();
+
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(
+        within(clarteCard).queryByRole("button", {
+          name: /Informations générales/i,
+        })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("n'ajoute pas de formulaire par défaut après suppression de toutes les étapes de la mairie", () => {
+    const config = createDefaultExplorateurIAConfig();
+    const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+    designerMap.mairie = (designerMap.mairie ?? []).filter((step) =>
+      step.id.endsWith(":designer:basics")
+    );
+
+    const fallbackSteps = extractQuarterStepsFromDesignerMap(
+      designerMap,
+      config.quarters
+    );
+    const { quarterSteps, designerSteps } = sanitizeQuarterDesignerSteps(
+      designerMap,
+      config.quarters,
+      fallbackSteps
+    );
+
+    expect(quarterSteps.mairie).toHaveLength(0);
+    expect(
+      designerSteps.mairie?.some((step) => step.component === "form") ?? false
+    ).toBe(false);
   });
 });

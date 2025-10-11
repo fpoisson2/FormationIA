@@ -255,19 +255,21 @@ export function sanitizeQuarterConfigs(
     }
   }
 
-  for (const defaults of fallback) {
-    if (used.has(defaults.id)) {
-      continue;
+  if (sanitized.length === 0) {
+    for (const defaults of fallback) {
+      if (used.has(defaults.id)) {
+        continue;
+      }
+      sanitized.push({
+        id: defaults.id,
+        label: defaults.label,
+        color: defaults.color,
+        buildingNumber: defaults.buildingNumber ?? null,
+        isGoal: defaults.isGoal ?? false,
+        inventory: cloneInventoryConfig(defaults.inventory),
+      });
+      used.add(defaults.id);
     }
-    sanitized.push({
-      id: defaults.id,
-      label: defaults.label,
-      color: defaults.color,
-      buildingNumber: defaults.buildingNumber ?? null,
-      isGoal: defaults.isGoal ?? false,
-      inventory: cloneInventoryConfig(defaults.inventory),
-    });
-    used.add(defaults.id);
   }
 
   return sanitized;
