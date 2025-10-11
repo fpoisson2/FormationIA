@@ -26,7 +26,7 @@ import type {
 } from "../../../api";
 import GuidedFields from "../../../components/GuidedFields";
 import { StepSequenceContext } from "../types";
-import type { StepComponentProps } from "../types";
+import type { StepComponentProps, StepComponentWithMetadata } from "../types";
 
 const DEFAULT_SUBMIT_LABEL = "Continuer";
 const DEFAULT_FAILURE_MESSAGE =
@@ -1807,7 +1807,7 @@ export function FormStep({
   return (
     <div className="flex flex-col gap-8 lg:flex-row">
       <form
-        className="flex-1 space-y-6"
+        className="flex-1 min-w-0 space-y-6"
         onSubmit={handleSubmit}
         aria-label="Formulaire guidé"
       >
@@ -2228,4 +2228,8 @@ export function FormStep({
     </div>
   );
 }
+
+const formStepWithMetadata = FormStep as StepComponentWithMetadata;
+formStepWithMetadata.stepSequenceContainerClassName =
+  "mx-auto flex w-full max-w-5xl flex-col gap-6 px-3 sm:px-6";
 

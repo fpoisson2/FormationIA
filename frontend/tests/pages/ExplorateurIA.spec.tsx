@@ -31,6 +31,11 @@ import {
 import ExplorateurIA, {
   createDefaultExplorateurIAConfig,
 } from "../../src/pages/ExplorateurIA";
+import { cloneQuarterStepMap } from "../../src/pages/explorateurIA/configUtils";
+import {
+  extractQuarterStepsFromDesignerMap,
+  sanitizeQuarterDesignerSteps,
+} from "../../src/pages/explorateurIA/designerUtils";
 
 function createExplorateurSteps(): StepDefinition[] {
   return [
@@ -361,5 +366,28 @@ describe("Explorateur IA designer", () => {
         })
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("n'ajoute pas de formulaire par défaut après suppression de toutes les étapes de la mairie", () => {
+    const config = createDefaultExplorateurIAConfig();
+    const designerMap = cloneQuarterStepMap(config.quarterDesignerSteps);
+    designerMap.mairie = (designerMap.mairie ?? []).filter((step) =>
+      step.id.endsWith(":designer:basics")
+    );
+
+    const fallbackSteps = extractQuarterStepsFromDesignerMap(
+      designerMap,
+      config.quarters
+    );
+    const { quarterSteps, designerSteps } = sanitizeQuarterDesignerSteps(
+      designerMap,
+      config.quarters,
+      fallbackSteps
+    );
+
+    expect(quarterSteps.mairie).toHaveLength(0);
+    expect(
+      designerSteps.mairie?.some((step) => step.component === "form") ?? false
+    ).toBe(false);
   });
 });
